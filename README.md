@@ -13,6 +13,8 @@ Project-specific build and validation rules live with the product code. Operatio
 
 ## Status
 
+For a new notebook, follow the [rebuild runbook](docs/rebuild.md).
+
 The [setup inventory](docs/setup-inventory.md) records current sources and remaining configuration checks.
 
 The first three pilot skills are available:
