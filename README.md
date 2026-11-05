@@ -13,7 +13,15 @@ Project-specific build and validation rules live with the product code. Operatio
 
 ## Status
 
-MOBAdev is being set up. The first planned skills cover delivery handoffs, threat modeling, and practical acceptance. Each skill's configuration and use will be verified in its target tool.
+The [setup inventory](docs/setup-inventory.md) records current sources and remaining configuration checks.
+
+The first three pilot skills are available:
+
+- [Delivery Handoff](skills/mobaflow-delivery-handoff/SKILL.md)
+- [Threat Modeling](skills/mobaflow-threat-modeling/SKILL.md)
+- [Practical Acceptance](skills/mobaflow-practical-acceptance/SKILL.md)
+
+Skill activation is verified separately in each target tool.
 
 ## License
 
