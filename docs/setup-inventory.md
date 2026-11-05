@@ -14,6 +14,8 @@ Versioned setup for the MOBAflow development department. This initial inventory 
 
 ## Provider coverage
 
+See the [role configuration evidence](role-configurations.md) for verified role records and open runtime checks.
+
 Inventory each provider independently across project files, user defaults, and the effective runtime. Include app and CLI settings and any cloud or hosted configuration that a role actually uses. The table lists sources to check. It does not certify that they have been captured.
 
 | Provider | Configuration sources to check | Provider-specific verification |
