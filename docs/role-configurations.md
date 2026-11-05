@@ -15,3 +15,17 @@ The maintainer directly confirmed on 2026-11-05 that Claude is COO and has overa
 | Head of UI/UX and Head of MOBAnews, Antigravity | A previous CLI check found both named App conversations in the conversation picker. The maintainer placed Head of MOBAnews under the Communication Manager. | Confirm the actual role definitions and active model, skill access and supported delivery and return route. Visibility in the picker is not a same-session messaging test. |
 
 The current check did not verify the effective context windows. The pilot skill assignments have been recorded in the existing queue, but activation from MOBAdev remains to be demonstrated. Record native readback and a dated result when each role next handles an appropriate assignment. Keep machine-local identifiers and private transcripts outside the repository.
+
+## Communication routes
+
+The check on 2026-11-05 used existing handoffs and read-only metadata. It did not start test conversations. A route is verified end to end when an assigned message reaches the intended role, the role accepts it, and the result returns to the agreed owner.
+
+| Route | Evidence and current boundary |
+| --- | --- |
+| Codex to Codex | Native chat delivery and result retrieval worked for the Technical Director and Project Manager. Verify the target chat for each new role. |
+| Codex to Claude Code and back | Earlier work with the original Refactoring session demonstrated targeted inbox delivery and a subsequent owner response through the Project Manager. That case does not establish a current direct COO to Technical Director return route or the route for every Claude role. |
+| COO to hosted Executive Assistant and back | Role announced. Effective hosted configuration, intended return channel, and one end-to-end work result remain to be verified. |
+| Codex or COO to Antigravity and back | A previous scoped advisory call returned a result. The Head of UI/UX and Head of MOBAnews App conversations were visible in the CLI picker. Direct CLI delivery to either original App conversation and return from that conversation remain unverified. The [documented import](https://antigravity.google/docs/cli/commands/resume/#importing-from-the-antigravity-app) creates a separate copy. Direct Claude-to-Antigravity delivery is also unverified. |
+| GitHub issues and PRs | Existing route for durable coordination and review evidence. Record recipient acceptance separately. Use an appropriate private route for information that is unsuitable for GitHub. |
+
+The COO appointment is recorded. The [MOBAflow master coordination instructions](https://github.com/ahuelsmann/MOBAflow/blob/main/.github/instructions/master-coordination.instructions.md) still reflected the previous routing when checked. Verify the responsibility and configured return path before treating the transition as complete. The first regular assignments needing Claude or Antigravity should record the actual role, agreed return route, acceptance, and result. Keep the work in the existing COO coordination record.
