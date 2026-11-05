@@ -12,6 +12,20 @@ Versioned setup for the MOBAflow development department. This initial inventory 
 | Three pilot skills in `skills/` | Original drafts passed the standard validator. The Project Manager reported checking queue references to the drafts. | Start shared versioning here and verify each target's active version during its first use. |
 | Codex, Claude Code, and Antigravity live role configuration | The pilot role assignments are known. Exact live definitions, discovery scope, and writable configuration owners are still to be verified. | Add sanitized native definitions or launch configuration under `agents/` and `tools/` when their owners confirm the source. |
 
+## Provider coverage
+
+Inventory each provider independently across project files, user defaults, and the effective runtime. Include app and CLI settings and any cloud or hosted configuration that a role actually uses. The table lists sources to check. It does not certify that they have been captured.
+
+| Provider | Configuration sources to check | Provider-specific verification |
+| --- | --- | --- |
+| Codex | MOBAflow project configuration, user profiles, agent instructions, skills, hooks, rules, MCP and plugins, desktop projects and chats, and hosted automations used by the team | Record the effective model, working context, skill version, permissions, and owner of each relevant automation. |
+| Claude Code | `CLAUDE.md`, project and user settings, agent definitions, skills, hooks, MCP and plugins, local CLI and desktop roles, and hosted plans or scheduled runs used by the team | Distinguish a named conversation from a reusable definition. Verify the target role, configuration sources, and evidence returned by the actual review or delivery path. |
+| Antigravity | Workspace and user rules, custom agents, skills, hooks, MCP and plugins, desktop projects and roles, CLI profiles and role bindings, and hosted configuration where used | Verify the workspace, role, and supported route independently in app and CLI. Record whether a route addresses the original role or starts a separate conversation. |
+
+For each source, record the owner, the authoritative location, the scope and precedence, the safe versioning or recreation method, and the last verification. Include reusable decisions or workflow knowledge currently kept only in a chat or memory as a reviewed summary with its owner. Record external dependencies and manual setup steps separately from reusable configuration. Keep authentication material, raw conversation history, personal memory, and machine-local session identifiers outside the repository.
+
+For each required cross-tool handoff, record the sender and receiving role, outbound channel, return channel, acceptance signal, fallback, and last observed result. Check the role and workspace before sending. Treat successful delivery, recipient acceptance, and returned work as separate evidence. The Project Manager owns the operational routing and queue.
+
 ## First rollout
 
 | Skill | Initial role | Verification |
