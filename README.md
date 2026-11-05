@@ -9,7 +9,7 @@ MOBAdev is the versioned setup for the [MOBAflow](https://github.com/ahuelsmann/
 - **Tool configuration** records how each supported tool discovers agent definitions and skills.
 - **Workflows** document how the team assigns work, hands off evidence, reviews changes, and verifies acceptance.
 
-Project-specific build and validation rules live with the product code. Operational assignments and their status are managed by the Project Manager.
+Project-specific build and validation rules live with the product code. Claude, as Chief Operating Officer (COO), leads development and owns operational assignments. The [role configuration register](docs/role-configurations.md) tracks evidence of the transition.
 
 ## Status
 
