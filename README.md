@@ -11,6 +11,10 @@ MOBAdev is the versioned setup for the [MOBAflow](https://github.com/ahuelsmann/
 
 Project-specific build and validation rules live with the product code. Claude, as Chief Operating Officer (COO), leads development and owns operational assignments. The [role configuration register](docs/role-configurations.md) tracks evidence of the transition.
 
+## Delivery workflow
+
+Use the [small-batch delivery guide](docs/delivery-workflow.md) to find the board, roles and review flow for MOBAflow work.
+
 ## Status
 
 For a new notebook, follow the [rebuild runbook](docs/rebuild.md).
