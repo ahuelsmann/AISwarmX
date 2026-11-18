@@ -1,0 +1,40 @@
+# MOBAflow agent workflow manifesto
+
+**Decision dates:** 2026-11-16 (small batches on `main`, [PR #468](https://github.com/ahuelsmann/MOBAflow/pull/468)) and 2026-11-17 (slice teams from the start, [PR #479](https://github.com/ahuelsmann/MOBAflow/pull/479), expanded into the multi-model agent network in [Issue #482](https://github.com/ahuelsmann/MOBAflow/issues/482) / [PR #483](https://github.com/ahuelsmann/MOBAflow/pull/483))  
+**Status:** Active team manifesto across **Claude Code**, **ChatGPT Codex** and **Antigravity**.
+
+The **[master coordination instructions](https://github.com/ahuelsmann/MOBAflow/blob/main/.github/instructions/master-coordination.instructions.md)** are the detailed rule set in the product repository. Use the [COO board in MOBAdev #1](https://github.com/ahuelsmann/MOBAdev/issues/1) for live slice assignments, risk classes, slice teams and locks.
+
+## Build as a multi-model agent network ("Quality, Quality, Quality")
+
+- **Role != single model.** Roles define domain responsibilities and survive model updates. Every role and slice team draws on four capability profiles across all three AI worlds:
+  - **`P1` Depth, Architecture & Safety (`Claude Opus 5.5` in Claude Code):** concurrency, Z21 protocol safety, runtime invariants, COO steering, independent review.
+  - **`P2` Repo, Build & Fact Precision (`GPT-6 Astra` in ChatGPT Codex):** solution/build graph (`Moba.slnx`), Spec Kit consistency, CI/Sonar/mutation verification, CPM/TD steering, cross-model review and Sites delivery.
+  - **`P3` System Context, Product & UI/UX (`Gemini 4 Argon` in Antigravity):** large multi-file context, WinUI 3 and MAUI interaction, Light/Dark themes, TrackPlan visuals, clear reader copy (`MOBAnews` and `docs/wiki/`).
+  - **`P4` Cadence, Triage & Fast Delivery (`Claude Fable 5.2` and `Gemini 4 Hydrogen`):** rapid routine slices, test/doc additions, triage and status monitoring.
+- **Cross-family diversity.** Writer and companion reviewer come from different model families (Claude writer -> Codex `P2` companion; Codex writer -> Claude `P1` companion). At Ready, every slice (`H`, `M` and `L`) receives a fresh independent `P1` (Opus 5.5+) review (never the writer's or companion's session) plus cross-family `P2`/`P3` verification so at least two model families verify the final comparison.
+- **Risk classes (`H / M / L`).** High-risk (`H`: Z21, runtime, concurrency, persistence, ESP32, runtime/protocol dependencies) and medium-risk (`M`: UI, features, TrackPlan, speech, MOBAnews, UI/feature dependencies) slices run with a multi-model slice team from the design note on; low-risk (`L`: docs, wiki, test/tooling-only dependencies, <=3-file non-behavioral fixes) slices state intent in the PR body without a separate design note or per-commit companion, and still pass the fresh `P1` + cross-family final review at Ready. Review-fix rounds always keep the risk class of their slice.
+
+## Agree on the work before writing code
+
+- The maintainer owns product goals, priorities, material UX or architecture decisions, new costs and app, device or hardware authorization. The **Decision & Steering Triad** (`P1` COO + `P2` CPM/TD + `P3` Product/UX) steers slice cutting, risk classification and the design Go; the **COO** is the sole technical writer on the board and manages Ready and auto-merge. The CPM/TD can veto a new slice or lock within 30 minutes under the board rules.
+- Cut work into independently mergeable slices. Each slice has one concern, one risk class (`H`, `M` or `L`), one named branch writer and one Draft PR. Aim for about 25 files or 400 changed lines at most, subject to the documented exceptions.
+- Reserve the affected areas on the COO board before starting. Respect existing locks. At most three code slices can be open and two local agents can build at once. Documentation-only slices are outside the code limit and lock the files they edit.
+- For class `H` and `M` slices, post a short design note (10–20 lines: goal, affected files, approach, risks and tests). Reviewers from complementary profiles (`P1`/`P2`, plus `P3` for UI/product work) check the note before the COO or Solution Architect gives the design Go. Write a failing acceptance test first for new product behavior. Keep a user-visible feature that spans several slices behind a default-off toggle until complete.
+
+## Deliver small changes to main with review from the start
+
+- While a class `H` or `M` slice grows, the writer pushes small commits early (tests first, then implementation) and the cross-family companion reviewer records per-commit findings as PR review comments.
+- Before every push that hands work on, merge the current remote `main` into the slice branch. Resolve conflicts in the writer's worktree and rerun the affected checks. Shared slice branches use merges and regular pushes, never rebase or force-push.
+- The COO moves a green Draft to Ready after checking CI and current SonarCloud findings, then dispatches a fresh independent `P1` (Opus 5.5 or higher) review alongside cross-family `P2`/`P3` verification on the exact head and base. The writer fixes findings; changes to reviewed content require another independent review at the slice's risk class.
+- The COO arms squash auto-merge for the reviewed head once required checks, SonarCloud and the applicable mutation checks meet the documented conditions and no blocking findings remain. Disarm before a new push. Close the slice and release its locks after merge, recording `docs/` and `docs/wiki/` impact in the PR.
+
+## Keep coordination traceable
+
+- Use the CLI channels for agent requests (`codex.exe queue`, `claude.exe` and `agy.exe`). Keep design notes, Go, companion comments and final reviews on the PR. Use MOBAdev #1 for the board, short UTC decision logs and durable results.
+- If the same finding survives two failed fix attempts (in companion or final review), or an exchange exceeds ten agent messages on one topic, the COO triggers the circuit breaker and takes the smallest decision needed to the maintainer with a recommendation.
+- The **Head of AI Strategy** (`P3` / `Orchestrator (Argon)` in Antigravity) guards this `manifest.md`, evaluates orchestration improvements with measurable quality impact, and keeps all sanitized agent, rule and workflow definitions backed up in `ahuelsmann/MOBAdev`.
+
+## Historical reference
+
+[Gemini's original handoff: *State of the AI*](docs/hand_off_restrukturierung_ki_setup_state_of_the_ai.md) is preserved verbatim as the original proposal that motivated design-first work, small batches and domain locks.
