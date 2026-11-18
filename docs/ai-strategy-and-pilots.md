@@ -2,6 +2,16 @@
 
 The **Head of AI Strategy** (`P3` / `Orchestrator (Argon)` in Antigravity) continuously evaluates and refines MOBAflow's multi-model agent network across **Antigravity**, **Claude Code**, and **ChatGPT Codex** under the maxim **"Quality, Quality, Quality"**, guards [manifest.md](../manifest.md), and keeps sanitized setup backups versioned in `ahuelsmann/MOBAdev`.
 
+## Standing Monitoring Agents vs. Runtime Ephemeral Agents
+
+To eliminate stale chat clutter and preserve fresh review context:
+
+- **Exactly 1 standing Monitoring & Steering Agent per tool (3 total):**
+  1. **Claude Code (`P1` Opus 5.5):** `Chief Operating Officer (COO)` — initiates workflows, cuts slices, assigns risk classes (`H`/`M`/`L`), spawns/dispatches runtime agents, and arms auto-merge.
+  2. **ChatGPT Codex (`P2` GPT-6 Astra):** `Technical Director & CPM` — backlog/Spec-Kit/build-graph precision and 30-minute board/lock check.
+  3. **Antigravity (`P3` Orchestrator Argon):** `Head of AI Strategy` — monitors multi-model orchestration, evaluates pilots, and guards `manifest.md` and `MOBAdev` backups.
+- **Runtime Spawning & Auto-Archival:** All task-scoped execution, review, and domain specialist agents (`Writer`, `Companion Reviewer`, `Final Reviewer`, `Head of UI/UX`, `Head of MOBAnews`, `Security`, `DevOps`) are spawned automatically at task runtime with their assigned model (`P1`–`P4`) and archived or deleted (along with their worktree) immediately on completion (`claude rm` / `--no-session-persistence`, `codex archive`, ephemeral `agy --agent` runs).
+
 ## Active Pilot: `Orchestrator (Argon)` (`gemini-pro-orchestrator-g1-pro`)
 
 - **Started:** 2026-11-18 (trialed in daily practice before updating `MOBAflow/docs/AI-DEVELOPMENT.md`)
