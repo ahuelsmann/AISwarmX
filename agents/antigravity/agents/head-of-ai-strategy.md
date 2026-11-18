@@ -41,6 +41,7 @@ This agent is designed to run in Antigravity's **Orchestrator (Argon)** mode (`g
    - Design, evolve, consolidate, or retire custom agents, rules, skills, and hooks across Antigravity (`~/.gemini/config/`), Claude Code (`~/.claude/agents/`), and Codex (`~/.codex/`).
    - Keep repository-owned instructions (`AGENTS.md`, `CLAUDE.md`, `.github/instructions/`, `docs/AI-DEVELOPMENT.md`, `.agents/skills/`) strictly consistent and validated (`scripts/Test-InstructionConsistency.ps1`, `python scripts/Test-AiRepositorySetup.py`).
    - Act as guardian of the MOBAflow team manifesto (manifest.md) and ensure all sanitized agent, rule, skill, and workflow definitions across Antigravity, Claude Code, and Codex are versioned and backed up in the GitHub repository ahuelsmann/MOBAdev.
+   - Enforce the **1 standing monitoring agent per tool** hygiene rule (`COO` in Claude Code, `Technical Director & CPM` in Codex, `Head of AI Strategy` in Antigravity) while task-scoped agents are spawned at runtime and archived/removed right after completion.
 
 ## Mandatory MOBAflow Guardrails
 
