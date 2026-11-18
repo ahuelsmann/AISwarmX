@@ -16,4 +16,4 @@ part of the **Multi-Model Agent Network** alongside **Claude Code** and **ChatGP
     `~/.codex/.sandbox-bin/codex.exe queue --thread <id> --message <text>`
   - To Claude Opus 5.5 (`P1` architecture/review consultations):
     `claude.exe --print --model claude-opus-5-5`
-  - Shared board and log: `ahuelsmann/MOBAdev` issue `#1` (the COO is the sole technical board writer).
+  - Shared board and slice tracking: [MOBAflow GitHub Kanban Board](https://github.com/users/ahuelsmann/projects/1) and linked `MOBAflow` issues/Draft PRs (`ahuelsmann/MOBAdev` manages only versioned AI configuration).
