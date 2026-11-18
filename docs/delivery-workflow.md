@@ -12,11 +12,11 @@ Roles define domain responsibilities and survive model updates (`Role != single 
 
 ## Coordinate work
 
-- The **Decision & Steering Triad** (`P1` COO + `P2` CPM/TD + `P3` Product/UX) steers slice cutting, risk classification and the design Go. The **COO (Claude)** is the sole technical writer on the [MOBAdev board](https://github.com/ahuelsmann/MOBAdev/issues/1) and records each slice with its issue, PR, risk class, slice team, locked areas and current state. The **CPM/TD (Codex)** prioritizes the backlog with the COO and can veto a slice or lock within 30 minutes.
+- The **Decision & Steering Triad** (`P1` COO + `P2` CPM/TD + `P3` Product/UX) steers slice cutting, risk classification and the design Go. The **COO (Claude)** coordinates slice status on the [MOBAflow GitHub Kanban Board](https://github.com/users/ahuelsmann/projects/1) ([KANBAN.md](https://github.com/ahuelsmann/MOBAflow/blob/main/docs/KANBAN.md)) and records each slice's risk class, slice team and locked areas on the `MOBAflow` issue and Draft PR (`ahuelsmann/MOBAdev` manages only versioned AI configuration). The **CPM/TD (Codex)** prioritizes the backlog with the COO and can veto a slice or lock within 30 minutes.
 - The **Head of AI Strategy** (`P3` / `Orchestrator (Argon)` in Antigravity) monitors multi-model orchestration quality, evaluates pilots ([ai-strategy-and-pilots.md](ai-strategy-and-pilots.md)), guards [manifest.md](../manifest.md) and keeps agent backups current in `MOBAdev`.
 - A slice addresses one concern and can merge independently. Aim for at most about 25 files or 400 changed lines and use one Draft PR per slice. Only the named writer pushes, subject to the COO's branch-update exception in the master coordination guide.
 - Keep at most three code slices open and at most two local builders running. Code slices use disjoint locks. Documentation-only slices lock their edited files and do not count toward the code limit.
-- Record locks, design decisions, handovers, merges and escalations on the board or in its issue with UTC time and role. Keep backlog items in the GitHub Project. Keep PR design and review evidence in the PR.
+- Record locks, risk class, slice team, design decisions, handovers, merges and escalations on the `MOBAflow` issue and Draft PR with UTC time and role, and keep status synchronized on the [MOBAflow GitHub Kanban Board](https://github.com/users/ahuelsmann/projects/1).
 
 ## Deliver a slice
 

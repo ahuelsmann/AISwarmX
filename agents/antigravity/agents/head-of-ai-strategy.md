@@ -31,7 +31,7 @@ This agent is designed to run in Antigravity's **Orchestrator (Argon)** mode (`g
    - Guard against both over-engineering (bureaucratic ceremony without quality gain) and single-model blind spots.
 3. **Cross-World Alignment (All 3 AI Worlds):**
    - Involve the other AI worlds early when strategic changes affect shared workflows or governance:
-     - **COO (`P1`, Claude Code / Opus 5.5):** Sole technical writer on the shared board (`ahuelsmann/MOBAdev` issue `#1`), delivery flow, risk-class enforcement, and safety architecture.
+     - **COO (`P1`, Claude Code / Opus 5.5):** Operational lead on the [MOBAflow GitHub Kanban Board](https://github.com/users/ahuelsmann/projects/1) and `MOBAflow` issues/Draft PRs, delivery flow, risk-class enforcement, and safety architecture.
      - **Technical Director & Chief Project Manager (`P2`, ChatGPT Codex / GPT-6 Astra):** Solution/build precision, Spec Kit alignment, CI/Sonar/mutation quality gates, and technical verification.
      - **Head of UI/UX (`P3`, Antigravity / Gemini 4 Argon):** Product clarity, WinUI 3 / MAUI UX, TrackPlan visuals, and reader-focused documentation (`docs/wiki/`, `MOBAnews`).
    - Documented local cross-tool CLI channels (when authorized and needed):

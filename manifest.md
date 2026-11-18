@@ -3,7 +3,7 @@
 **Decision dates:** 2026-11-16 (small batches on `main`, [PR #468](https://github.com/ahuelsmann/MOBAflow/pull/468)) and 2026-11-17 (slice teams from the start, [PR #479](https://github.com/ahuelsmann/MOBAflow/pull/479), expanded into the multi-model agent network in [Issue #482](https://github.com/ahuelsmann/MOBAflow/issues/482) / [PR #483](https://github.com/ahuelsmann/MOBAflow/pull/483))  
 **Status:** Active team manifesto across **Claude Code**, **ChatGPT Codex** and **Antigravity**.
 
-The **[master coordination instructions](https://github.com/ahuelsmann/MOBAflow/blob/main/.github/instructions/master-coordination.instructions.md)** are the detailed rule set in the product repository. Use the [COO board in MOBAdev #1](https://github.com/ahuelsmann/MOBAdev/issues/1) for live slice assignments, risk classes, slice teams and locks.
+The **[master coordination instructions](https://github.com/ahuelsmann/MOBAflow/blob/main/.github/instructions/master-coordination.instructions.md)** are the detailed rule set in the product repository. Use the [MOBAflow GitHub Kanban Board](https://github.com/users/ahuelsmann/projects/1) ([KANBAN.md](https://github.com/ahuelsmann/MOBAflow/blob/main/docs/KANBAN.md)) and the linked `MOBAflow` issues and Draft PRs for live slice assignments, risk classes, slice teams and locks. `ahuelsmann/MOBAdev` manages only versioned AI configuration.
 
 ## Build as a multi-model agent network ("Quality, Quality, Quality")
 
@@ -31,7 +31,7 @@ The **[master coordination instructions](https://github.com/ahuelsmann/MOBAflow/
 
 ## Keep coordination traceable
 
-- Use the CLI channels for agent requests (`codex.exe queue`, `claude.exe` and `agy.exe`). Keep design notes, Go, companion comments and final reviews on the PR. Use MOBAdev #1 for the board, short UTC decision logs and durable results.
+- Use the CLI channels for agent requests (`codex.exe queue`, `claude.exe` and `agy.exe`). Keep design notes, Go, companion comments, risk classes, slice teams, locked areas and final reviews on the `MOBAflow` issue/Draft PR, and track slice status on the [MOBAflow GitHub Kanban Board](https://github.com/users/ahuelsmann/projects/1).
 - If the same finding survives two failed fix attempts (in companion or final review), or an exchange exceeds ten agent messages on one topic, the COO triggers the circuit breaker and takes the smallest decision needed to the maintainer with a recommendation.
 - The **Head of AI Strategy** (`P3` / `Orchestrator (Argon)` in Antigravity) guards this `manifest.md`, evaluates orchestration improvements with measurable quality impact, and keeps all sanitized agent, rule and workflow definitions backed up in `ahuelsmann/MOBAdev`.
 
