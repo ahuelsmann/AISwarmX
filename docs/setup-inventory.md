@@ -37,3 +37,11 @@ For each required cross-tool handoff, record the sender and receiving role, outb
 | Practical Acceptance | Quality Manager and Head of UI/UX | Confirm access from the Antigravity role and use on a scoped acceptance case. Keep test execution subject to its assignment. |
 
 Use the setup repository for durable role definitions, reusable skills, and tool configuration. Keep credentials, chats, personal memory, machine-local identifiers, and live queue records out of version control. Review each imported template's provenance and license.
+
+## 2026-11-18 Multi-model network and agent backup update
+
+- Added the active team manifesto ([`manifest.md`](../manifest.md)) and its preserved historical proposal ([`docs/hand_off_restrukturierung_ki_setup_state_of_the_ai.md`](hand_off_restrukturierung_ki_setup_state_of_the_ai.md)).
+- Updated [`docs/delivery-workflow.md`](delivery-workflow.md) to reflect the 2026-11-17 multi-model agent network (`MOBAflow` PR #479 and PR #483): `P1`–`P4` capability profiles, `H`/`M`/`L` risk classes, cross-family companion review from the start, and independent two-family final review at Ready.
+- Added sanitized native agent and rule backups under [`agents/antigravity/`](../agents/antigravity/) (`head-of-ai-strategy.md`, `head-of-ui-ux.md`, `head-of-mobanews.md`, `mobaflow-agent-network.md`) and [`agents/claude/`](../agents/claude/) (`p1-safety-architect.md`, `p1-companion-reviewer.md`, `p1-final-reviewer.md`, `p4-fast-slice-builder.md`) with installation guidance in [`agents/README.md`](../agents/README.md).
+- Recorded the `Head of AI Strategy` role, `Orchestrator (Argon)` evaluation scorecard, and `Gemini 4 Carbon` deferral record in [`docs/ai-strategy-and-pilots.md`](ai-strategy-and-pilots.md).
+

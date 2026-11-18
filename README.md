@@ -13,7 +13,10 @@ Project-specific build and validation rules live with the product code. Claude, 
 
 ## Delivery workflow
 
-Use the [small-batch delivery guide](docs/delivery-workflow.md) to find the board, roles and review flow for MOBAflow work.
+Read the [MOBAflow agent workflow manifesto](manifest.md) for the active team principles and use the [small-batch delivery guide](docs/delivery-workflow.md) to find the board, roles, risk classes (`H`/`M`/`L`) and review flow for MOBAflow work.
+
+- [Versioned agent and rule backups](agents/README.md) for Antigravity and Claude Code
+- [AI strategy and orchestration pilots](docs/ai-strategy-and-pilots.md) (`Orchestrator (Argon)` pilot & `Gemini 4 Carbon` decision record)
 
 ## Status
 
