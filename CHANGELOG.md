@@ -5,7 +5,15 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAdev generations (`Gen#1 = 1.x`, `Gen#2 = 2.x`, `Gen#3 = 3.0.0+`).
 
-## [3.0.1] - 2026-11-19
+## [3.0.2] - 2026-11-19
+
+### Changed
+- **`Configuration` Tab Header (`StatusHeader.tsx`):** Renamed the third header tab from `Config` to `Configuration` and removed the leading document icon.
+- **Monitor Card Order (`DashboardSnapshotService.cs`, `MonitorCards.tsx`):** Ordered the standing monitor cards with `Codex Monitor` first, followed by `Claude Monitor` and `Antigravity Monitor`.
+
+---
+
+## [3.0.1] - 2026-11-19 (PR #13)
 
 ### Changed & Removed
 - **AI Strategy & Monitor Model Update (`docs/ai-strategy-and-pilots.md`, `manifest.md`, `docs/delivery-workflow.md`, `agents/antigravity/agents/head-of-ai-strategy.md`, Dashboard providers/UI):** Defined **`Orchestrator (Neon)`** (`gemini-pro-orchestrator-neon`) as the standing model for `Antigravity Monitor` and updated `Codex Monitor` to **`Sol 6.2`** (`gpt-6.2-sol`).
