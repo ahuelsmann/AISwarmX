@@ -29,6 +29,29 @@ if (-not (Test-Path $ApiProject)) {
     throw "Backend-Projekt nicht gefunden: $ApiProject"
 }
 
+function Start-BrowserWhenReady {
+    param(
+        [string]$ProbeUrl,
+        [string]$TargetUrl
+    )
+
+    return Start-Job -ScriptBlock {
+        param($Probe, $Target)
+        for ($i = 0; $i -lt 90; $i++) {
+            try {
+                $res = Invoke-WebRequest -Uri $Probe -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+                if ($res.StatusCode -ge 200 -and $res.StatusCode -lt 400) {
+                    Start-Process $Target
+                    return
+                }
+            }
+            catch {
+                Start-Sleep -Milliseconds 500
+            }
+        }
+    } -ArgumentList $ProbeUrl, $TargetUrl
+}
+
 $env:Dashboard__BindUrl = $BindUrl
 
 if ($DevMode) {
@@ -49,13 +72,18 @@ if ($DevMode) {
         npm --prefix $Path run dev
     } -ArgumentList $WebRoot
 
+    $browserJob = $null
     try {
         if ($OpenBrowser) {
-            Start-Process 'http://127.0.0.1:5173'
+            $browserJob = Start-BrowserWhenReady -ProbeUrl "$BindUrl/api/health" -TargetUrl 'http://127.0.0.1:5173'
         }
         dotnet run --project $ApiProject --configuration Release --no-launch-profile
     }
     finally {
+        if ($browserJob) {
+            Stop-Job $browserJob -ErrorAction SilentlyContinue
+            Remove-Job $browserJob -Force -ErrorAction SilentlyContinue
+        }
         Stop-Job $viteJob -ErrorAction SilentlyContinue
         Remove-Job $viteJob -Force -ErrorAction SilentlyContinue
     }
@@ -76,11 +104,20 @@ if ($RebuildFrontend -or -not (Test-Path $WebDistIndex)) {
 Write-Host ''
 Write-Host '=== MOBAdev Agent Network Dashboard (Nur Lesen · Loopback) ===' -ForegroundColor Green
 Write-Host "URL: $BindUrl"
+Write-Host 'Warte auf Kestrel-Start; Browser öffnet automatisch sobald bereit.' -ForegroundColor DarkGray
 Write-Host 'Zum Beenden Strg+C drücken.'
 Write-Host ''
 
-if ($OpenBrowser) {
-    Start-Process $BindUrl
+$browserJob = $null
+try {
+    if ($OpenBrowser) {
+        $browserJob = Start-BrowserWhenReady -ProbeUrl "$BindUrl/api/health" -TargetUrl $BindUrl
+    }
+    dotnet run --project $ApiProject --configuration Release --no-launch-profile
 }
-
-dotnet run --project $ApiProject --configuration Release --no-launch-profile
+finally {
+    if ($browserJob) {
+        Stop-Job $browserJob -ErrorAction SilentlyContinue
+        Remove-Job $browserJob -Force -ErrorAction SilentlyContinue
+    }
+}

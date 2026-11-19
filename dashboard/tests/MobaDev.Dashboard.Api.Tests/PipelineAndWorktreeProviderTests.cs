@@ -29,14 +29,49 @@ public sealed class PipelineAndWorktreeProviderTests
             ]
             """;
 
+        var mergedPrJson = """
+            [
+              {
+                "number": 495,
+                "title": "build(deps): bump patch packages",
+                "url": "https://github.com/ahuelsmann/MOBAflow/pull/495",
+                "headRefName": "claude/deps-494",
+                "mergedAt": "2026-11-19T12:00:00Z",
+                "updatedAt": "2026-11-19T12:00:00Z",
+                "body": "Class L dependency update.\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+                "comments": [
+                  {
+                    "author": { "login": "ahuelsmann" },
+                    "body": "Final review (P1, fresh session): no Blocker/High/Medium. Cross-family verification (P3, Gemini Argon): PASS, zero findings."
+                  },
+                  {
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "<!-- codex-review-state:v1 {\"code_review\":{\"has_any_findings\":false}} -->"
+                  },
+                  {
+                    "author": { "login": "ahuelsmann" },
+                    "body": "COO gate: reviews clean, arming auto-merge."
+                  }
+                ]
+              }
+            ]
+            """;
+
         var failGitHub = false;
         var runner = new FakeCommandRunner((fileName, args) =>
         {
-            if (fileName == "gh" && args.Contains("pr"))
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("open"))
             {
                 return failGitHub
                     ? new CommandResult(1, string.Empty, "network offline")
                     : new CommandResult(0, prJson, string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("merged"))
+            {
+                return failGitHub
+                    ? new CommandResult(1, string.Empty, "network offline")
+                    : new CommandResult(0, mergedPrJson, string.Empty);
             }
 
             if (fileName == "gh" && args.Contains("project"))
@@ -58,12 +93,22 @@ public sealed class PipelineAndWorktreeProviderTests
 
         var pr = Assert.Single(first.PullRequests);
         Assert.Equal(492, pr.Number);
+        Assert.Equal("OPEN", pr.State);
         Assert.Equal("Draft", pr.StateLabel);
         Assert.Equal("BEHIND", pr.MergeState);
         Assert.Equal("pass", pr.CiStatus);
         Assert.Equal("pass", pr.SonarStatus);
         Assert.Equal("L", pr.RiskClass);
         Assert.Equal([".github/instructions", "AGENTS.md"], pr.LockedAreas);
+        Assert.Contains(pr.Participants, p => p.Role == "Writer" && p.Model == "GPT-6 Astra");
+
+        var mergedPr = Assert.Single(first.RecentlyMerged);
+        Assert.Equal(495, mergedPr.Number);
+        Assert.Equal("MERGED", mergedPr.State);
+        Assert.Equal("Gemergt", mergedPr.StateLabel);
+        Assert.NotNull(mergedPr.MergedAtUtc);
+        Assert.Contains(mergedPr.Participants, p => p.Role == "Final Reviewer" && p.Model == "Claude Opus 5.5" && p.Status == "PASS");
+        Assert.Contains(mergedPr.Participants, p => p.Role == "Cross-Family Verifier" && p.Model == "Gemini 4 Argon" && p.Status == "PASS");
 
         // Second call: GitHub fails -> cached fallback with degraded status
         failGitHub = true;
@@ -71,6 +116,7 @@ public sealed class PipelineAndWorktreeProviderTests
         Assert.Equal("degraded", second.Source.Status);
         Assert.True(second.Source.FromCache);
         Assert.Single(second.PullRequests);
+        Assert.Single(second.RecentlyMerged);
     }
 
     [Fact]
@@ -105,8 +151,8 @@ public sealed class PipelineAndWorktreeProviderTests
         {
             new Contracts.PullRequestInfo(
                 492, "docs", "https://github.com/ahuelsmann/MOBAflow/pull/492",
-                "codex/strategy-mobaflow-kanban-board", "Draft", true, false,
-                "BEHIND", "pass", "pass", "L", [], DateTimeOffset.UtcNow, null)
+                "codex/strategy-mobaflow-kanban-board", "OPEN", "Draft", true, false,
+                "BEHIND", "pass", "pass", "L", [], DateTimeOffset.UtcNow, null, null, [])
         };
 
         var (worktrees, health) = await provider.GetWorktreesAsync(paths, openPrs, CancellationToken.None);
