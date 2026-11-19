@@ -95,9 +95,18 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: '2px',
-    minWidth: 0
+    flex: '1 1 0',
+    minWidth: 0,
+    overflow: 'hidden'
+  },
+  rowTitle: {
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
   },
   rowSub: {
+    display: 'block',
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
     overflow: 'hidden',
@@ -210,7 +219,7 @@ export function HygieneAndSyncPanel({
           {hygiene.sessions.map((session) => (
             <div key={session.tool} className={styles.row}>
               <div className={styles.rowMain}>
-                <Text weight="semibold" size={200}>
+                <Text weight="semibold" size={200} className={styles.rowTitle}>
                   {session.tool}
                 </Text>
                 <span className={styles.rowSub}>
@@ -284,7 +293,12 @@ export function HygieneAndSyncPanel({
           {visibleWorktrees.map((wt) => (
             <div key={`${wt.folderName}-${wt.branch}`} className={styles.row}>
               <div className={styles.rowMain}>
-                <Text weight="semibold" size={200} className="mono" title={wt.branch}>
+                <Text
+                  weight="semibold"
+                  size={200}
+                  className={`${styles.rowTitle} mono`}
+                  title={wt.branch}
+                >
                   {wt.branch}
                 </Text>
                 <span className={`${styles.rowSub} mono`} title={wt.folderName}>

@@ -33,6 +33,13 @@ html[data-theme='light'] body {
   font-family: 'Cascadia Code', Consolas, 'Courier New', monospace;
 }
 
+/* Prevent fixed-height Fluent Badges from crushing into multi-line clipped text inside flex rows */
+.fui-Badge {
+  flex-shrink: 0;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
 .pulse-dot {
   width: 8px;
   height: 8px;

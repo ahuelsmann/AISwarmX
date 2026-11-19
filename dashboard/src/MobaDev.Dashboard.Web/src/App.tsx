@@ -195,7 +195,7 @@ export function App() {
 
   const handleOpenDoc = (scope: ConfigDocsScope, relativePath: string) => {
     setRequestedDoc({ scope, path: relativePath });
-    setActiveTab(scope === 'mobadev' ? 'mobadev-docs' : 'mobaflow-docs');
+    setActiveTab('mobadev-docs');
   };
 
   const driftBadgeCount = snapshot
@@ -286,16 +286,6 @@ export function App() {
               scope="mobadev"
               isDark={isDark}
               requestedPath={requestedDoc?.scope === 'mobadev' ? requestedDoc.path : null}
-              onConsumeRequestedPath={() => setRequestedDoc(null)}
-            />
-          )}
-
-          {activeTab === 'mobaflow-docs' && (
-            <ConfigDocsView
-              key="mobaflow"
-              scope="mobaflow"
-              isDark={isDark}
-              requestedPath={requestedDoc?.scope === 'mobaflow' ? requestedDoc.path : null}
               onConsumeRequestedPath={() => setRequestedDoc(null)}
             />
           )}

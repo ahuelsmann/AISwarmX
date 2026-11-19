@@ -16,7 +16,6 @@ import {
 import {
   ArrowClockwise16Regular,
   ArrowRight16Regular,
-  Book16Regular,
   CheckmarkCircle16Regular,
   Desktop16Regular,
   DocumentText16Regular,
@@ -366,10 +365,7 @@ export function StatusHeader({
               </span>
             </Tab>
             <Tab value="mobadev-docs" icon={<DocumentText16Regular />}>
-              MOBAdev Config
-            </Tab>
-            <Tab value="mobaflow-docs" icon={<Book16Regular />}>
-              MOBAflow Instructions
+              Config
             </Tab>
           </TabList>
         </nav>

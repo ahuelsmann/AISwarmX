@@ -21,13 +21,6 @@ public sealed class ConfigDocsProviderTests
         await File.WriteAllTextAsync(Path.Combine(fx.MobaDevPath, ".env"), "SECRET=123\n");
         await File.WriteAllTextAsync(Path.Combine(fx.MobaDevPath, "unlisted-notes.md"), "Private\n");
 
-        var mobaFlowInstDir = Path.Combine(fx.MobaFlowPath, ".github", "instructions");
-        Directory.CreateDirectory(mobaFlowInstDir);
-        await File.WriteAllTextAsync(Path.Combine(fx.MobaFlowPath, "AGENTS.md"), "# AGENTS\n");
-        await File.WriteAllTextAsync(
-            Path.Combine(mobaFlowInstDir, "master-coordination.instructions.md"),
-            "# Master Coordination\n");
-
         var provider = new ConfigDocsProvider();
         var paths = new ResolvedDashboardPaths(
             fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
@@ -42,11 +35,6 @@ public sealed class ConfigDocsProviderTests
         Assert.DoesNotContain(mobaDevCatalog.Files, f => f.FileName == "unlisted-notes.md");
         Assert.DoesNotContain(mobaDevCatalog.Files, f => f.FileName == ".env");
 
-        var mobaFlowCatalog = await provider.GetCatalogAsync(paths, "mobaflow", CancellationToken.None);
-        Assert.Equal("ok", mobaFlowCatalog.Source.Status);
-        Assert.Contains(mobaFlowCatalog.Files, f => f.RelativePath == "AGENTS.md");
-        Assert.Contains(mobaFlowCatalog.Files, f => f.RelativePath == ".github/instructions/master-coordination.instructions.md");
-
         var doc = await provider.GetDocumentContentAsync(paths, "mobadev", "manifest.md", CancellationToken.None);
         Assert.NotNull(doc);
         Assert.Contains("# MOBAdev Manifest", doc.Content);
@@ -57,6 +45,8 @@ public sealed class ConfigDocsProviderTests
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
             provider.GetDocumentContentAsync(paths, "mobadev", "../secret.md", CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            provider.GetCatalogAsync(paths, "mobaflow", CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentException>(() =>
             provider.GetCatalogAsync(paths, "other", CancellationToken.None));
     }

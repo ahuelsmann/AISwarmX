@@ -252,7 +252,7 @@ public static partial class PrParticipantExtractor
                 Tool: "Antigravity",
                 Role: "Head of AI Strategy",
                 Profile: "P3",
-                Model: "Gemini 4 Argon",
+                Model: "Orchestrator (Neon)",
                 Status: "Involved",
                 EvidenceSource: "PR Comment")));
         }
@@ -295,7 +295,7 @@ public static partial class PrParticipantExtractor
                 Tool: "ChatGPT Codex",
                 Role: "Cross-Family Verifier (TD/CPM)",
                 Profile: "P2",
-                Model: "GPT-6 Astra",
+                Model: "Sol 6.2",
                 Status: status,
                 EvidenceSource: "Cross-Family Check")));
         }

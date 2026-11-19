@@ -15,7 +15,7 @@ public sealed class AntigravityMonitorProvider
     private const string Role = "Head of AI Strategy";
     private const string Profile = "P3";
     private const string Tool = "Antigravity";
-    private const string DefaultDesktopModel = "Orchestrator (Argon / Neon)";
+    private const string DefaultDesktopModel = "Orchestrator (Neon)";
 
     public Task<MonitorInfo> GetMonitorAsync(ResolvedDashboardPaths paths, CancellationToken cancellationToken)
     {

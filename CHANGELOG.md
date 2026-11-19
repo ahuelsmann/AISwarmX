@@ -3,8 +3,22 @@
 All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Dashboard** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAdev generations (`Gen#1 = 1.x`, `Gen#2 = 2.x`, `Gen#3 = 3.0.0+`).
 
-## [1.2.0] - 2026-11-19
+## [3.0.1] - 2026-11-19
+
+### Changed & Removed
+- **AI Strategy & Monitor Model Update (`docs/ai-strategy-and-pilots.md`, `manifest.md`, `docs/delivery-workflow.md`, `agents/antigravity/agents/head-of-ai-strategy.md`, Dashboard providers/UI):** Defined **`Orchestrator (Neon)`** (`gemini-pro-orchestrator-neon`) as the standing model for `Antigravity Monitor` and updated `Codex Monitor` to **`Sol 6.2`** (`gpt-6.2-sol`).
+- **Generation-Aligned Versioning (`CHANGELOG.md`, `package.json`, `dashboard/DESIGN.md`):** Aligned Semantic Versioning with MOBAdev generations (`Gen#1 = 1.x`, `Gen#2 = 2.x`, `Gen#3 = 3.0.0+`).
+- **Simplified Header & `MOBAdev`-Only Docs (`StatusHeader.tsx`, `ConfigDocsProvider.cs`, `GovernanceMatrixView.tsx`):** Removed the `MOBAflow Instructions` tab and backend `mobaflow` scope to keep the cockpit focused on `MOBAdev` configuration files; shortened the third header tab title to `Config` and repointed `Git & Delivery Strategy` quick links to `Manifest` (`manifest.md`) and `Delivery Workflow` (`docs/delivery-workflow.md`).
+
+### Fixed
+- **Cross-View Badge & Border Clipping (`base.css`, `HygieneAndSyncPanel.tsx`, `PipelineCard.tsx`, `ConfigDocsView.tsx`, `GovernanceMatrixView.tsx`, `RoleAndModelIcons.tsx`):** Added `.fui-Badge { flex-shrink: 0; white-space: nowrap; }`, flex truncation (`flex: 1 1 0; min-width: 0; overflow: hidden`) on Worktree/Session rows so `Stale / Merged` never wraps or clips, plus wrapping container pills (`wrapPill`, `monoPill`, `pathPill`, `riskCellStack`, `ModelBadge` `wrap`) and top-aligned `10px` table cell spacing across `Matrix & Rules`.
+- **Markdown Link Cleanup in Governance Tables (`GovernanceProvider.cs`):** Stripped Markdown links (`[label](target)`) down to plain readable link text when extracting role responsibilities and matrix descriptions.
+
+---
+
+## [3.0.0] - 2026-11-19 (PR #12)
 
 ### Added
 - **Dashboard Title & Warning Breakdown Popover:** Rebranded the read-only cockpit to **MOBAdev Agent Swarm Gen#3** and added an interactive Fluent `Popover` on the header warnings badge breaking down rules drift, stale worktrees, extra sessions, and quota pauses with 1-click jump links.
@@ -23,7 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.1.0] - 2026-11-19 (PR #11)
+## [2.3.0] - 2026-11-19 (PR #11)
 
 ### Added
 - **Fluent UI 2 Adoption:** Migrated the React cockpit to `@fluentui/react-components` and `@fluentui/react-icons` aligned with `MOBAflow`'s WinUI 3 Light/Dark Fluent styling (`#0078D4`).
@@ -36,7 +50,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.0.1] - 2026-11-19 (PR #10)
+## [2.2.0] - 2026-11-19 (PR #10)
 
 ### Added
 - **Per-Task Agent, Role & Model Attribution (`PrParticipantExtractor.cs`):** Added extraction of participating agents, profiles (`P1`–`P4`), models, and statuses per PR across both `Open` and `Recently Merged` views.
@@ -44,7 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.0.0] - 2026-11-19 (PRs #7, #8, #9)
+## [2.1.0] - 2026-11-19 (PRs #7, #8, #9)
 
 ### Added
 - **Dashboard Design Concept (`dashboard/DESIGN.md`):** Co-designed strictly read-only, zero-duplication, loopback-only (`127.0.0.1:5179`) architecture with `Head of UI/UX` (PR #7).
@@ -53,7 +67,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.2.0] - 2026-11-18 (PRs #3, #4, #5, #6)
+## [2.0.0] - 2026-11-18 (PRs #3, #4, #5, #6)
 
 ### Changed
 - **Unified Standing Monitors & Hygiene (PRs #5, #6):** Standardized permanent monitor names (`Claude Monitor`, `Codex Monitor`, `Antigravity Monitor`) and enforced the 1-monitor-per-tool rule across agent definitions and docs.
@@ -62,7 +76,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.1.0] - 2026-11-16 (PR #2 & Baseline 2026-11-05)
+## [1.0.0] - 2026-11-16 (PR #2 & Baseline 2026-11-05)
 
 ### Added
 - Initial `MOBAdev` repository structure, MIT license, rebuild runbook, setup inventory, pilot skills (`skills/`), and MOBAflow small-batch delivery workflow documentation (`docs/delivery-workflow.md`).

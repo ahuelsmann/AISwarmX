@@ -118,6 +118,19 @@ const useStyles = makeStyles({
     lineHeight: tokens.lineHeightBase200,
     overflowX: 'auto',
     whiteSpace: 'pre-wrap'
+  },
+  pathPill: {
+    display: 'inline-block',
+    padding: '2px 8px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: '17px',
+    color: tokens.colorNeutralForeground1,
+    whiteSpace: 'normal',
+    wordBreak: 'break-word',
+    maxWidth: '100%'
   }
 });
 
@@ -235,7 +248,7 @@ export function ConfigDocsView({
   }, [catalog, filterText]);
 
   const activeDoc = selectedPath ? contentCache[selectedPath] : undefined;
-  const headingLabel = scope === 'mobadev' ? 'MOBAdev Config Files' : 'MOBAflow Instructions';
+  const headingLabel = 'MOBAdev Config Files';
 
   return (
     <div className={styles.layout}>
@@ -349,9 +362,7 @@ export function ConfigDocsView({
                 <Badge appearance="tint" color="subtle" shape="rounded" className="mono">
                   {activeDoc.repository}
                 </Badge>
-                <Badge appearance="outline" color="subtle" shape="rounded" className="mono">
-                  {activeDoc.relativePath}
-                </Badge>
+                <span className={`${styles.pathPill} mono`}>{activeDoc.relativePath}</span>
               </div>
 
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>

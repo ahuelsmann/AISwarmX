@@ -14,7 +14,7 @@ When copying `agents/antigravity/agents/head-of-ai-strategy.md` or `agents/antig
 
 ## Antigravity frontmatter rule
 
-Do **not** add a raw `model: <model-id>` field (such as `gemini-pro-orchestrator-g1-pro`) to the YAML frontmatter of `.md` files in `~/.gemini/config/agents/`. The Antigravity loader silently ignores agent files with explicit model IDs in frontmatter. Instead, select the model in the Antigravity UI picker or via CLI flag (`agy --agent <name> --model <model-id>`).
+Do **not** add a raw `model: <model-id>` field (such as `gemini-pro-orchestrator-neon`) to the YAML frontmatter of `.md` files in `~/.gemini/config/agents/`. The Antigravity loader silently ignores agent files with explicit model IDs in frontmatter. Instead, select the model in the Antigravity UI picker or via CLI flag (`agy --agent <name> --model <model-id>`).
 
 ## Verify Antigravity discovery
 
