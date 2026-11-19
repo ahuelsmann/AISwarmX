@@ -58,7 +58,7 @@ public sealed class MonitorProvidersTests
 
         TempDashboardFixture.CreateSqliteDb(dbPath, $"""
             CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, model TEXT, archived INTEGER, updated_at INTEGER);
-            INSERT INTO threads VALUES ('t1', 'Codex Monitor', 'gpt-6.1-sol', 0, {nowEpoch});
+            INSERT INTO threads VALUES ('t1', 'Codex Monitor', 'gpt-6.2-sol', 0, {nowEpoch});
             INSERT INTO threads VALUES ('t2', 'Guardian review', 'codex-auto-review', 0, {nowEpoch});
             INSERT INTO threads VALUES ('t3', 'Archived Old', 'gpt-6.1-sol', 1, {nowEpoch - 5000});
             """);
@@ -80,7 +80,7 @@ public sealed class MonitorProvidersTests
 
         Assert.Equal("ok", monitor.Source.Status);
         Assert.Equal("standby", monitor.State);
-        Assert.Equal("gpt-6.1-sol", monitor.Model);
+        Assert.Equal("gpt-6.2-sol", monitor.Model);
         Assert.Equal(1, monitor.ActiveSessionCount);
         Assert.Equal("ACTIVE (FREQ=HOURLY;INTERVAL=1)", monitor.AutomationStatus);
     }
@@ -114,6 +114,7 @@ public sealed class MonitorProvidersTests
         var runningResult = await provider.GetMonitorAsync(paths, CancellationToken.None);
         Assert.Equal("ok", runningResult.Source.Status);
         Assert.Equal("busy", runningResult.State);
+        Assert.Equal("Orchestrator (Neon)", runningResult.Model);
         Assert.Equal(1, runningResult.ActiveSessionCount);
     }
 }

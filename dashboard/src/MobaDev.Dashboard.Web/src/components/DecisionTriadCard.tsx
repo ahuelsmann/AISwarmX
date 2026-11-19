@@ -88,7 +88,7 @@ const COUNCIL_SEATS: SeatDefinition[] = [
     shortTag: 'CPM & TD',
     roleMatch: 'Technical Director & CPM',
     tool: 'ChatGPT Codex',
-    fallbackModel: 'GPT-6 Astra',
+    fallbackModel: 'Sol 6.2',
     mandate: 'Prioritizes backlog, validates build graph & holds scope/lock veto'
   },
   {
@@ -97,7 +97,7 @@ const COUNCIL_SEATS: SeatDefinition[] = [
     shortTag: 'AI Strategy',
     roleMatch: 'Head of AI Strategy',
     tool: 'Antigravity',
-    fallbackModel: 'Gemini 4 Argon',
+    fallbackModel: 'Orchestrator (Neon)',
     mandate: 'Routes models across hosts, aligns UI/UX & safeguards clarity'
   }
 ];
