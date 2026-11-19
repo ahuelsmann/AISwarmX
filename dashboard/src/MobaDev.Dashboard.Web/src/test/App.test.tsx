@@ -223,6 +223,84 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           linkedIssues: [],
           mergeBlockReasons: []
         }
+      ],
+      activeIssues: [
+        {
+          number: 451,
+          title: 'RF-10: Formatting baseline and gate',
+          url: 'https://github.com/ahuelsmann/MOBAflow/issues/451',
+          gitHubState: 'OPEN',
+          kanbanStatus: 'In progress',
+          priority: 'P1',
+          area: 'Infrastructure',
+          issueType: 'Refactoring',
+          riskClass: 'L',
+          writer: 'Claude Writer',
+          lockedAreas: ['quality.yml'],
+          updatedAtUtc: nowIso,
+          linkedPullRequests: [
+            {
+              number: 501,
+              title: 'ci(quality): enforce C# whitespace gate (RF-10 slice 3)',
+              url: 'https://github.com/ahuelsmann/MOBAflow/pull/501',
+              stateLabel: 'Draft',
+              isMerged: false
+            }
+          ],
+          participants: [],
+          boardDriftReason: null
+        },
+        {
+          number: 47,
+          title: 'Quality and refactoring programme: RF-01 through RF-18',
+          url: 'https://github.com/ahuelsmann/MOBAflow/issues/47',
+          gitHubState: 'OPEN',
+          kanbanStatus: 'In progress',
+          priority: 'P0',
+          area: 'Infrastructure',
+          issueType: 'Refactoring',
+          riskClass: null,
+          writer: null,
+          lockedAreas: [],
+          updatedAtUtc: nowIso,
+          linkedPullRequests: [],
+          participants: [],
+          boardDriftReason: null
+        },
+        {
+          number: 136,
+          title: 'Text-to-Speech interface modularization',
+          url: 'https://github.com/ahuelsmann/MOBAflow/issues/136',
+          gitHubState: 'OPEN',
+          kanbanStatus: 'In progress',
+          priority: null,
+          area: null,
+          issueType: null,
+          riskClass: null,
+          writer: null,
+          lockedAreas: [],
+          updatedAtUtc: nowIso,
+          linkedPullRequests: [],
+          participants: [],
+          boardDriftReason: 'No active PR or Writer (stale on board)'
+        },
+        {
+          number: 266,
+          title: 'ci: keep documentation consistent within each pull request',
+          url: 'https://github.com/ahuelsmann/MOBAflow/issues/266',
+          gitHubState: 'CLOSED',
+          kanbanStatus: 'In progress',
+          priority: null,
+          area: null,
+          issueType: null,
+          riskClass: null,
+          writer: null,
+          lockedAreas: [],
+          updatedAtUtc: nowIso,
+          linkedPullRequests: [],
+          participants: [],
+          boardDriftReason: 'Closed on GitHub — move to Done on Kanban'
+        }
       ]
     },
     hygiene: {
@@ -569,6 +647,40 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
       expect(blockedLabel.parentElement).toHaveTextContent(
         /Draft PR \(not yet marked Ready for review\).*2 checks running/
       );
+    },
+    10_000
+  );
+
+  it(
+    'displays Active Issues view with linked PRs, No PR yet issues, and collapsible Board Drift',
+    async () => {
+      const user = userEvent.setup();
+      stubDashboardFetch();
+
+      render(<App />);
+      await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+
+      await user.click(screen.getByRole('button', { name: /Active Issues \(2\)/i }));
+
+      expect(await screen.findByText('RF-10: Formatting baseline and gate')).toBeInTheDocument();
+      expect(screen.getByText('PR #501')).toBeInTheDocument();
+      expect(
+        screen.getByText('Quality and refactoring programme: RF-01 through RF-18')
+      ).toBeInTheDocument();
+      expect(screen.getByText('No PR yet')).toBeInTheDocument();
+
+      // Drift items remain collapsed until expanded
+      expect(
+        screen.queryByText('ci: keep documentation consistent within each pull request')
+      ).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /Show Board Drift \(2\)/i }));
+
+      expect(screen.getByText('Text-to-Speech interface modularization')).toBeInTheDocument();
+      expect(screen.getByText(/No active PR or Writer \(stale on board\)/)).toBeInTheDocument();
+      expect(
+        screen.getByText('ci: keep documentation consistent within each pull request')
+      ).toBeInTheDocument();
+      expect(screen.getByText(/Closed on GitHub — move to Done on Kanban/)).toBeInTheDocument();
     },
     10_000
   );

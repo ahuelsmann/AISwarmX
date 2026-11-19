@@ -1,6 +1,6 @@
 # MOBAdev Agent Swarm Gen#3 Dashboard — Architektur- & UI/UX-Konzept
 
-**Status:** Umgesetzt (v3.0.1 / Gen#3 — Slices 1–6 komplett: Fluent UI 2, Agent Swarm Gen#3 Rebrand, Compact Monitors, Warning Popover, Merge Gates, Rules Diff, Git Strategy & Read-Only Config Tab)  
+**Status:** Umgesetzt (v3.1.0 / Gen#3 — Slices 1–6 komplett inkl. `Active Issues`-Kanban-Ansicht, PR `BLOCKED`-Begründung, Compact Monitors, Warning Popover, Merge Gates, Rules Diff, Git Strategy & Read-Only `Configuration`-Tab)  
 **Verantwortlich:** `Antigravity Monitor` (`Head of AI Strategy`, `P3`) gemeinsam mit `Head of UI/UX` (`P3`)  
 **Ziel-Repository:** `ahuelsmann/MOBAdev` (`PRIVATE`, unter `dashboard/`)  
 **Stack:** ASP.NET Core Minimal API (`.NET 10`) + React (`TypeScript` + `Vite`)
@@ -174,4 +174,5 @@ Die Umsetzung läuft parallel zum `MOBAflow`-Refactoring in 3 kleinen, unabhäng
 - **Korrigierte Writer-Erkennung (`PrParticipantExtractor`):** Explizite `- Writer:`-Slice-Header überschreiben Template-Texte (`P1-P4`), sodass z. B. `P4 slice builder (Claude)` korrekt als `P4` / `Claude Fable 5.2` erscheint.
 - **PR Merge-Gate-Fortschritt & Plain-English `UNSTABLE`:** Jede PR zeigt `Gates X/Y` (`Writer`, optional `Companion`, `CI & Sonar`, `P1 Final`, `Cross-Family`, `Auto-Merge`) sowie verständliche `Checks Pending` / `Checks Failing`-Badges.
 - **Einklappbare Stale-Worktrees & Read-Only Rules-Diff (`GET /api/governance/diff`):** Stale-Worktrees > 3 werden standardmäßig gekürzt; in `Matrix & Rules` zeigt `Show Diff` einen pfadgeschützten Unified Diff (`Target` vs. `Actual`) direkt im Cockpit.
-- **Read-Only `Config`-Tab (`MOBAdev`) & `Git & Delivery Strategy`:** Strikte Allow-List-Endpunkte (`GET /api/docs`, `GET /api/docs/content`) liefern versionierte `MOBAdev`-Markdown-Konfigurationen sicher an eine Master-Detail-Ansicht (`Formatted` / `Raw`) aus; `Matrix & Rules` fasst zusätzlich die 5 MOBAflow-Git-Invarianten mit Direktlinks zu `manifest.md` und `docs/delivery-workflow.md` zusammen.
+- **Read-Only `Configuration`-Tab (`MOBAdev`) & `Git & Delivery Strategy`:** Strikte Allow-List-Endpunkte (`GET /api/docs`, `GET /api/docs/content`) liefern versionierte `MOBAdev`-Markdown-Konfigurationen sicher an eine Master-Detail-Ansicht (`Formatted` / `Raw`) aus; `Matrix & Rules` fasst zusätzlich die 5 MOBAflow-Git-Invarianten mit Direktlinks zu `manifest.md` und `docs/delivery-workflow.md` zusammen.
+- **`Active Issues`-Sicht & explizite PR `BLOCKED`-Gründe (`PipelineProvider`, `PipelineCard`):** Gefilterte GitHub-ProjectV2-GraphQL-Abfrage lädt aktive Kanban-Issues (`In progress`, `In review`, `Ready`) auch ohne offenen PR (`No PR yet`), reichert sie aus verknüpften PRs an und trennt Altlasten in einen einklappbaren `Board Drift`-Bereich (`Closed on GitHub` / `Stale / No Writer`); offene PRs zeigen konkrete Merge-Blocker (`Draft PR`, Konflikt, Review-Status, fehlgeschlagene/laufende Checks) direkt unter der PR-Zeile an.

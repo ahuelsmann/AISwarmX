@@ -144,6 +144,30 @@ public sealed record LinkedIssueInfo(
     string Url,
     string? State);
 
+public sealed record LinkedPullRequestRef(
+    int Number,
+    string Title,
+    string Url,
+    string StateLabel,
+    bool IsMerged);
+
+public sealed record ActiveIssueInfo(
+    int Number,
+    string Title,
+    string Url,
+    string GitHubState,
+    string KanbanStatus,
+    string? Priority,
+    string? Area,
+    string? IssueType,
+    string? RiskClass,
+    string? Writer,
+    IReadOnlyList<string> LockedAreas,
+    DateTimeOffset UpdatedAtUtc,
+    IReadOnlyList<LinkedPullRequestRef> LinkedPullRequests,
+    IReadOnlyList<TaskParticipantInfo> Participants,
+    string? BoardDriftReason);
+
 public sealed record PullRequestInfo(
     int Number,
     string Title,
@@ -170,6 +194,7 @@ public sealed record PipelineResponse(
     string Repository,
     IReadOnlyList<PullRequestInfo> PullRequests,
     IReadOnlyList<PullRequestInfo> RecentlyMerged,
+    IReadOnlyList<ActiveIssueInfo> ActiveIssues,
     bool ProjectBoardAvailable,
     string? ProjectBoardNotice,
     SourceHealth Source);

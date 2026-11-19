@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   Badge,
+  Button,
   Card,
   Link,
   MessageBar,
@@ -19,6 +20,8 @@ import {
   BranchRequest20Regular,
   Checkmark16Regular,
   CheckmarkCircle16Regular,
+  ChevronDown16Regular,
+  ChevronUp16Regular,
   Circle16Regular,
   Clock16Regular,
   Dismiss16Regular,
@@ -33,7 +36,9 @@ import {
 } from '@fluentui/react-icons';
 import { formatAbsoluteEn, formatRelativeTimeEn } from '../api/dashboardClient';
 import type {
+  ActiveIssueInfo,
   LinkedIssueInfo,
+  LinkedPullRequestRef,
   PipelineResponse,
   PullRequestInfo,
   TaskParticipantInfo
@@ -195,6 +200,24 @@ const useStyles = makeStyles({
     gap: '6px',
     padding: '28px 16px',
     color: tokens.colorNeutralForeground2
+  },
+  driftBar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px',
+    padding: '8px 10px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    marginTop: '6px'
+  },
+  driftSummaryGroup: {
+    display: 'inline-flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '6px'
   }
 });
 
@@ -204,12 +227,24 @@ interface PipelineCardProps {
   isDark: boolean;
 }
 
-type PipelineViewMode = 'open' | 'merged';
+type PipelineViewMode = 'open' | 'issues' | 'merged';
 
 export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
   const styles = useStyles();
   const [viewMode, setViewMode] = useState<PipelineViewMode>('open');
-  const activeList = viewMode === 'open' ? pipeline.pullRequests : pipeline.recentlyMerged;
+  const [showBoardDrift, setShowBoardDrift] = useState(false);
+
+  const allActiveIssues = pipeline.activeIssues ?? [];
+  const cleanIssues = allActiveIssues.filter((i) => !i.boardDriftReason);
+  const driftIssues = allActiveIssues.filter((i) => Boolean(i.boardDriftReason));
+  const closedDriftCount = driftIssues.filter((i) => i.gitHubState === 'CLOSED').length;
+  const staleDriftCount = driftIssues.length - closedDriftCount;
+  const driftSummaryParts = [
+    closedDriftCount > 0 ? `${closedDriftCount} Closed on GitHub` : null,
+    staleDriftCount > 0 ? `${staleDriftCount} Stale / No Writer` : null
+  ].filter(Boolean);
+
+  const activePrList = viewMode === 'open' ? pipeline.pullRequests : pipeline.recentlyMerged;
 
   return (
     <Card className={styles.card} appearance="filled" aria-label="Task and PR Pipeline MOBAflow">
@@ -222,14 +257,22 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
           </Badge>
         </div>
 
-        <div className={styles.filterGroup} role="group" aria-label="Filter PR status">
+        <div className={styles.filterGroup} role="group" aria-label="Filter pipeline view">
           <ToggleButton
             size="small"
             appearance={viewMode === 'open' ? 'primary' : 'subtle'}
             checked={viewMode === 'open'}
             onClick={() => setViewMode('open')}
           >
-            <span className="tabular">Open ({pipeline.pullRequests.length})</span>
+            <span className="tabular">Open PRs ({pipeline.pullRequests.length})</span>
+          </ToggleButton>
+          <ToggleButton
+            size="small"
+            appearance={viewMode === 'issues' ? 'primary' : 'subtle'}
+            checked={viewMode === 'issues'}
+            onClick={() => setViewMode('issues')}
+          >
+            <span className="tabular">Active Issues ({cleanIssues.length})</span>
           </ToggleButton>
           <ToggleButton
             size="small"
@@ -265,7 +308,7 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
         </MessageBar>
       )}
 
-      {pipeline.source.status !== 'unavailable' && activeList.length === 0 && (
+      {pipeline.source.status !== 'unavailable' && viewMode !== 'issues' && activePrList.length === 0 && (
         <div className={styles.emptyState}>
           <CheckmarkCircle16Regular style={{ width: 22, height: 22 }} aria-hidden="true" />
           <Text weight="semibold">
@@ -279,9 +322,9 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
         </div>
       )}
 
-      {activeList.length > 0 && (
+      {viewMode !== 'issues' && activePrList.length > 0 && (
         <div className={styles.prList}>
-          {activeList.map((pr) => (
+          {activePrList.map((pr) => (
             <PullRequestRow
               key={`${pr.state}-${pr.number}`}
               pr={pr}
@@ -291,6 +334,86 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
             />
           ))}
         </div>
+      )}
+
+      {pipeline.source.status !== 'unavailable' && viewMode === 'issues' && (
+        <>
+          {cleanIssues.length === 0 && driftIssues.length === 0 && (
+            <div className={styles.emptyState}>
+              <CheckmarkCircle16Regular style={{ width: 22, height: 22 }} aria-hidden="true" />
+              <Text weight="semibold">No active issues on the Kanban board</Text>
+              <Text size={200}>
+                Issues moved to In progress, In review, or Ready will appear here even before a PR is opened.
+              </Text>
+            </div>
+          )}
+
+          {cleanIssues.length === 0 && driftIssues.length > 0 && (
+            <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+              No current active issues without board drift.
+            </Text>
+          )}
+
+          {cleanIssues.length > 0 && (
+            <div className={styles.prList}>
+              {cleanIssues.map((issue) => (
+                <ActiveIssueRow
+                  key={issue.number}
+                  issue={issue}
+                  nowMs={nowMs}
+                  isDark={isDark}
+                  styles={styles}
+                />
+              ))}
+            </div>
+          )}
+
+          {driftIssues.length > 0 && (
+            <>
+              <div className={styles.driftBar}>
+                <div className={styles.driftSummaryGroup}>
+                  <Warning16Regular
+                    style={{ color: tokens.colorPaletteMarigoldForeground1, flexShrink: 0 }}
+                    aria-hidden="true"
+                  />
+                  <Text size={200} weight="semibold">
+                    Board Drift
+                  </Text>
+                  <GlossaryTooltip term="Board Drift" iconOnly />
+                  <Text size={200} className="tabular" style={{ color: tokens.colorNeutralForeground2 }}>
+                    ({driftSummaryParts.join(' · ')})
+                  </Text>
+                </div>
+
+                <Button
+                  size="small"
+                  appearance="subtle"
+                  icon={showBoardDrift ? <ChevronUp16Regular /> : <ChevronDown16Regular />}
+                  iconPosition="after"
+                  onClick={() => setShowBoardDrift((prev) => !prev)}
+                >
+                  {showBoardDrift
+                    ? 'Hide Board Drift'
+                    : `Show Board Drift (${driftIssues.length})`}
+                </Button>
+              </div>
+
+              {showBoardDrift && (
+                <div className={styles.prList}>
+                  {driftIssues.map((issue) => (
+                    <ActiveIssueRow
+                      key={`drift-${issue.number}`}
+                      issue={issue}
+                      nowMs={nowMs}
+                      isDark={isDark}
+                      styles={styles}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </>
       )}
     </Card>
   );
@@ -835,5 +958,232 @@ function RiskClassBadge({ riskClass }: { riskClass: string }) {
     <Badge appearance="outline" color="subtle" shape="rounded">
       Class ?
     </Badge>
+  );
+}
+
+function ActiveIssueRow({
+  issue,
+  nowMs,
+  isDark,
+  styles
+}: {
+  issue: ActiveIssueInfo;
+  nowMs: number;
+  isDark: boolean;
+  styles: ReturnType<typeof useStyles>;
+}) {
+  const hasOpenPr = issue.linkedPullRequests.some((p) => !p.isMerged);
+  const hasDrift = Boolean(issue.boardDriftReason);
+  const isClosed = issue.gitHubState.toUpperCase() === 'CLOSED';
+
+  return (
+    <div className={styles.prRow}>
+      <div className={styles.prTop}>
+        <div className={styles.prTitleWrap}>
+          <Link
+            href={issue.url}
+            target="_blank"
+            rel="noreferrer"
+            className="mono"
+            title={`Open Issue #${issue.number} on GitHub`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontWeight: tokens.fontWeightSemibold,
+              flexShrink: 0
+            }}
+          >
+            #{issue.number} <Open16Regular style={{ width: 12, height: 12 }} aria-hidden="true" />
+          </Link>
+          <Text weight="semibold">{issue.title}</Text>
+        </div>
+
+        <div className={styles.prMetaRow}>
+          <KanbanStatusBadge status={issue.kanbanStatus} />
+          {issue.priority && <PriorityBadge priority={issue.priority} />}
+          {issue.riskClass && <RiskClassBadge riskClass={issue.riskClass} />}
+          {!hasOpenPr && !hasDrift && (
+            <Badge appearance="outline" color="subtle" shape="rounded">
+              No PR yet
+            </Badge>
+          )}
+        </div>
+      </div>
+
+      {issue.boardDriftReason && (
+        <MessageBar intent={isClosed ? 'error' : 'warning'} layout="multiline">
+          <MessageBarBody>
+            <strong>Board drift:</strong> {issue.boardDriftReason}
+          </MessageBarBody>
+        </MessageBar>
+      )}
+
+      {issue.linkedPullRequests.length > 0 && (
+        <div className={styles.issuesRow}>
+          <BranchFork16Regular
+            style={{ color: tokens.colorNeutralForeground2, flexShrink: 0 }}
+            aria-hidden="true"
+          />
+          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+            Linked PRs:
+          </Text>
+          {issue.linkedPullRequests.map((prRef) => (
+            <LinkedPullRequestPill
+              key={prRef.number}
+              prRef={prRef}
+              className={styles.issuePillLink}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className={styles.prMetaRow}>
+        {issue.area && (
+          <Badge appearance="tint" color="subtle" shape="rounded">
+            {issue.area}
+          </Badge>
+        )}
+        {issue.issueType && (
+          <Badge appearance="tint" color="subtle" shape="rounded">
+            {issue.issueType}
+          </Badge>
+        )}
+        {issue.writer && (
+          <span className={`${styles.monoPill} mono`}>Writer: {issue.writer}</span>
+        )}
+        {isClosed && (
+          <Badge appearance="tint" color="danger" shape="rounded">
+            Closed
+          </Badge>
+        )}
+        <Text
+          size={200}
+          className="tabular"
+          style={{ color: tokens.colorNeutralForeground2 }}
+          title={formatAbsoluteEn(issue.updatedAtUtc)}
+        >
+          Updated {formatRelativeTimeEn(issue.updatedAtUtc, nowMs)}
+        </Text>
+      </div>
+
+      {issue.lockedAreas.length > 0 && (
+        <div className={styles.prMetaRow}>
+          <LockClosed16Regular
+            style={{ width: 14, height: 14, color: tokens.colorNeutralForeground2 }}
+            aria-hidden="true"
+          />
+          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+            Locked Areas:
+          </Text>
+          {issue.lockedAreas.map((area) => (
+            <span
+              key={area}
+              className={`${styles.monoPill} mono`}
+              style={
+                issue.riskClass === 'H'
+                  ? {
+                      borderColor: tokens.colorPaletteRedBorderActive,
+                      color: tokens.colorPaletteRedForeground1
+                    }
+                  : undefined
+              }
+            >
+              {area}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {issue.participants.length > 0 && (
+        <div className={styles.participantsBlock}>
+          <div className={styles.participantsHeader}>
+            <Bot16Regular aria-hidden="true" />
+            <span>Participating Agents, Roles &amp; Models</span>
+          </div>
+          <div className={styles.participantsRow}>
+            {issue.participants.map((participant) => (
+              <ParticipantPill
+                key={`${participant.role}-${participant.tool}-${participant.profile}`}
+                participant={participant}
+                isDark={isDark}
+                styles={styles}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KanbanStatusBadge({ status }: { status: string }) {
+  switch (status.toLowerCase()) {
+    case 'in review':
+      return (
+        <Badge appearance="tint" color="brand" shape="rounded">
+          {status}
+        </Badge>
+      );
+    case 'in progress':
+      return (
+        <Badge appearance="tint" color="warning" shape="rounded">
+          {status}
+        </Badge>
+      );
+    case 'ready':
+      return (
+        <Badge appearance="tint" color="success" shape="rounded">
+          {status}
+        </Badge>
+      );
+    default:
+      return (
+        <Badge appearance="tint" color="subtle" shape="rounded">
+          {status}
+        </Badge>
+      );
+  }
+}
+
+function PriorityBadge({ priority }: { priority: string }) {
+  const normalized = priority.toUpperCase();
+  const color: 'danger' | 'warning' | 'subtle' =
+    normalized === 'P0' ? 'danger' : normalized === 'P1' ? 'warning' : 'subtle';
+  return (
+    <Badge appearance="tint" color={color} shape="rounded">
+      {normalized}
+    </Badge>
+  );
+}
+
+function LinkedPullRequestPill({
+  prRef,
+  className
+}: {
+  prRef: LinkedPullRequestRef;
+  className: string;
+}) {
+  return (
+    <Link
+      href={prRef.url}
+      target="_blank"
+      rel="noreferrer"
+      className={className}
+      title={`Open PR #${prRef.number} on GitHub`}
+    >
+      <span className="mono" style={{ fontWeight: tokens.fontWeightSemibold }}>
+        PR #{prRef.number}
+      </span>
+      <Badge
+        appearance="tint"
+        color={prRef.isMerged ? 'informative' : 'brand'}
+        shape="rounded"
+        size="small"
+      >
+        {prRef.stateLabel}
+      </Badge>
+      <Open16Regular style={{ width: 12, height: 12, flexShrink: 0 }} aria-hidden="true" />
+    </Link>
   );
 }

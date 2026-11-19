@@ -74,7 +74,7 @@ public sealed class PipelineAndWorktreeProviderTests
                     : new CommandResult(0, mergedPrJson, string.Empty);
             }
 
-            if (fileName == "gh" && args.Contains("project"))
+            if (fileName == "gh" && (args.Contains("project") || args.Contains("graphql")))
             {
                 return new CommandResult(1, string.Empty, "missing required scopes [read:project]");
             }
@@ -214,7 +214,7 @@ public sealed class PipelineAndWorktreeProviderTests
                 return new CommandResult(0, issuesJson, string.Empty);
             }
 
-            if (fileName == "gh" && args.Contains("project"))
+            if (fileName == "gh" && (args.Contains("project") || args.Contains("graphql")))
             {
                 return new CommandResult(1, string.Empty, "missing scope");
             }
@@ -312,7 +312,7 @@ public sealed class PipelineAndWorktreeProviderTests
                 return new CommandResult(0, "[]", string.Empty);
             }
 
-            if (fileName == "gh" && args.Contains("project"))
+            if (fileName == "gh" && (args.Contains("project") || args.Contains("graphql")))
             {
                 return new CommandResult(1, string.Empty, "missing scope");
             }
@@ -334,6 +334,183 @@ public sealed class PipelineAndWorktreeProviderTests
         var pr502 = Assert.Single(result.PullRequests, p => p.Number == 502);
         Assert.Contains("Merge conflict with main — merge main and resolve conflicts", pr502.MergeBlockReasons);
         Assert.Contains("Check failing: SonarCloud Code Analysis", pr502.MergeBlockReasons);
+    }
+
+    [Fact]
+    public async Task PipelineProvider_LoadsActiveKanbanIssuesEnrichesFromPrsAndDetectsBoardDrift()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var recentIso = now.AddHours(-2).ToString("O");
+        var staleIso = now.AddDays(-10).ToString("O");
+        var closedIso = now.AddDays(-15).ToString("O");
+
+        var openPrJson = $$"""
+            [
+              {
+                "number": 501,
+                "title": "ci(quality): enforce whitespace gate (RF-10 slice 3)",
+                "url": "https://github.com/ahuelsmann/MOBAflow/pull/501",
+                "headRefName": "claude/rf10-gate",
+                "isDraft": true,
+                "mergeStateStatus": "BLOCKED",
+                "mergeable": "MERGEABLE",
+                "reviewDecision": "",
+                "autoMergeRequest": null,
+                "updatedAt": "{{recentIso}}",
+                "body": "## Slice header\n\n- Issue: #451\n- Risk class (H/M/L): L\n- Locked areas: `quality.yml`, `CONTRIBUTING.md`\n- Writer: COO (Claude)",
+                "statusCheckRollup": [],
+                "comments": [],
+                "closingIssuesReferences": [],
+                "projectItems": []
+              }
+            ]
+            """;
+
+        var graphQlJson = $$"""
+            {
+              "data": {
+                "user": {
+                  "projectV2": {
+                    "items": {
+                      "nodes": [
+                        {
+                          "fieldValues": {
+                            "nodes": [
+                              { "name": "In progress", "field": { "name": "Status" } },
+                              { "name": "P0", "field": { "name": "Priority" } },
+                              { "name": "Infrastructure", "field": { "name": "Area" } },
+                              { "name": "Refactoring", "field": { "name": "Type" } }
+                            ]
+                          },
+                          "content": {
+                            "__typename": "Issue",
+                            "number": 47,
+                            "title": "Quality and refactoring programme: RF-01 through RF-18",
+                            "url": "https://github.com/ahuelsmann/MOBAflow/issues/47",
+                            "state": "OPEN",
+                            "updatedAt": "{{recentIso}}"
+                          }
+                        },
+                        {
+                          "fieldValues": {
+                            "nodes": [
+                              { "name": "In progress", "field": { "name": "Status" } }
+                            ]
+                          },
+                          "content": {
+                            "__typename": "Issue",
+                            "number": 136,
+                            "title": "Text-to-Speech interface modularization",
+                            "url": "https://github.com/ahuelsmann/MOBAflow/issues/136",
+                            "state": "OPEN",
+                            "updatedAt": "{{staleIso}}"
+                          }
+                        },
+                        {
+                          "fieldValues": {
+                            "nodes": [
+                              { "name": "In progress", "field": { "name": "Status" } }
+                            ]
+                          },
+                          "content": {
+                            "__typename": "Issue",
+                            "number": 266,
+                            "title": "ci: keep documentation consistent within each pull request",
+                            "url": "https://github.com/ahuelsmann/MOBAflow/issues/266",
+                            "state": "CLOSED",
+                            "updatedAt": "{{closedIso}}"
+                          }
+                        },
+                        {
+                          "fieldValues": {
+                            "nodes": [
+                              { "name": "In progress", "field": { "name": "Status" } }
+                            ]
+                          },
+                          "content": {
+                            "__typename": "Issue",
+                            "number": 451,
+                            "title": "RF-10: Formatting baseline and gate",
+                            "url": "https://github.com/ahuelsmann/MOBAflow/issues/451",
+                            "state": "OPEN",
+                            "updatedAt": "{{recentIso}}"
+                          }
+                        },
+                        {
+                          "fieldValues": {
+                            "nodes": [
+                              { "name": "In review", "field": { "name": "Status" } }
+                            ]
+                          },
+                          "content": {
+                            "__typename": "PullRequest",
+                            "number": 501,
+                            "title": "ci(quality): enforce whitespace gate (RF-10 slice 3)",
+                            "url": "https://github.com/ahuelsmann/MOBAflow/pull/501",
+                            "state": "OPEN",
+                            "isDraft": true,
+                            "updatedAt": "{{recentIso}}"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        var runner = new FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("open"))
+            {
+                return new CommandResult(0, openPrJson, string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("merged"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("issue"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("graphql"))
+            {
+                return new CommandResult(0, graphQlJson, string.Empty);
+            }
+
+            return new CommandResult(1, string.Empty, "unexpected");
+        });
+
+        var provider = new PipelineProvider(runner);
+        var result = await provider.GetPipelineAsync(new DashboardOptions(), CancellationToken.None);
+
+        Assert.True(result.ProjectBoardAvailable);
+        Assert.Equal("In review", Assert.Single(result.PullRequests, p => p.Number == 501).ProjectStatus);
+
+        Assert.Equal([451, 47, 136, 266], result.ActiveIssues.Select(i => i.Number).ToArray());
+
+        var issue451 = result.ActiveIssues[0];
+        Assert.Equal("In progress", issue451.KanbanStatus);
+        Assert.Equal("L", issue451.RiskClass);
+        Assert.Equal(["quality.yml", "CONTRIBUTING.md"], issue451.LockedAreas);
+        Assert.Single(issue451.LinkedPullRequests, p => p.Number == 501);
+        Assert.Null(issue451.BoardDriftReason);
+
+        var issue47 = result.ActiveIssues[1];
+        Assert.Equal("P0", issue47.Priority);
+        Assert.Equal("Infrastructure", issue47.Area);
+        Assert.Empty(issue47.LinkedPullRequests);
+        Assert.Null(issue47.BoardDriftReason);
+
+        var issue136 = result.ActiveIssues[2];
+        Assert.Equal("No active PR or Writer (stale on board)", issue136.BoardDriftReason);
+
+        var issue266 = result.ActiveIssues[3];
+        Assert.Equal("Closed on GitHub — move to Done on Kanban", issue266.BoardDriftReason);
     }
 
     [Fact]
