@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   Badge,
   Button,
@@ -11,6 +12,8 @@ import {
 import {
   ArrowRight16Regular,
   CheckmarkCircle16Regular,
+  ChevronDown16Regular,
+  ChevronUp16Regular,
   Folder16Regular,
   ShieldTask16Regular,
   Warning16Regular
@@ -109,34 +112,55 @@ interface HygieneAndSyncPanelProps {
   onOpenMatrixSync: (onlyDrift: boolean) => void;
 }
 
+const MAX_COLLAPSED_STALE_WORKTREES = 3;
+
 export function HygieneAndSyncPanel({
   governance,
   hygiene,
   onOpenMatrixSync
 }: HygieneAndSyncPanelProps) {
   const styles = useStyles();
+  const [showAllStale, setShowAllStale] = useState(false);
+
   const driftTotal = governance.driftCount + governance.missingCount;
+
+  const staleWorktrees = hygiene.worktrees.filter((w) => w.status === 'stale');
+  const otherWorktrees = hygiene.worktrees.filter((w) => w.status !== 'stale');
+  const canCollapseStale = staleWorktrees.length > MAX_COLLAPSED_STALE_WORKTREES;
+  const visibleStaleWorktrees =
+    canCollapseStale && !showAllStale
+      ? staleWorktrees.slice(0, MAX_COLLAPSED_STALE_WORKTREES)
+      : staleWorktrees;
+  const visibleWorktrees = [...visibleStaleWorktrees, ...otherWorktrees];
 
   return (
     <div className={styles.stack}>
       {/* Rules State · Actual vs. Target */}
-      <Card className={styles.card} appearance="filled" aria-label="Rules State Actual vs Target">
+      <Card
+        id="section-rules"
+        className={styles.card}
+        appearance="filled"
+        aria-label="Rules State Actual vs Target"
+      >
         <div className={styles.header}>
           <div className={styles.titleGroup}>
             <ShieldTask16Regular aria-hidden="true" />
             <h2 className={styles.title}>Rules State · Actual vs. Target</h2>
-            <GlossaryTooltip term="Drift" showIcon />
+            <GlossaryTooltip term="Drift" iconOnly />
           </div>
 
           {driftTotal === 0 ? (
-            <Badge appearance="tint" color="success" shape="rounded" icon={<CheckmarkCircle16Regular />}>
+            <Badge
+              appearance="tint"
+              color="success"
+              shape="rounded"
+              icon={<CheckmarkCircle16Regular />}
+            >
               In Sync
             </Badge>
           ) : (
             <Badge appearance="tint" color="warning" shape="rounded" icon={<Warning16Regular />}>
-              <span className="tabular">
-                {driftTotal === 1 ? '1 Deviation' : `${driftTotal} Deviations`}
-              </span>
+              <span className="tabular">{driftTotal} Out of Sync</span>
             </Badge>
           )}
         </div>
@@ -164,16 +188,21 @@ export function HygieneAndSyncPanel({
           onClick={() => onOpenMatrixSync(driftTotal > 0)}
           style={{ justifyContent: 'space-between' }}
         >
-          {driftTotal > 0 ? 'Review Deviations' : 'Open Matrix & Rules'}
+          {driftTotal > 0 ? 'Review Drift' : 'Open Matrix & Rules'}
         </Button>
       </Card>
 
       {/* Session Hygiene · Actual vs. Target */}
-      <Card className={styles.card} appearance="filled" aria-label="Session Hygiene per Tool">
+      <Card
+        id="section-sessions"
+        className={styles.card}
+        appearance="filled"
+        aria-label="Session Hygiene per Tool"
+      >
         <div className={styles.header}>
           <h2 className={styles.title}>Session Hygiene · Actual vs. Target</h2>
           <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-            Target: 1 standing monitor
+            Target: 1 monitor / tool
           </Text>
         </div>
 
@@ -221,12 +250,17 @@ export function HygieneAndSyncPanel({
       </Card>
 
       {/* Git Worktrees (MOBAflow) */}
-      <Card className={styles.card} appearance="filled" aria-label="Git Worktrees MOBAflow">
+      <Card
+        id="section-worktrees"
+        className={styles.card}
+        appearance="filled"
+        aria-label="Git Worktrees MOBAflow"
+      >
         <div className={styles.header}>
           <div className={styles.titleGroup}>
             <Folder16Regular aria-hidden="true" />
             <h2 className={styles.title}>Git Worktrees (MOBAflow)</h2>
-            <GlossaryTooltip term="Worktree" showIcon />
+            <GlossaryTooltip term="Worktree" iconOnly />
           </div>
 
           {hygiene.staleWorktreeCount > 0 ? (
@@ -247,7 +281,7 @@ export function HygieneAndSyncPanel({
         )}
 
         <div className={styles.list}>
-          {hygiene.worktrees.map((wt) => (
+          {visibleWorktrees.map((wt) => (
             <div key={`${wt.folderName}-${wt.branch}`} className={styles.row}>
               <div className={styles.rowMain}>
                 <Text weight="semibold" size={200} className="mono" title={wt.branch}>
@@ -278,6 +312,21 @@ export function HygieneAndSyncPanel({
             </div>
           ))}
         </div>
+
+        {canCollapseStale && (
+          <Button
+            size="small"
+            appearance="subtle"
+            icon={showAllStale ? <ChevronUp16Regular /> : <ChevronDown16Regular />}
+            iconPosition="after"
+            onClick={() => setShowAllStale((prev) => !prev)}
+            style={{ justifyContent: 'space-between' }}
+          >
+            {showAllStale
+              ? 'Show fewer stale worktrees'
+              : `Show all ${staleWorktrees.length} stale worktrees`}
+          </Button>
+        )}
       </Card>
     </div>
   );

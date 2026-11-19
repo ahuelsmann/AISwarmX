@@ -53,4 +53,28 @@ public sealed class PrParticipantExtractorTests
         Assert.Contains(participants, p => p.Role == "Companion / Auto-Review" && p.Status == "Quota Limit");
         Assert.Contains(participants, p => p.Role == "Final Reviewer" && p.Status == "Blocked");
     }
+
+    [Fact]
+    public void Extract_UsesExplicitSliceHeaderWriterProfileEvenWhenTemplateMentionsP1ToP4()
+    {
+        var body = """
+            ## Slice header
+
+            - Issue: #451
+            - Risk class (H/M/L): L
+            - Locked areas: `.editorconfig`, `AGENTS.md`, `plans/451-formatting-baseline.md`
+            - Writer: P4 slice builder (Claude)
+            - Companion / review profiles (P1-P4, or none for class L): none (class L)
+
+            🤖 Generated with [Claude Code](https://claude.com/claude-code)
+            """;
+
+        var participants = PrParticipantExtractor.Extract("claude/rf10-rules", body, []);
+
+        var writer = Assert.Single(participants, p => p.Role == "Writer");
+        Assert.Equal("P4", writer.Profile);
+        Assert.Equal("Claude Fable 5.2", writer.Model);
+        Assert.Equal("Claude Code", writer.Tool);
+        Assert.Equal("Slice Header", writer.EvidenceSource);
+    }
 }

@@ -1,8 +1,13 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
-import type { DashboardSnapshot } from '../types/dashboard';
+import type {
+  ConfigDocContentResponse,
+  ConfigDocsCatalogResponse,
+  DashboardSnapshot,
+  RuleDiffResponse
+} from '../types/dashboard';
 
 function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): DashboardSnapshot {
   const nowIso = new Date().toISOString();
@@ -11,7 +16,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
     readOnly: true,
     bindAddress: 'http://127.0.0.1:5179',
     overallStatus: 'warnings',
-    warningCount: 3,
+    warningCount: 7,
     monitors: {
       generatedAtUtc: nowIso,
       source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
@@ -74,7 +79,8 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
         {
           role: 'Decision & Steering Triad',
           profiles: 'P1 (COO) + P2 (CPM/TD) + P3 (Product/UX)',
-          responsibility: 'Cross-model steering for slice cutting, risk classification, design Go and escalations'
+          responsibility:
+            'Cross-model steering for slice cutting, risk classification, design Go and escalations'
         },
         {
           role: 'Chief Operating Officer (COO)',
@@ -101,7 +107,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           syncStatus: 'drift',
           repoHash: '5df3fc1eba23',
           localHash: '4c75aab1d12b',
-          driftSummary: 'Content differs (+2/-1 lines)'
+          driftSummary: 'Content differs (+1/-1 lines)'
         },
         {
           tool: 'Antigravity',
@@ -146,8 +152,8 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           stateLabel: 'Draft',
           isDraft: true,
           autoMergeEnabled: false,
-          mergeState: 'BEHIND',
-          ciStatus: 'pass',
+          mergeState: 'UNSTABLE',
+          ciStatus: 'pending',
           sonarStatus: 'pass',
           riskClass: 'L',
           lockedAreas: ['AGENTS.md'],
@@ -162,7 +168,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
               profile: 'P2',
               model: 'GPT-6 Astra',
               status: 'Implemented',
-              evidenceSource: 'Branch'
+              evidenceSource: 'Slice Header'
             }
           ],
           linkedIssues: [
@@ -220,7 +226,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
     hygiene: {
       generatedAtUtc: nowIso,
       source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
-      staleWorktreeCount: 1,
+      staleWorktreeCount: 4,
       sessions: [
         {
           tool: 'Claude Code',
@@ -241,9 +247,33 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
       ],
       worktrees: [
         {
-          folderName: 'artifacts/worktrees/old-merged',
-          branch: 'codex/old-merged',
+          folderName: 'artifacts/worktrees/old-1',
+          branch: 'codex/old-1',
+          headShort: 'a12e6061',
+          isMain: false,
+          status: 'stale',
+          linkedPrNumber: null
+        },
+        {
+          folderName: 'artifacts/worktrees/old-2',
+          branch: 'codex/old-2',
+          headShort: 'a12e6062',
+          isMain: false,
+          status: 'stale',
+          linkedPrNumber: null
+        },
+        {
+          folderName: 'artifacts/worktrees/old-3',
+          branch: 'codex/old-3',
           headShort: 'a12e6063',
+          isMain: false,
+          status: 'stale',
+          linkedPrNumber: null
+        },
+        {
+          folderName: 'artifacts/worktrees/old-4',
+          branch: 'codex/old-4',
+          headShort: 'a12e6064',
           isMain: false,
           status: 'stale',
           linkedPrNumber: null
@@ -262,91 +292,248 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
   };
 }
 
-describe('MOBAdev Agent Network Dashboard', () => {
+function createDiffFixture(): RuleDiffResponse {
+  return {
+    tool: 'Antigravity',
+    kind: 'agent',
+    fileName: 'head-of-ai-strategy.md',
+    syncStatus: 'drift',
+    targetHash: '5df3fc1eba23',
+    actualHash: '4c75aab1d12b',
+    addedLines: 1,
+    removedLines: 1,
+    truncated: false,
+    lines: [
+      { kind: 'hunk', targetLineNumber: null, actualLineNumber: null, text: '@@ Target L4 / Actual L4 @@' },
+      { kind: 'removed', targetLineNumber: 4, actualLineNumber: null, text: 'Line Old' },
+      { kind: 'added', targetLineNumber: null, actualLineNumber: 4, text: 'Line New' }
+    ]
+  };
+}
+
+function stubDashboardFetch(snapshot = createSnapshotFixture()) {
+  const nowIso = new Date().toISOString();
+
+  const mobaDevCatalog: ConfigDocsCatalogResponse = {
+    generatedAtUtc: nowIso,
+    scope: 'mobadev',
+    repository: 'ahuelsmann/MOBAdev',
+    source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
+    files: [
+      {
+        scope: 'mobadev',
+        relativePath: 'manifest.md',
+        fileName: 'manifest.md',
+        group: 'Core',
+        repository: 'ahuelsmann/MOBAdev',
+        sizeBytes: 120,
+        lastModifiedUtc: nowIso
+      }
+    ]
+  };
+
+  const mobaFlowCatalog: ConfigDocsCatalogResponse = {
+    generatedAtUtc: nowIso,
+    scope: 'mobaflow',
+    repository: 'ahuelsmann/MOBAflow',
+    source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
+    files: [
+      {
+        scope: 'mobaflow',
+        relativePath: 'AGENTS.md',
+        fileName: 'AGENTS.md',
+        group: 'Core Entry Points',
+        repository: 'ahuelsmann/MOBAflow',
+        sizeBytes: 240,
+        lastModifiedUtc: nowIso
+      },
+      {
+        scope: 'mobaflow',
+        relativePath: '.github/instructions/git-worktree-isolation.instructions.md',
+        fileName: 'git-worktree-isolation.instructions.md',
+        group: 'Repository Instructions',
+        repository: 'ahuelsmann/MOBAflow',
+        sizeBytes: 310,
+        lastModifiedUtc: nowIso
+      }
+    ]
+  };
+
+  const docContents: Record<string, ConfigDocContentResponse> = {
+    'mobadev::manifest.md': {
+      scope: 'mobadev',
+      relativePath: 'manifest.md',
+      fileName: 'manifest.md',
+      group: 'Core',
+      repository: 'ahuelsmann/MOBAdev',
+      sizeBytes: 120,
+      lineCount: 4,
+      lastModifiedUtc: nowIso,
+      truncated: false,
+      content: '# MOBAdev Manifest\n\nCentral configuration baseline for `MOBAdev`.'
+    },
+    'mobaflow::AGENTS.md': {
+      scope: 'mobaflow',
+      relativePath: 'AGENTS.md',
+      fileName: 'AGENTS.md',
+      group: 'Core Entry Points',
+      repository: 'ahuelsmann/MOBAflow',
+      sizeBytes: 240,
+      lineCount: 3,
+      lastModifiedUtc: nowIso,
+      truncated: false,
+      content: '# AGENTS\n\nMerge, never rebase.'
+    },
+    'mobaflow::.github/instructions/git-worktree-isolation.instructions.md': {
+      scope: 'mobaflow',
+      relativePath: '.github/instructions/git-worktree-isolation.instructions.md',
+      fileName: 'git-worktree-isolation.instructions.md',
+      group: 'Repository Instructions',
+      repository: 'ahuelsmann/MOBAflow',
+      sizeBytes: 310,
+      lineCount: 3,
+      lastModifiedUtc: nowIso,
+      truncated: false,
+      content: '# Worktree Isolation\n\nOne dedicated worktree per active slice.'
+    }
+  };
+
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url.startsWith('/api/governance/diff')) {
+        return { ok: true, json: async () => createDiffFixture() };
+      }
+
+      if (url.startsWith('/api/docs/content')) {
+        const params = new URLSearchParams(url.split('?')[1] ?? '');
+        const key = `${params.get('scope')}::${params.get('path')}`;
+        const doc = docContents[key];
+        if (!doc) {
+          return { ok: false, status: 404, json: async () => ({}) };
+        }
+        return { ok: true, json: async () => doc };
+      }
+
+      if (url.startsWith('/api/docs')) {
+        const params = new URLSearchParams(url.split('?')[1] ?? '');
+        const scope = params.get('scope');
+        return {
+          ok: true,
+          json: async () => (scope === 'mobaflow' ? mobaFlowCatalog : mobaDevCatalog)
+        };
+      }
+
+      return { ok: true, json: async () => snapshot };
+    })
+  );
+}
+
+describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     window.localStorage.clear();
   });
 
-  it('renders live monitor states, compact Decision & Steering Triad strip, PR pipeline with linked issues & participants, and recently merged toggle', async () => {
+  it(
+    'renders Agent Swarm header, compact monitor cards, 1-line Triad with Code WIP, PR gates & collapsible stale worktrees',
+    async () => {
     const user = userEvent.setup();
-    const fixture = createSnapshotFixture();
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => fixture
-      })
-    );
+    stubDashboardFetch();
 
     render(<App />);
 
-    expect(await screen.findByText('Read-Only · 127.0.0.1')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' })
+    ).toBeInTheDocument();
+    expect(screen.getByText('Read-Only · 127.0.0.1')).toBeInTheDocument();
 
-    // Row 1: Monitor cards
+    // Row 1: Compact monitor cards with human-friendly RRULE label
     expect(screen.getByRole('heading', { name: 'Claude Monitor' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Codex Monitor' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Antigravity Monitor' })).toBeInTheDocument();
     expect(screen.getByText(/Reset: 12am \(Europe\/Berlin\)/)).toBeInTheDocument();
+    expect(screen.getByText('Active · Hourly')).toBeInTheDocument();
     expect(screen.getByText('Standby')).toBeInTheDocument();
     expect(screen.getByText('Active / Busy')).toBeInTheDocument();
 
-    // Row 2: Compact Decision & Steering Triad bar
+    // Row 2: Compact Triad bar with Code WIP (Class L docs excluded from code WIP limit)
     expect(screen.getByRole('heading', { name: 'Decision & Steering Triad' })).toBeInTheDocument();
     expect(screen.getByText('Quorum 2 / 3 · 1 Quota Pause')).toBeInTheDocument();
-    expect(screen.getByText('Active Slices: 1 / 3')).toBeInTheDocument();
-    expect(screen.getByText('COO')).toBeInTheDocument();
-    expect(screen.getByText('CPM & TD')).toBeInTheDocument();
-    expect(screen.getByText('AI Strategy')).toBeInTheDocument();
+    expect(screen.getByText('Code WIP: 0 / 3 (+1 Docs)')).toBeInTheDocument();
     expect(screen.getByText('Escalation: Human')).toBeInTheDocument();
 
-    // Row 3: Pipeline with linked GitHub issue, participant chips & missing scope notice
+    // Row 3: PR #492 with Checks Pending (UNSTABLE), Merge Gates, linked issue & single-line participant pill
     expect(screen.getByText('Repository: ahuelsmann/MOBAflow')).toBeInTheDocument();
     expect(screen.getByText('#492')).toBeInTheDocument();
+    expect(screen.getByText('Checks Pending')).toBeInTheDocument();
+    expect(screen.getByText('Gates 1/5:')).toBeInTheDocument();
     expect(screen.getByText('Issue #366')).toBeInTheDocument();
-    expect(screen.getByText(/RF-09: Coverage and mutation ratchets/)).toBeInTheDocument();
-    expect(screen.getByText(/ChatGPT Codex · GPT-6 Astra/)).toBeInTheDocument();
+    expect(screen.getByText('GPT-6 Astra')).toBeInTheDocument();
     expect(screen.getByText(/missing read:project scope/i)).toBeInTheDocument();
 
-    // Hygiene & stale worktree warnings
-    expect(screen.getByText('2 / 1 Warning')).toBeInTheDocument();
-    expect(screen.getByText('Stale / Merged')).toBeInTheDocument();
+    // Stale worktrees collapsed when > 3 stale
+    expect(screen.getByText('codex/old-1')).toBeInTheDocument();
+    expect(screen.queryByText('codex/old-4')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Show all 4 stale worktrees/i }));
+    expect(screen.getByText('codex/old-4')).toBeInTheDocument();
 
     // Switch to Recently Merged tasks and verify multi-model participation
     await user.click(screen.getByRole('button', { name: /Recently Merged \(1\)/i }));
     expect(screen.getByText('#495')).toBeInTheDocument();
     expect(screen.getByText('Final Reviewer')).toBeInTheDocument();
-    expect(screen.getByText(/Claude Code · Claude Opus 5.5/)).toBeInTheDocument();
-    expect(screen.getByText(/Antigravity · Gemini 4 Argon/)).toBeInTheDocument();
-  });
+    expect(screen.getByText('Claude Opus 5.5')).toBeInTheDocument();
+    expect(screen.getByText('Gemini 4 Argon')).toBeInTheDocument();
+    },
+    10_000
+  );
 
-  it('navigates from Rules State deviations to Matrix & Rules pre-filtered to Drift Only, checks Actual/Target hash order, and switches themes', async () => {
+  it(
+    'opens Warning Breakdown popover, jumps to Matrix & Rules Diff viewer, displays Git Strategy card and links to instructions',
+    async () => {
     const user = userEvent.setup();
-    const fixture = createSnapshotFixture();
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => fixture
-      })
-    );
+    stubDashboardFetch();
 
     render(<App />);
-    const driftBtn = await screen.findByRole('button', { name: /Review Deviations/i });
-    await user.click(driftBtn);
+    const warnBtn = await screen.findByRole('button', { name: /7 Warnings — show breakdown/i });
+    await user.click(warnBtn);
 
-    // Pre-filtered to drift only: Actual / Target labels and 1 Entry count
-    expect(screen.getByRole('heading', { name: /Rules State · Actual vs\. Target/i })).toBeInTheDocument();
+    expect(screen.getByText('Warning Breakdown')).toBeInTheDocument();
+    expect(screen.getByText('1 Rule Drift / Missing')).toBeInTheDocument();
+    expect(screen.getByText('4 Stale Worktrees')).toBeInTheDocument();
+    expect(screen.getByText('1 Extra Session')).toBeInTheDocument();
+    expect(screen.getByText('1 Quota Pause')).toBeInTheDocument();
+
+    // Jump straight from popover to Matrix & Rules pre-filtered to Drift
+    const popoverRegion = screen.getByRole('region', { name: 'Warning breakdown' });
+    await user.click(within(popoverRegion).getByRole('button', { name: 'Review Drift' }));
+
+    expect(
+      screen.getByRole('heading', { name: /Rules State · Actual vs\. Target/i })
+    ).toBeInTheDocument();
     expect(screen.getByText('1 Entry')).toBeInTheDocument();
     expect(screen.getByText('Actual: 4c75aab1d12b')).toBeInTheDocument();
     expect(screen.getByText('Target: 5df3fc1eba23')).toBeInTheDocument();
     expect(screen.getByText('head-of-ai-strategy.md')).toBeInTheDocument();
-    expect(screen.queryByText('mobaflow-agent-network.md')).not.toBeInTheDocument();
 
-    // Toggle off drift-only filter -> 2 Entries & synced item appears
-    await user.click(screen.getByRole('button', { name: /Drift Only/i }));
-    expect(screen.getByText('2 Entries')).toBeInTheDocument();
-    expect(screen.getByText('mobaflow-agent-network.md')).toBeInTheDocument();
+    // Expand read-only diff preview
+    await user.click(screen.getByRole('button', { name: 'Show Diff' }));
+    expect(await screen.findByText('Target (MOBAdev) vs. Actual (Local)')).toBeInTheDocument();
+    expect(screen.getByText('+1 added')).toBeInTheDocument();
+    expect(screen.getByText('-1 removed')).toBeInTheDocument();
+    expect(screen.getByText('Line Old')).toBeInTheDocument();
+    expect(screen.getByText('Line New')).toBeInTheDocument();
+
+    // Verify Git & Delivery Strategy reference card & jump to MOBAflow Instructions tab
+    expect(screen.getByRole('heading', { name: /Git & Delivery Strategy/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Worktree Rules' }));
+
+    expect(
+      await screen.findByRole('heading', { name: 'Worktree Isolation' })
+    ).toBeInTheDocument();
+    expect(screen.getByText('One dedicated worktree per active slice.')).toBeInTheDocument();
 
     // Theme switching
     await user.click(screen.getByRole('button', { name: 'Light' }));
@@ -354,7 +541,28 @@ describe('MOBAdev Agent Network Dashboard', () => {
 
     await user.click(screen.getByRole('button', { name: 'Dark' }));
     expect(document.documentElement.dataset.theme).toBe('dark');
-  });
+    },
+    15_000
+  );
+
+  it(
+    'renders read-only MOBAdev Config Markdown tab with Formatted and Raw views',
+    async () => {
+    const user = userEvent.setup();
+    stubDashboardFetch();
+
+    render(<App />);
+    await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+
+    await user.click(screen.getByRole('tab', { name: /MOBAdev Config/i }));
+    expect(await screen.findByRole('heading', { name: 'MOBAdev Manifest' })).toBeInTheDocument();
+    expect(screen.getByText(/Central configuration baseline for/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Raw' }));
+    expect(screen.getByText(/# MOBAdev Manifest/)).toBeInTheDocument();
+    },
+    10_000
+  );
 
   it('degrades gracefully when backend is unreachable', async () => {
     vi.stubGlobal(

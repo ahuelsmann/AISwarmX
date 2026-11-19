@@ -18,11 +18,14 @@ import {
   BranchRequest20Regular,
   Checkmark16Regular,
   CheckmarkCircle16Regular,
+  Circle16Regular,
   Clock16Regular,
   Dismiss16Regular,
+  DismissCircle16Regular,
   LockClosed16Regular,
   Merge16Regular,
   Open16Regular,
+  ShieldCheckmark16Regular,
   TicketDiagonal16Regular,
   Warning16Regular,
   WifiOff20Regular
@@ -81,10 +84,10 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: '8px',
-    padding: '14px 0',
+    padding: '12px 0',
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
     ':first-child': {
-      paddingTop: '4px',
+      paddingTop: '2px',
       borderTop: 'none'
     },
     ':last-child': {
@@ -131,11 +134,16 @@ const useStyles = makeStyles({
       ...shorthands.borderColor(tokens.colorBrandStroke1)
     }
   },
+  gatesRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '6px'
+  },
   participantsBlock: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '6px',
-    marginTop: '2px'
+    gap: '6px'
   },
   participantsHeader: {
     display: 'inline-flex',
@@ -145,26 +153,22 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground2
   },
-  participantsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
-    gap: '8px'
-  },
-  participantChip: {
+  participantsRow: {
     display: 'flex',
-    flexDirection: 'column',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '6px'
+  },
+  participantPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
     gap: '6px',
-    padding: '8px 10px',
+    padding: '3px 8px',
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground2,
-    border: `1px solid ${tokens.colorNeutralStroke2}`
-  },
-  participantTop: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: '6px',
-    flexWrap: 'wrap'
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    whiteSpace: 'nowrap',
+    maxWidth: '100%'
   },
   emptyState: {
     display: 'flex',
@@ -315,7 +319,13 @@ function PullRequestRow({
 
         <div className={styles.prMetaRow}>
           <PrStateBadge stateLabel={pr.stateLabel} isMerged={isMerged} />
-          {!isMerged && <MergeStateBadge mergeState={pr.mergeState} />}
+          {!isMerged && (
+            <MergeStateBadge
+              mergeState={pr.mergeState}
+              ciStatus={pr.ciStatus}
+              sonarStatus={pr.sonarStatus}
+            />
+          )}
           <RiskClassBadge riskClass={pr.riskClass} />
         </div>
       </div>
@@ -370,6 +380,8 @@ function PullRequestRow({
         </Text>
       </div>
 
+      <MergeGatesStrip pr={pr} isMerged={isMerged} styles={styles} />
+
       {pr.lockedAreas.length > 0 && (
         <div className={styles.prMetaRow}>
           <LockClosed16Regular
@@ -404,9 +416,9 @@ function PullRequestRow({
             No agent evidence recorded on this PR yet.
           </Text>
         ) : (
-          <div className={styles.participantsGrid}>
+          <div className={styles.participantsRow}>
             {pr.participants.map((participant) => (
-              <ParticipantChip
+              <ParticipantPill
                 key={`${participant.role}-${participant.tool}-${participant.profile}`}
                 participant={participant}
                 isDark={isDark}
@@ -416,6 +428,120 @@ function PullRequestRow({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+type GateState = 'pass' | 'pending' | 'fail' | 'todo';
+
+interface GateStep {
+  label: string;
+  state: GateState;
+}
+
+function MergeGatesStrip({
+  pr,
+  isMerged,
+  styles
+}: {
+  pr: PullRequestInfo;
+  isMerged: boolean;
+  styles: ReturnType<typeof useStyles>;
+}) {
+  const hasWriter = pr.participants.some((p) => p.role === 'Writer');
+  const companions = pr.participants.filter((p) => p.role.includes('Companion'));
+  const finalReviews = pr.participants.filter((p) => p.role === 'Final Reviewer');
+  const crossFamily = pr.participants.filter((p) => p.role.includes('Cross-Family'));
+
+  const companionState: GateState = companions.some(
+    (p) => p.status === 'Blocked'
+  )
+    ? 'fail'
+    : companions.some((p) => p.status === 'Findings' || p.status === 'Quota Limit')
+      ? 'pending'
+      : companions.some((p) => p.status === 'PASS' || p.status === 'Reviewed')
+        ? 'pass'
+        : 'todo';
+
+  const ciSonarState: GateState =
+    isMerged || (pr.ciStatus === 'pass' && pr.sonarStatus === 'pass')
+      ? 'pass'
+      : pr.ciStatus === 'fail' || pr.sonarStatus === 'fail'
+        ? 'fail'
+        : pr.ciStatus === 'pending' || pr.sonarStatus === 'pending'
+          ? 'pending'
+          : 'todo';
+
+  const finalState: GateState = finalReviews.some((p) => p.status === 'PASS')
+    ? 'pass'
+    : finalReviews.some((p) => p.status === 'Blocked')
+      ? 'fail'
+      : finalReviews.length > 0
+        ? 'pending'
+        : 'todo';
+
+  const crossState: GateState = crossFamily.some((p) => p.status === 'PASS')
+    ? 'pass'
+    : crossFamily.some((p) => p.status === 'Blocked')
+      ? 'fail'
+      : crossFamily.length > 0
+        ? 'pending'
+        : 'todo';
+
+  const gates: GateStep[] = [
+    { label: 'Writer', state: hasWriter ? 'pass' : 'todo' },
+    ...(pr.riskClass === 'H' || pr.riskClass === 'M'
+      ? [{ label: 'Companion', state: companionState }]
+      : []),
+    { label: 'CI & Sonar', state: ciSonarState },
+    { label: 'P1 Final', state: finalState },
+    { label: 'Cross-Family', state: crossState },
+    { label: 'Auto-Merge', state: isMerged || pr.autoMergeEnabled ? 'pass' : 'todo' }
+  ];
+
+  const passedCount = gates.filter((g) => g.state === 'pass').length;
+
+  return (
+    <div className={styles.gatesRow} aria-label={`Merge gates ${passedCount} of ${gates.length}`}>
+      <ShieldCheckmark16Regular
+        style={{ color: tokens.colorNeutralForeground2, flexShrink: 0 }}
+        aria-hidden="true"
+      />
+      <Text size={200} weight="semibold" style={{ color: tokens.colorNeutralForeground2 }}>
+        <span className="tabular">
+          Gates {passedCount}/{gates.length}:
+        </span>
+      </Text>
+      {gates.map((gate) => (
+        <Badge
+          key={gate.label}
+          appearance={gate.state === 'todo' ? 'outline' : 'tint'}
+          color={
+            gate.state === 'pass'
+              ? 'success'
+              : gate.state === 'pending'
+                ? 'warning'
+                : gate.state === 'fail'
+                  ? 'danger'
+                  : 'subtle'
+          }
+          shape="rounded"
+          size="small"
+          icon={
+            gate.state === 'pass' ? (
+              <CheckmarkCircle16Regular />
+            ) : gate.state === 'pending' ? (
+              <Clock16Regular />
+            ) : gate.state === 'fail' ? (
+              <DismissCircle16Regular />
+            ) : (
+              <Circle16Regular />
+            )
+          }
+        >
+          {gate.label}
+        </Badge>
+      ))}
     </div>
   );
 }
@@ -455,7 +581,7 @@ function LinkedIssuePill({ issue, className }: { issue: LinkedIssueInfo; classNa
   );
 }
 
-function ParticipantChip({
+function ParticipantPill({
   participant,
   isDark,
   styles
@@ -477,29 +603,22 @@ function ParticipantChip({
             ? 'brand'
             : 'subtle';
 
+  const summaryTitle = `${participant.agent} (${participant.tool} · ${participant.model}) · Evidence: ${participant.evidenceSource}`;
+
   return (
     <div
-      className={styles.participantChip}
-      title={`${participant.agent} · Evidence: ${participant.evidenceSource}`}
+      className={styles.participantPill}
+      title={summaryTitle}
+      aria-label={`${participant.profile} ${participant.role} ${participant.tool} · ${participant.model} ${participant.status}`}
     >
-      <div className={styles.participantTop}>
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <GlossaryTooltip term={participant.profile}>
-            <ProfileBadge profile={participant.profile} isDark={isDark} />
-          </GlossaryTooltip>
-          <RoleBadge role={participant.role} isDark={isDark} compact />
-        </div>
-        <Badge appearance="tint" color={statusColor} shape="rounded" size="small">
-          {participant.status}
-        </Badge>
-      </div>
-
-      <ModelBadge
-        model={participant.model}
-        toolPrefix={participant.tool}
-        isDark={isDark}
-        mono
-      />
+      <GlossaryTooltip term={participant.profile}>
+        <ProfileBadge profile={participant.profile} isDark={isDark} />
+      </GlossaryTooltip>
+      <RoleBadge role={participant.role} isDark={isDark} compact />
+      <ModelBadge model={participant.model} isDark={isDark} mono />
+      <Badge appearance="tint" color={statusColor} shape="rounded" size="small">
+        {participant.status}
+      </Badge>
     </div>
   );
 }
@@ -535,7 +654,15 @@ function PrStateBadge({ stateLabel, isMerged }: { stateLabel: string; isMerged: 
   );
 }
 
-function MergeStateBadge({ mergeState }: { mergeState: string }) {
+function MergeStateBadge({
+  mergeState,
+  ciStatus,
+  sonarStatus
+}: {
+  mergeState: string;
+  ciStatus: string;
+  sonarStatus: string;
+}) {
   switch (mergeState.toUpperCase()) {
     case 'CLEAN':
       return (
@@ -553,6 +680,21 @@ function MergeStateBadge({ mergeState }: { mergeState: string }) {
           </Badge>
         </GlossaryTooltip>
       );
+    case 'UNSTABLE': {
+      const hasFailure = ciStatus === 'fail' || sonarStatus === 'fail';
+      return (
+        <GlossaryTooltip term="UNSTABLE">
+          <Badge
+            appearance="tint"
+            color={hasFailure ? 'danger' : 'warning'}
+            shape="rounded"
+            icon={hasFailure ? <Warning16Regular /> : <Clock16Regular />}
+          >
+            {hasFailure ? 'Checks Failing' : 'Checks Pending'}
+          </Badge>
+        </GlossaryTooltip>
+      );
+    }
     case 'DIRTY':
     case 'BLOCKED':
       return (

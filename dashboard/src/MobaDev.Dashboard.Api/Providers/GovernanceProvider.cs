@@ -125,29 +125,121 @@ public sealed partial class GovernanceProvider
         return (roles, riskClasses);
     }
 
+    private static IReadOnlyList<(string Tool, string Kind, string RepoDir, string LocalDir)> GetSyncTargets(
+        ResolvedDashboardPaths paths) =>
+    [
+        (
+            "Antigravity",
+            "agent",
+            Path.Combine(paths.MobaDevRepoPath, "agents", "antigravity", "agents"),
+            Path.Combine(paths.GeminiConfigPath, "agents")
+        ),
+        (
+            "Antigravity",
+            "rule",
+            Path.Combine(paths.MobaDevRepoPath, "agents", "antigravity", "rules"),
+            Path.Combine(paths.GeminiConfigPath, "rules")
+        ),
+        (
+            "Claude Code",
+            "agent",
+            Path.Combine(paths.MobaDevRepoPath, "agents", "claude", "agents"),
+            Path.Combine(paths.ClaudeHomePath, "agents")
+        )
+    ];
+
+    public Task<RuleDiffResponse?> GetRuleDiffAsync(
+        ResolvedDashboardPaths paths,
+        string tool,
+        string kind,
+        string fileName,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (string.IsNullOrWhiteSpace(fileName) ||
+            fileName.Contains('/') ||
+            fileName.Contains('\\') ||
+            fileName.Contains("..", StringComparison.Ordinal) ||
+            fileName.Contains('\0') ||
+            !string.Equals(Path.GetFileName(fileName), fileName, StringComparison.Ordinal) ||
+            !fileName.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Invalid file name.", nameof(fileName));
+        }
+
+        var target = GetSyncTargets(paths).FirstOrDefault(t =>
+            string.Equals(t.Tool, tool, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(t.Kind, kind, StringComparison.OrdinalIgnoreCase));
+
+        if (string.IsNullOrEmpty(target.Tool))
+        {
+            return Task.FromResult<RuleDiffResponse?>(null);
+        }
+
+        var repoPath = Path.Combine(target.RepoDir, fileName);
+        var localPath = Path.Combine(target.LocalDir, fileName);
+
+        if (!PathWhitelistGuard.IsAllowedFilePath(repoPath) ||
+            !PathWhitelistGuard.IsAllowedFilePath(localPath))
+        {
+            throw new ArgumentException("File path is not permitted by whitelist.", nameof(fileName));
+        }
+
+        var repoExists = File.Exists(repoPath);
+        var localExists = File.Exists(localPath);
+        if (!repoExists && !localExists)
+        {
+            return Task.FromResult<RuleDiffResponse?>(null);
+        }
+
+        var repoRaw = repoExists ? File.ReadAllText(repoPath, Encoding.UTF8) : null;
+        var localRaw = localExists ? File.ReadAllText(localPath, Encoding.UTF8) : null;
+
+        var targetHash = repoRaw is not null ? ComputeNormalizedHash(repoRaw, paths.MobaFlowRepoPath) : null;
+        var actualHash = localRaw is not null ? ComputeNormalizedHash(localRaw, paths.MobaFlowRepoPath) : null;
+
+        var syncStatus = (targetHash, actualHash) switch
+        {
+            (not null, not null) when targetHash == actualHash => "synced",
+            (not null, not null) => "drift",
+            (not null, null) => "missing_local",
+            (null, not null) => "missing_repo",
+            _ => "missing_local"
+        };
+
+        var targetLines = repoRaw is not null
+            ? NormalizeContentForComparison(repoRaw, paths.MobaFlowRepoPath).Split('\n')
+            : [];
+        var actualLines = localRaw is not null
+            ? NormalizeContentForComparison(localRaw, paths.MobaFlowRepoPath).Split('\n')
+            : [];
+
+        const int contextLines = 2;
+        const int maxLines = 200;
+
+        var (diffLines, addedCount, removedCount, truncated) = BuildUnifiedDiffLines(
+            targetLines,
+            actualLines,
+            contextLines,
+            maxLines);
+
+        return Task.FromResult<RuleDiffResponse?>(new RuleDiffResponse(
+            Tool: target.Tool,
+            Kind: target.Kind,
+            FileName: fileName,
+            SyncStatus: syncStatus,
+            TargetHash: targetHash,
+            ActualHash: actualHash,
+            AddedLines: addedCount,
+            RemovedLines: removedCount,
+            Truncated: truncated,
+            Lines: diffLines));
+    }
+
     private static List<AgentSyncItem> ScanAgentSyncItems(ResolvedDashboardPaths paths)
     {
-        var targets = new (string Tool, string Kind, string RepoDir, string LocalDir)[]
-        {
-            (
-                "Antigravity",
-                "agent",
-                Path.Combine(paths.MobaDevRepoPath, "agents", "antigravity", "agents"),
-                Path.Combine(paths.GeminiConfigPath, "agents")
-            ),
-            (
-                "Antigravity",
-                "rule",
-                Path.Combine(paths.MobaDevRepoPath, "agents", "antigravity", "rules"),
-                Path.Combine(paths.GeminiConfigPath, "rules")
-            ),
-            (
-                "Claude Code",
-                "agent",
-                Path.Combine(paths.MobaDevRepoPath, "agents", "claude", "agents"),
-                Path.Combine(paths.ClaudeHomePath, "agents")
-            )
-        };
+        var targets = GetSyncTargets(paths);
 
         var items = new List<AgentSyncItem>();
         foreach (var (tool, kind, repoDir, localDir) in targets)
@@ -289,6 +381,227 @@ public sealed partial class GovernanceProvider
         var repoOnly = repoLines.Except(localLines).Count();
         var localOnly = localLines.Except(repoLines).Count();
         return $"Content differs (+{localOnly}/-{repoOnly} lines)";
+    }
+
+    private sealed record RawDiffOp(string Kind, int? TargetLineNumber, int? ActualLineNumber, string Text);
+
+    private static (IReadOnlyList<DiffLineInfo> Lines, int AddedLines, int RemovedLines, bool Truncated)
+        BuildUnifiedDiffLines(
+            string[] targetLines,
+            string[] actualLines,
+            int contextLines,
+            int maxLines)
+    {
+        if (targetLines.Length == 0 && actualLines.Length == 0)
+        {
+            return ([], 0, 0, false);
+        }
+
+        if (targetLines.Length == 0)
+        {
+            var truncatedOnlyAdded = actualLines.Length > maxLines;
+            var addedOnly = actualLines
+                .Take(maxLines)
+                .Select((line, idx) => new DiffLineInfo("added", null, idx + 1, line))
+                .ToList();
+            return (addedOnly, actualLines.Length, 0, truncatedOnlyAdded);
+        }
+
+        if (actualLines.Length == 0)
+        {
+            var truncatedOnlyRemoved = targetLines.Length > maxLines;
+            var removedOnly = targetLines
+                .Take(maxLines)
+                .Select((line, idx) => new DiffLineInfo("removed", idx + 1, null, line))
+                .ToList();
+            return (removedOnly, 0, targetLines.Length, truncatedOnlyRemoved);
+        }
+
+        var ops = ComputeDiffOps(targetLines, actualLines);
+        var addedCount = ops.Count(o => o.Kind == "added");
+        var removedCount = ops.Count(o => o.Kind == "removed");
+
+        var include = new bool[ops.Count];
+        for (var i = 0; i < ops.Count; i++)
+        {
+            if (ops[i].Kind == "context")
+            {
+                continue;
+            }
+
+            var start = Math.Max(0, i - contextLines);
+            var end = Math.Min(ops.Count - 1, i + contextLines);
+            for (var j = start; j <= end; j++)
+            {
+                include[j] = true;
+            }
+        }
+
+        var result = new List<DiffLineInfo>();
+        var truncated = false;
+        var inHunk = false;
+
+        for (var i = 0; i < ops.Count; i++)
+        {
+            if (!include[i])
+            {
+                inHunk = false;
+                continue;
+            }
+
+            if (!inHunk)
+            {
+                var nextTarget = ops[i].TargetLineNumber ?? (FindLastKnownTargetLine(ops, i) + 1);
+                var nextActual = ops[i].ActualLineNumber ?? (FindLastKnownActualLine(ops, i) + 1);
+                if (result.Count >= maxLines)
+                {
+                    truncated = true;
+                    break;
+                }
+
+                result.Add(new DiffLineInfo("hunk", null, null, $"@@ Target L{nextTarget} / Actual L{nextActual} @@"));
+                inHunk = true;
+            }
+
+            if (result.Count >= maxLines)
+            {
+                truncated = true;
+                break;
+            }
+
+            var op = ops[i];
+            result.Add(new DiffLineInfo(op.Kind, op.TargetLineNumber, op.ActualLineNumber, op.Text));
+        }
+
+        return (result, addedCount, removedCount, truncated);
+    }
+
+    private static List<RawDiffOp> ComputeDiffOps(string[] targetLines, string[] actualLines)
+    {
+        var n = targetLines.Length;
+        var m = actualLines.Length;
+
+        if ((long)n * m > 400_000)
+        {
+            return ComputeLargeFileFallbackOps(targetLines, actualLines);
+        }
+
+        var dp = new int[n + 1, m + 1];
+        for (var i = n - 1; i >= 0; i--)
+        {
+            for (var j = m - 1; j >= 0; j--)
+            {
+                dp[i, j] = string.Equals(targetLines[i], actualLines[j], StringComparison.Ordinal)
+                    ? dp[i + 1, j + 1] + 1
+                    : Math.Max(dp[i + 1, j], dp[i, j + 1]);
+            }
+        }
+
+        var ops = new List<RawDiffOp>(n + m);
+        var ti = 0;
+        var ai = 0;
+
+        while (ti < n && ai < m)
+        {
+            if (string.Equals(targetLines[ti], actualLines[ai], StringComparison.Ordinal))
+            {
+                ops.Add(new RawDiffOp("context", ti + 1, ai + 1, targetLines[ti]));
+                ti++;
+                ai++;
+            }
+            else if (dp[ti + 1, ai] >= dp[ti, ai + 1])
+            {
+                ops.Add(new RawDiffOp("removed", ti + 1, null, targetLines[ti]));
+                ti++;
+            }
+            else
+            {
+                ops.Add(new RawDiffOp("added", null, ai + 1, actualLines[ai]));
+                ai++;
+            }
+        }
+
+        while (ti < n)
+        {
+            ops.Add(new RawDiffOp("removed", ti + 1, null, targetLines[ti]));
+            ti++;
+        }
+
+        while (ai < m)
+        {
+            ops.Add(new RawDiffOp("added", null, ai + 1, actualLines[ai]));
+            ai++;
+        }
+
+        return ops;
+    }
+
+    private static List<RawDiffOp> ComputeLargeFileFallbackOps(string[] targetLines, string[] actualLines)
+    {
+        var ops = new List<RawDiffOp>();
+        var prefix = 0;
+        var minLen = Math.Min(targetLines.Length, actualLines.Length);
+        while (prefix < minLen && string.Equals(targetLines[prefix], actualLines[prefix], StringComparison.Ordinal))
+        {
+            ops.Add(new RawDiffOp("context", prefix + 1, prefix + 1, targetLines[prefix]));
+            prefix++;
+        }
+
+        var suffix = 0;
+        while (suffix < (targetLines.Length - prefix) &&
+               suffix < (actualLines.Length - prefix) &&
+               string.Equals(
+                   targetLines[targetLines.Length - 1 - suffix],
+                   actualLines[actualLines.Length - 1 - suffix],
+                   StringComparison.Ordinal))
+        {
+            suffix++;
+        }
+
+        for (var i = prefix; i < targetLines.Length - suffix; i++)
+        {
+            ops.Add(new RawDiffOp("removed", i + 1, null, targetLines[i]));
+        }
+
+        for (var j = prefix; j < actualLines.Length - suffix; j++)
+        {
+            ops.Add(new RawDiffOp("added", null, j + 1, actualLines[j]));
+        }
+
+        for (var s = suffix; s > 0; s--)
+        {
+            var ti = targetLines.Length - s;
+            var ai = actualLines.Length - s;
+            ops.Add(new RawDiffOp("context", ti + 1, ai + 1, targetLines[ti]));
+        }
+
+        return ops;
+    }
+
+    private static int FindLastKnownTargetLine(List<RawDiffOp> ops, int index)
+    {
+        for (var k = index - 1; k >= 0; k--)
+        {
+            if (ops[k].TargetLineNumber is int ln)
+            {
+                return ln;
+            }
+        }
+
+        return 0;
+    }
+
+    private static int FindLastKnownActualLine(List<RawDiffOp> ops, int index)
+    {
+        for (var k = index - 1; k >= 0; k--)
+        {
+            if (ops[k].ActualLineNumber is int ln)
+            {
+                return ln;
+            }
+        }
+
+        return 0;
     }
 
     private static (string? Name, string? Description) ParseFrontmatter(string markdown)

@@ -15,6 +15,7 @@ public sealed class DashboardSnapshotService
     private readonly Providers.CodexMonitorProvider _codexProvider;
     private readonly Providers.AntigravityMonitorProvider _antigravityProvider;
     private readonly Providers.GovernanceProvider _governanceProvider;
+    private readonly Providers.ConfigDocsProvider _configDocsProvider;
     private readonly Providers.PipelineProvider _pipelineProvider;
     private readonly Providers.WorktreeProvider _worktreeProvider;
 
@@ -35,6 +36,7 @@ public sealed class DashboardSnapshotService
         Providers.CodexMonitorProvider codexProvider,
         Providers.AntigravityMonitorProvider antigravityProvider,
         Providers.GovernanceProvider governanceProvider,
+        Providers.ConfigDocsProvider configDocsProvider,
         Providers.PipelineProvider pipelineProvider,
         Providers.WorktreeProvider worktreeProvider)
     {
@@ -43,6 +45,7 @@ public sealed class DashboardSnapshotService
         _codexProvider = codexProvider;
         _antigravityProvider = antigravityProvider;
         _governanceProvider = governanceProvider;
+        _configDocsProvider = configDocsProvider;
         _pipelineProvider = pipelineProvider;
         _worktreeProvider = worktreeProvider;
     }
@@ -77,6 +80,33 @@ public sealed class DashboardSnapshotService
     {
         var snapshot = await GetSnapshotAsync(forceRefresh, cancellationToken).ConfigureAwait(false);
         return snapshot.Governance;
+    }
+
+    public Task<RuleDiffResponse?> GetRuleDiffAsync(
+        string tool,
+        string kind,
+        string fileName,
+        CancellationToken cancellationToken)
+    {
+        var paths = _optionsMonitor.CurrentValue.ResolvePaths();
+        return _governanceProvider.GetRuleDiffAsync(paths, tool, kind, fileName, cancellationToken);
+    }
+
+    public Task<ConfigDocsCatalogResponse> GetConfigDocsCatalogAsync(
+        string scope,
+        CancellationToken cancellationToken)
+    {
+        var paths = _optionsMonitor.CurrentValue.ResolvePaths();
+        return _configDocsProvider.GetCatalogAsync(paths, scope, cancellationToken);
+    }
+
+    public Task<ConfigDocContentResponse?> GetConfigDocContentAsync(
+        string scope,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var paths = _optionsMonitor.CurrentValue.ResolvePaths();
+        return _configDocsProvider.GetDocumentContentAsync(paths, scope, path, cancellationToken);
     }
 
     public async Task<PipelineResponse> GetPipelineAsync(bool forceRefresh, CancellationToken cancellationToken)

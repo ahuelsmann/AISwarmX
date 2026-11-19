@@ -13,7 +13,11 @@ import {
   Prohibited16Regular,
   Timer16Regular
 } from '@fluentui/react-icons';
-import { formatAbsoluteEn, formatRelativeTimeEn } from '../api/dashboardClient';
+import {
+  formatAbsoluteEn,
+  formatAutomationStatusEn,
+  formatRelativeTimeEn
+} from '../api/dashboardClient';
 import type { MonitorInfo } from '../types/dashboard';
 import { GlossaryTooltip } from './GlossaryTooltip';
 import { ModelBadge, ProfileBadge, RoleBadge } from './RoleAndModelIcons';
@@ -22,22 +26,22 @@ const useStyles = makeStyles({
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-    gap: '14px',
+    gap: '12px',
     '@media (max-width: 959px)': {
       gridTemplateColumns: 'minmax(0, 1fr)'
     }
   },
   card: {
-    padding: '14px 16px',
-    gap: '12px',
+    padding: '10px 14px',
+    gap: '8px',
     justifyContent: 'space-between',
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`
   },
-  cardTop: {
+  topBand: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '8px'
+    gap: '6px'
   },
   headerRow: {
     display: 'flex',
@@ -49,7 +53,7 @@ const useStyles = makeStyles({
   titleGroup: {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
+    gap: '6px',
     flexWrap: 'wrap'
   },
   title: {
@@ -58,28 +62,25 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1
   },
-  subtitleRow: {
+  roleRow: {
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
     flexWrap: 'wrap'
   },
-  slots: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-    paddingTop: '10px',
-    borderTop: `1px solid ${tokens.colorNeutralStroke2}`
-  },
-  slotRow: {
+  footerRow: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: '8px',
-    flexWrap: 'wrap'
+    flexWrap: 'wrap',
+    paddingTop: '8px',
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`
   },
-  slotLabel: {
-    fontSize: tokens.fontSizeBase200,
+  activityWrap: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
     color: tokens.colorNeutralForeground2
   }
 });
@@ -96,69 +97,71 @@ export function MonitorCards({ monitors, nowMs, isDark }: MonitorCardsProps) {
   return (
     <section aria-label="Live Monitor Status">
       <div className={styles.grid}>
-        {monitors.map((monitor) => (
-          <Card key={monitor.id} className={styles.card} appearance="filled">
-            <div className={styles.cardTop}>
-              <div className={styles.headerRow}>
-                <div className={styles.titleGroup}>
-                  <h2 className={styles.title}>{monitor.displayName}</h2>
-                  <GlossaryTooltip term={monitor.profile} showIcon>
-                    <ProfileBadge profile={monitor.profile} isDark={isDark} />
-                  </GlossaryTooltip>
+        {monitors.map((monitor) => {
+          const automationLabel = formatAutomationStatusEn(monitor.automationStatus);
+
+          return (
+            <Card key={monitor.id} className={styles.card} appearance="filled">
+              <div className={styles.topBand}>
+                <div className={styles.headerRow}>
+                  <div className={styles.titleGroup}>
+                    <h2 className={styles.title}>{monitor.displayName}</h2>
+                    <GlossaryTooltip term={monitor.profile}>
+                      <ProfileBadge profile={monitor.profile} isDark={isDark} />
+                    </GlossaryTooltip>
+                  </div>
+                  <MonitorStateBadge state={monitor.state} />
                 </div>
-                <MonitorStateBadge state={monitor.state} />
+
+                <div className={styles.roleRow}>
+                  <RoleBadge role={monitor.role} isDark={isDark} compact />
+                  <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                    · {monitor.tool}
+                  </Text>
+                  {automationLabel && (
+                    <Badge
+                      appearance="tint"
+                      color="subtle"
+                      shape="rounded"
+                      size="small"
+                      title={`Automation: ${monitor.automationStatus}`}
+                    >
+                      {automationLabel}
+                    </Badge>
+                  )}
+                </div>
+
+                {monitor.state === 'rate_limited' && monitor.rateLimitResetLabel && (
+                  <MessageBar intent="warning" layout="singleline">
+                    <MessageBarBody className="tabular">
+                      Quota Pause — Reset: {monitor.rateLimitResetLabel}
+                    </MessageBarBody>
+                  </MessageBar>
+                )}
+
+                {monitor.source.status !== 'ok' && monitor.source.notice && (
+                  <MessageBar intent="warning" layout="multiline">
+                    <MessageBarBody>{monitor.source.notice}</MessageBarBody>
+                  </MessageBar>
+                )}
               </div>
 
-              <div className={styles.subtitleRow}>
-                <RoleBadge role={monitor.role} isDark={isDark} />
-                <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-                  · {monitor.tool}
-                </Text>
-              </div>
-
-              {monitor.state === 'rate_limited' && monitor.rateLimitResetLabel && (
-                <MessageBar intent="warning" layout="singleline">
-                  <MessageBarBody className="tabular">
-                    Quota Pause — Reset: {monitor.rateLimitResetLabel}
-                  </MessageBarBody>
-                </MessageBar>
-              )}
-
-              {monitor.source.status !== 'ok' && monitor.source.notice && (
-                <MessageBar intent="warning" layout="multiline">
-                  <MessageBarBody>{monitor.source.notice}</MessageBarBody>
-                </MessageBar>
-              )}
-            </div>
-
-            <div className={styles.slots}>
-              <div className={styles.slotRow}>
-                <span className={styles.slotLabel}>Active Model</span>
+              <div className={styles.footerRow}>
                 <ModelBadge model={monitor.model} isDark={isDark} mono />
-              </div>
 
-              <div className={styles.slotRow}>
-                <span className={styles.slotLabel}>Last Activity</span>
-                <Text
-                  size={200}
-                  className="tabular"
-                  title={formatAbsoluteEn(monitor.lastActivityUtc)}
+                <span
+                  className={styles.activityWrap}
+                  title={`Last Activity: ${formatAbsoluteEn(monitor.lastActivityUtc)}`}
                 >
-                  {formatRelativeTimeEn(monitor.lastActivityUtc, nowMs)}
-                </Text>
+                  <Clock16Regular style={{ width: 13, height: 13 }} aria-hidden="true" />
+                  <Text size={200} className="tabular">
+                    {formatRelativeTimeEn(monitor.lastActivityUtc, nowMs)}
+                  </Text>
+                </span>
               </div>
-
-              {monitor.automationStatus && (
-                <div className={styles.slotRow}>
-                  <span className={styles.slotLabel}>Automation</span>
-                  <Badge appearance="outline" color="subtle" shape="rounded" className="mono">
-                    {monitor.automationStatus}
-                  </Badge>
-                </div>
-              )}
-            </div>
-          </Card>
-        ))}
+            </Card>
+          );
+        })}
       </div>
     </section>
   );

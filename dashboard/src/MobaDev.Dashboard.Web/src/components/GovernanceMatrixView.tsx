@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import {
   Badge,
+  Button,
   Card,
   MessageBar,
   MessageBarBody,
+  Spinner,
   Table,
   TableBody,
   TableCell,
@@ -16,11 +18,22 @@ import {
   tokens
 } from '@fluentui/react-components';
 import {
+  ArrowRight16Regular,
+  BranchRequest16Regular,
   CheckmarkCircle16Regular,
+  ChevronDown16Regular,
+  ChevronRight16Regular,
   Prohibited16Regular,
   Warning16Regular
 } from '@fluentui/react-icons';
-import type { GovernanceResponse } from '../types/dashboard';
+import { fetchRuleDiff } from '../api/dashboardClient';
+import { getToneStyles } from '../theme/mobaFluentTheme';
+import type {
+  AgentSyncItem,
+  ConfigDocsScope,
+  GovernanceResponse,
+  RuleDiffResponse
+} from '../types/dashboard';
 import { GlossaryTooltip } from './GlossaryTooltip';
 import { ModelBadge, ProfileBadge, RoleBadge } from './RoleAndModelIcons';
 
@@ -108,6 +121,50 @@ const useStyles = makeStyles({
     gap: '6px',
     padding: '24px 16px',
     color: tokens.colorNeutralForeground2
+  },
+  diffContainer: {
+    margin: '6px 0',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    overflow: 'hidden'
+  },
+  diffHeader: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px',
+    padding: '8px 12px',
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  diffScroll: {
+    maxHeight: '280px',
+    overflowY: 'auto',
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: '20px'
+  },
+  diffLine: {
+    display: 'grid',
+    gridTemplateColumns: '40px 40px 18px minmax(0, 1fr)',
+    gap: '6px',
+    padding: '1px 10px',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word'
+  },
+  strategyGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+    gap: '10px'
+  },
+  strategyTile: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    padding: '10px 12px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`
   }
 });
 
@@ -116,17 +173,51 @@ interface GovernanceMatrixViewProps {
   onlyDrift: boolean;
   onOnlyDriftChange: (value: boolean) => void;
   isDark: boolean;
+  onOpenDoc?: (scope: ConfigDocsScope, relativePath: string) => void;
+}
+
+const GIT_STRATEGY_INVARIANTS = [
+  {
+    title: '1. Small Batches on main',
+    detail: '1 Draft PR = 1 focused slice (~25 files / ~400 lines); no long-running branches.'
+  },
+  {
+    title: '2. Worktree Isolation',
+    detail: 'Every active slice runs in its own Git worktree; main stays clean at all times.'
+  },
+  {
+    title: '3. Merge, Never Rebase',
+    detail: 'BEHIND branches merge main in locally; shared branches are never rebased or force-pushed.'
+  },
+  {
+    title: '4. One Writer · Area Locks · Code WIP <= 3',
+    detail: 'Single writer per branch, non-overlapping locks, max 3 open code slices (Class L docs excluded).'
+  },
+  {
+    title: '5. Head-Bound Squash Auto-Merge',
+    detail: 'Armed by COO (--squash --auto --match-head-commit) only after green CI, Sonar = 0, P1 Final & Cross-Family PASS.'
+  }
+];
+
+function rowKey(agent: AgentSyncItem): string {
+  return `${agent.tool}::${agent.kind}::${agent.fileName}`;
 }
 
 export function GovernanceMatrixView({
   governance,
   onlyDrift,
   onOnlyDriftChange,
-  isDark
+  isDark,
+  onOpenDoc
 }: GovernanceMatrixViewProps) {
   const styles = useStyles();
   const [profileFilter, setProfileFilter] = useState<string>('ALL');
   const [riskFilter, setRiskFilter] = useState<string>('ALL');
+
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [diffCache, setDiffCache] = useState<Record<string, RuleDiffResponse>>({});
+  const [loadingKey, setLoadingKey] = useState<string | null>(null);
+  const [diffError, setDiffError] = useState<Record<string, string>>({});
 
   const driftTotal = governance.driftCount + governance.missingCount;
 
@@ -153,6 +244,36 @@ export function GovernanceMatrixView({
     }
     return rc.code.toUpperCase() === riskFilter;
   });
+
+  const handleToggleDiff = async (agent: AgentSyncItem) => {
+    const key = rowKey(agent);
+    if (expandedKey === key) {
+      setExpandedKey(null);
+      return;
+    }
+
+    setExpandedKey(key);
+    if (diffCache[key]) {
+      return;
+    }
+
+    setLoadingKey(key);
+    setDiffError((prev) => {
+      const copy = { ...prev };
+      delete copy[key];
+      return copy;
+    });
+
+    try {
+      const diff = await fetchRuleDiff(agent.tool, agent.kind, agent.fileName);
+      setDiffCache((prev) => ({ ...prev, [key]: diff }));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unable to load diff.';
+      setDiffError((prev) => ({ ...prev, [key]: msg }));
+    } finally {
+      setLoadingKey(null);
+    }
+  };
 
   return (
     <div className={styles.stack}>
@@ -224,7 +345,7 @@ export function GovernanceMatrixView({
         <div className={styles.cardHeader}>
           <div className={styles.titleGroup}>
             <h2 className={styles.title}>Rules State · Actual vs. Target</h2>
-            <GlossaryTooltip term="Drift" showIcon />
+            <GlossaryTooltip term="Drift" iconOnly />
           </div>
           <Badge appearance="tint" color="subtle" shape="rounded">
             <span className="tabular">
@@ -254,57 +375,97 @@ export function GovernanceMatrixView({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredAgents.map((agent) => (
-                  <TableRow key={`${agent.tool}-${agent.kind}-${agent.fileName}`}>
-                    <TableCell>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '4px 0' }}>
-                        <RoleBadge
-                          role={agent.kind === 'rule' ? 'rule' : agent.name}
-                          label={agent.name}
-                          isDark={isDark}
-                          compact
-                        />
-                        <Text size={200} className="mono" style={{ color: tokens.colorNeutralForeground2 }}>
-                          {agent.fileName}
-                        </Text>
-                        {agent.description && (
+                {filteredAgents.map((agent) => {
+                  const key = rowKey(agent);
+                  const isExpanded = expandedKey === key;
+                  const cachedDiff = diffCache[key];
+                  const rowError = diffError[key];
+
+                  return (
+                    <Fragment key={key}>
+                      <TableRow>
+                        <TableCell>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '4px 0' }}>
+                            <RoleBadge
+                              role={agent.kind === 'rule' ? 'rule' : agent.name}
+                              label={agent.name}
+                              isDark={isDark}
+                              compact
+                            />
+                            <Text size={200} className="mono" style={{ color: tokens.colorNeutralForeground2 }}>
+                              {agent.fileName}
+                            </Text>
+                            {agent.description && (
+                              <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                                {agent.description}
+                              </Text>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div>{agent.tool}</div>
                           <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-                            {agent.description}
+                            {agent.kind === 'rule' ? 'Rule' : 'Agent'}
                           </Text>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div>{agent.tool}</div>
-                      <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-                        {agent.kind === 'rule' ? 'Rule' : 'Agent'}
-                      </Text>
-                    </TableCell>
-                    <TableCell>
-                      {agent.profileHint ? (
-                        <GlossaryTooltip term={agent.profileHint}>
-                          <ProfileBadge profile={agent.profileHint} isDark={isDark} />
-                        </GlossaryTooltip>
-                      ) : (
-                        '–'
+                        </TableCell>
+                        <TableCell>
+                          {agent.profileHint ? (
+                            <GlossaryTooltip term={agent.profileHint}>
+                              <ProfileBadge profile={agent.profileHint} isDark={isDark} />
+                            </GlossaryTooltip>
+                          ) : (
+                            '–'
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 4,
+                              alignItems: 'flex-start'
+                            }}
+                          >
+                            <SyncBadge status={agent.syncStatus} />
+                            {agent.driftSummary && (
+                              <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                                {agent.driftSummary}
+                              </Text>
+                            )}
+                            {agent.syncStatus !== 'synced' && (
+                              <Button
+                                size="small"
+                                appearance="subtle"
+                                icon={isExpanded ? <ChevronDown16Regular /> : <ChevronRight16Regular />}
+                                onClick={() => void handleToggleDiff(agent)}
+                              >
+                                {isExpanded ? 'Hide Diff' : 'Show Diff'}
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="mono">
+                          <div>Actual: {agent.localHash ?? '–'}</div>
+                          <div>Target: {agent.repoHash ?? '–'}</div>
+                        </TableCell>
+                      </TableRow>
+
+                      {isExpanded && (
+                        <TableRow>
+                          <TableCell colSpan={5}>
+                            <RuleDiffPreview
+                              diff={cachedDiff}
+                              loading={loadingKey === key}
+                              error={rowError}
+                              isDark={isDark}
+                              styles={styles}
+                            />
+                          </TableCell>
+                        </TableRow>
                       )}
-                    </TableCell>
-                    <TableCell>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
-                        <SyncBadge status={agent.syncStatus} />
-                        {agent.driftSummary && (
-                          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-                            {agent.driftSummary}
-                          </Text>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="mono">
-                      <div>Actual: {agent.localHash ?? '–'}</div>
-                      <div>Target: {agent.repoHash ?? '–'}</div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                    </Fragment>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -457,6 +618,171 @@ export function GovernanceMatrixView({
           </Card>
         </div>
       </div>
+
+      {/* Git & Delivery Strategy Reference */}
+      <Card className={styles.card} appearance="filled" aria-label="Git and Delivery Strategy">
+        <div className={styles.cardHeader}>
+          <div className={styles.titleGroup}>
+            <BranchRequest16Regular aria-hidden="true" />
+            <h2 className={styles.title}>Git &amp; Delivery Strategy</h2>
+            <Badge appearance="tint" color="subtle" shape="rounded">
+              MOBAflow Invariants
+            </Badge>
+          </div>
+
+          {onOpenDoc && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={<ArrowRight16Regular />}
+                iconPosition="after"
+                onClick={() =>
+                  onOpenDoc('mobaflow', '.github/instructions/master-coordination.instructions.md')
+                }
+              >
+                Master Coordination
+              </Button>
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={<ArrowRight16Regular />}
+                iconPosition="after"
+                onClick={() =>
+                  onOpenDoc('mobaflow', '.github/instructions/git-worktree-isolation.instructions.md')
+                }
+              >
+                Worktree Rules
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <div className={styles.strategyGrid}>
+          {GIT_STRATEGY_INVARIANTS.map((item) => (
+            <div key={item.title} className={styles.strategyTile}>
+              <Text weight="semibold" size={200}>
+                {item.title}
+              </Text>
+              <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                {item.detail}
+              </Text>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function RuleDiffPreview({
+  diff,
+  loading,
+  error,
+  isDark,
+  styles
+}: {
+  diff?: RuleDiffResponse;
+  loading: boolean;
+  error?: string;
+  isDark: boolean;
+  styles: ReturnType<typeof useStyles>;
+}) {
+  const greenStyles = getToneStyles('green', isDark);
+  const redStyles = getToneStyles('red', isDark);
+
+  if (loading) {
+    return (
+      <div style={{ padding: '12px' }}>
+        <Spinner size="small" label="Loading read-only diff…" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <MessageBar intent="error" style={{ margin: '6px 0' }}>
+        <MessageBarBody>{error}</MessageBarBody>
+      </MessageBar>
+    );
+  }
+
+  if (!diff) {
+    return null;
+  }
+
+  return (
+    <div className={styles.diffContainer} aria-label={`Read-only diff for ${diff.fileName}`}>
+      <div className={styles.diffHeader}>
+        <Text size={200} weight="semibold">
+          Target (MOBAdev) vs. Actual (Local)
+        </Text>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Badge appearance="tint" color="success" shape="rounded" size="small" className="tabular">
+            +{diff.addedLines} added
+          </Badge>
+          <Badge appearance="tint" color="danger" shape="rounded" size="small" className="tabular">
+            -{diff.removedLines} removed
+          </Badge>
+          {diff.truncated && (
+            <Badge appearance="outline" color="subtle" shape="rounded" size="small">
+              Truncated
+            </Badge>
+          )}
+        </div>
+      </div>
+
+      {diff.lines.length === 0 ? (
+        <div style={{ padding: '10px 12px', color: tokens.colorNeutralForeground2 }}>
+          No textual line differences detected.
+        </div>
+      ) : (
+        <div className={`${styles.diffScroll} mono`}>
+          {diff.lines.map((line, index) => {
+            const bg =
+              line.kind === 'added'
+                ? greenStyles.bg
+                : line.kind === 'removed'
+                  ? redStyles.bg
+                  : line.kind === 'hunk'
+                    ? tokens.colorNeutralBackground3
+                    : 'transparent';
+            const marker =
+              line.kind === 'added'
+                ? '+'
+                : line.kind === 'removed'
+                  ? '-'
+                  : line.kind === 'hunk'
+                    ? '@@'
+                    : ' ';
+            const fg =
+              line.kind === 'added'
+                ? greenStyles.fg
+                : line.kind === 'removed'
+                  ? redStyles.fg
+                  : line.kind === 'hunk'
+                    ? tokens.colorNeutralForeground2
+                    : tokens.colorNeutralForeground1;
+
+            return (
+              <div
+                key={`dl-${index}`}
+                className={styles.diffLine}
+                style={{ backgroundColor: bg, color: fg }}
+              >
+                <span className="tabular" style={{ color: tokens.colorNeutralForeground3 }}>
+                  {line.targetLineNumber ?? ''}
+                </span>
+                <span className="tabular" style={{ color: tokens.colorNeutralForeground3 }}>
+                  {line.actualLineNumber ?? ''}
+                </span>
+                <span>{marker}</span>
+                <span>{line.text}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
