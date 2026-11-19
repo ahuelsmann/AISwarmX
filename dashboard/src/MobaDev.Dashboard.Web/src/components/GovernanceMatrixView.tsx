@@ -1,19 +1,130 @@
 import { useState } from 'react';
-import { AlertTriangle, CheckCircle2, Slash } from 'lucide-react';
+import {
+  Badge,
+  Card,
+  MessageBar,
+  MessageBarBody,
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+  Text,
+  ToggleButton,
+  makeStyles,
+  tokens
+} from '@fluentui/react-components';
+import {
+  CheckmarkCircle16Regular,
+  Prohibited16Regular,
+  Warning16Regular
+} from '@fluentui/react-icons';
 import type { GovernanceResponse } from '../types/dashboard';
 import { GlossaryTooltip } from './GlossaryTooltip';
+import { ModelBadge, ProfileBadge, RoleBadge } from './RoleAndModelIcons';
+
+const useStyles = makeStyles({
+  stack: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '14px'
+  },
+  filterBar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '12px',
+    padding: '10px 14px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  filterGroup: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '6px'
+  },
+  card: {
+    padding: '16px',
+    gap: '12px',
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  cardHeader: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px'
+  },
+  titleGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap'
+  },
+  title: {
+    margin: 0,
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1
+  },
+  tableScroll: {
+    overflowX: 'auto'
+  },
+  split: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 7fr) minmax(0, 5fr)',
+    gap: '14px',
+    '@media (max-width: 1099px)': {
+      gridTemplateColumns: 'minmax(0, 1fr)'
+    }
+  },
+  skillList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px'
+  },
+  skillRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px',
+    padding: '8px 10px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  emptyState: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    textAlign: 'center',
+    gap: '6px',
+    padding: '24px 16px',
+    color: tokens.colorNeutralForeground2
+  }
+});
 
 interface GovernanceMatrixViewProps {
   governance: GovernanceResponse;
   onlyDrift: boolean;
   onOnlyDriftChange: (value: boolean) => void;
+  isDark: boolean;
 }
 
 export function GovernanceMatrixView({
   governance,
   onlyDrift,
-  onOnlyDriftChange
+  onOnlyDriftChange,
+  isDark
 }: GovernanceMatrixViewProps) {
+  const styles = useStyles();
   const [profileFilter, setProfileFilter] = useState<string>('ALL');
   const [riskFilter, setRiskFilter] = useState<string>('ALL');
 
@@ -44,257 +155,306 @@ export function GovernanceMatrixView({
   });
 
   return (
-    <div className="side-stack">
-      {/* Head Sync Banner */}
+    <div className={styles.stack}>
       {driftTotal === 0 ? (
-        <div className="notice-banner notice-banner--green">
-          <CheckCircle2 size={16} aria-hidden="true" />
-          <span>
-            <strong>Synchron:</strong> Alle {governance.syncedCount} lokalen Agenten und Regeln stimmen mit dem MOBAdev-Backup überein.
-          </span>
-        </div>
+        <MessageBar intent="success">
+          <MessageBarBody>
+            <strong>In Sync:</strong> All {governance.syncedCount} local agents and rules match the
+            MOBAdev target baseline.
+          </MessageBarBody>
+        </MessageBar>
       ) : (
-        <div className="notice-banner notice-banner--amber">
-          <AlertTriangle size={16} aria-hidden="true" />
-          <span>
-            <strong>Abweichung / Drift erkannt:</strong> {governance.driftCount} Abweichung(en) und {governance.missingCount} fehlende Zuordnung(en) zwischen lokalem Rechner und MOBAdev.
-          </span>
-        </div>
+        <MessageBar intent="warning">
+          <MessageBarBody>
+            <strong>Drift Detected:</strong> {governance.driftCount} drift(s) and{' '}
+            {governance.missingCount} missing mapping(s) between local machine (Actual) and MOBAdev
+            (Target).
+          </MessageBarBody>
+        </MessageBar>
       )}
 
-      {/* Filter Chips */}
-      <div className="filter-bar" role="region" aria-label="Matrix-Filter">
-        <div className="filter-group">
-          <span className="filter-label">Profil:</span>
+      {/* Filter Bar */}
+      <div className={styles.filterBar} role="region" aria-label="Matrix filters">
+        <div className={styles.filterGroup}>
+          <Text size={200} weight="semibold" style={{ color: tokens.colorNeutralForeground2 }}>
+            Profile:
+          </Text>
           {['ALL', 'P1', 'P2', 'P3', 'P4'].map((p) => (
-            <button
+            <ToggleButton
               key={p}
-              type="button"
-              className="chip-btn"
-              aria-pressed={profileFilter === p}
+              size="small"
+              appearance={profileFilter === p ? 'primary' : 'subtle'}
+              checked={profileFilter === p}
               onClick={() => setProfileFilter(p)}
             >
-              {p === 'ALL' ? 'Alle' : p}
-            </button>
+              {p === 'ALL' ? 'All' : p}
+            </ToggleButton>
           ))}
         </div>
 
-        <div className="filter-group">
-          <span className="filter-label">Risikoklasse:</span>
+        <div className={styles.filterGroup}>
+          <Text size={200} weight="semibold" style={{ color: tokens.colorNeutralForeground2 }}>
+            Risk Class:
+          </Text>
           {['ALL', 'H', 'M', 'L'].map((r) => (
-            <button
+            <ToggleButton
               key={r}
-              type="button"
-              className="chip-btn"
-              aria-pressed={riskFilter === r}
+              size="small"
+              appearance={riskFilter === r ? 'primary' : 'subtle'}
+              checked={riskFilter === r}
               onClick={() => setRiskFilter(r)}
             >
-              {r === 'ALL' ? 'Alle' : `Klasse ${r}`}
-            </button>
+              {r === 'ALL' ? 'All' : `Class ${r}`}
+            </ToggleButton>
           ))}
         </div>
 
-        <button
-          type="button"
-          className="chip-btn"
-          aria-pressed={onlyDrift}
+        <ToggleButton
+          size="small"
+          appearance={onlyDrift ? 'primary' : 'subtle'}
+          checked={onlyDrift}
           onClick={() => onOnlyDriftChange(!onlyDrift)}
         >
-          Nur Abweichungen ({driftTotal})
-        </button>
+          <span className="tabular">Drift Only ({driftTotal})</span>
+        </ToggleButton>
       </div>
 
-      {/* Agent & Rule Sync Table */}
-      <section className="card" aria-label="Agenten- und Regel-Sync">
-        <div className="card-header">
-          <div className="card-title-row">
-            <h2 className="card-title">Agenten &amp; Regeln (Lokal vs. MOBAdev)</h2>
+      {/* Rules State · Actual vs. Target */}
+      <Card className={styles.card} appearance="filled" aria-label="Rules State Actual vs Target">
+        <div className={styles.cardHeader}>
+          <div className={styles.titleGroup}>
+            <h2 className={styles.title}>Rules State · Actual vs. Target</h2>
             <GlossaryTooltip term="Drift" showIcon />
           </div>
-          <span className="badge tabular">{filteredAgents.length} Einträge</span>
+          <Badge appearance="tint" color="subtle" shape="rounded">
+            <span className="tabular">
+              {filteredAgents.length === 1 ? '1 Entry' : `${filteredAgents.length} Entries`}
+            </span>
+          </Badge>
         </div>
 
         {filteredAgents.length === 0 ? (
-          <div className="empty-state">
-            <CheckCircle2 size={20} aria-hidden="true" />
-            <strong>Keine Treffer für die aktiven Filter</strong>
-            <span>Alle lokalen Regeln sind synchron mit MOBAdev oder durch einen Filter ausgeblendet.</span>
+          <div className={styles.emptyState}>
+            <CheckmarkCircle16Regular style={{ width: 22, height: 22 }} aria-hidden="true" />
+            <Text weight="semibold">No matching entries for active filters</Text>
+            <Text size={200}>
+              All local rules match MOBAdev or matching rows are hidden by current filters.
+            </Text>
           </div>
         ) : (
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Name &amp; Datei</th>
-                  <th>Tool / Typ</th>
-                  <th>Profil</th>
-                  <th>Sync-Status</th>
-                  <th>Hashes (Repo / Lokal)</th>
-                </tr>
-              </thead>
-              <tbody>
+          <div className={styles.tableScroll}>
+            <Table size="small" aria-label="Agent and rule sync table">
+              <TableHeader>
+                <TableRow>
+                  <TableHeaderCell>Name &amp; File</TableHeaderCell>
+                  <TableHeaderCell>Tool / Type</TableHeaderCell>
+                  <TableHeaderCell>Profile</TableHeaderCell>
+                  <TableHeaderCell>Sync Status</TableHeaderCell>
+                  <TableHeaderCell>Hashes (Actual / Target)</TableHeaderCell>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {filteredAgents.map((agent) => (
-                  <tr key={`${agent.tool}-${agent.kind}-${agent.fileName}`}>
-                    <td>
-                      <strong>{agent.name}</strong>
-                      <div className="hygiene-sub mono">{agent.fileName}</div>
-                      {agent.description && <div className="monitor-subtitle">{agent.description}</div>}
-                    </td>
-                    <td>
-                      {agent.tool}
-                      <div className="slot-label">{agent.kind === 'rule' ? 'Regel' : 'Agent'}</div>
-                    </td>
-                    <td>
+                  <TableRow key={`${agent.tool}-${agent.kind}-${agent.fileName}`}>
+                    <TableCell>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '4px 0' }}>
+                        <RoleBadge
+                          role={agent.kind === 'rule' ? 'rule' : agent.name}
+                          label={agent.name}
+                          isDark={isDark}
+                          compact
+                        />
+                        <Text size={200} className="mono" style={{ color: tokens.colorNeutralForeground2 }}>
+                          {agent.fileName}
+                        </Text>
+                        {agent.description && (
+                          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                            {agent.description}
+                          </Text>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div>{agent.tool}</div>
+                      <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                        {agent.kind === 'rule' ? 'Rule' : 'Agent'}
+                      </Text>
+                    </TableCell>
+                    <TableCell>
                       {agent.profileHint ? (
                         <GlossaryTooltip term={agent.profileHint}>
-                          <span className="badge">{agent.profileHint}</span>
+                          <ProfileBadge profile={agent.profileHint} isDark={isDark} />
                         </GlossaryTooltip>
                       ) : (
                         '–'
                       )}
-                    </td>
-                    <td>
-                      <SyncBadge status={agent.syncStatus} />
-                      {agent.driftSummary && <div className="slot-label">{agent.driftSummary}</div>}
-                    </td>
-                    <td className="mono">
-                      <div>Repo: {agent.repoHash ?? '–'}</div>
-                      <div>Lokal: {agent.localHash ?? '–'}</div>
-                    </td>
-                  </tr>
+                    </TableCell>
+                    <TableCell>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                        <SyncBadge status={agent.syncStatus} />
+                        {agent.driftSummary && (
+                          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                            {agent.driftSummary}
+                          </Text>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="mono">
+                      <div>Actual: {agent.localHash ?? '–'}</div>
+                      <div>Target: {agent.repoHash ?? '–'}</div>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
-      </section>
+      </Card>
 
-      {/* Capability Profiles P1-P4 */}
-      <section className="card" aria-label="Fähigkeitsprofile und Modelle">
-        <div className="card-header">
-          <h2 className="card-title">Fähigkeitsprofile (P1–P4) &amp; Modell-Zuordnung</h2>
+      {/* Capability Profiles (P1-P4) & Model Mapping */}
+      <Card
+        className={styles.card}
+        appearance="filled"
+        aria-label="Capability Profiles and Model Mapping"
+      >
+        <div className={styles.cardHeader}>
+          <h2 className={styles.title}>Capability Profiles (P1–P4) &amp; Model Mapping</h2>
         </div>
-        <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Profil</th>
-                <th>Bezeichnung</th>
-                <th>Aktive Modelle &amp; Clients</th>
-                <th>Stärken &amp; typische Aufgaben</th>
-              </tr>
-            </thead>
-            <tbody>
+
+        <div className={styles.tableScroll}>
+          <Table size="small" aria-label="Capability profiles table">
+            <TableHeader>
+              <TableRow>
+                <TableHeaderCell>Profile</TableHeaderCell>
+                <TableHeaderCell>Name</TableHeaderCell>
+                <TableHeaderCell>Active Models &amp; Clients</TableHeaderCell>
+                <TableHeaderCell>Strengths &amp; Typical Assignments</TableHeaderCell>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {governance.profiles.map((p) => (
-                <tr key={p.profile}>
-                  <td>
+                <TableRow key={p.profile}>
+                  <TableCell>
                     <GlossaryTooltip term={p.profile} showIcon>
-                      <span className="badge badge--blue">{p.profile}</span>
+                      <ProfileBadge profile={p.profile} isDark={isDark} />
                     </GlossaryTooltip>
-                  </td>
-                  <td>
-                    <strong>{p.name}</strong>
-                  </td>
-                  <td>
-                    <span className="model-chip mono">{p.models}</span>
-                  </td>
-                  <td>{p.strengths}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell>
+                    <Text weight="semibold">{p.name}</Text>
+                  </TableCell>
+                  <TableCell>
+                    <ModelBadge model={p.models} isDark={isDark} mono />
+                  </TableCell>
+                  <TableCell>{p.strengths}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
-      </section>
+      </Card>
 
-      {/* Roles & Risk Classes */}
-      <div className="live-split">
-        <section className="card" aria-label="Rollenmatrix">
-          <div className="card-header">
-            <h2 className="card-title">Rollen &amp; Zuständigkeiten</h2>
+      {/* Bottom Split: Roles vs. Risk Classes + Skills */}
+      <div className={styles.split}>
+        <Card className={styles.card} appearance="filled" aria-label="Roles and Responsibilities">
+          <div className={styles.cardHeader}>
+            <h2 className={styles.title}>Roles &amp; Responsibilities</h2>
           </div>
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Rolle</th>
-                  <th>Profil</th>
-                  <th>Verantwortung</th>
-                </tr>
-              </thead>
-              <tbody>
+
+          <div className={styles.tableScroll}>
+            <Table size="small" aria-label="Roles matrix table">
+              <TableHeader>
+                <TableRow>
+                  <TableHeaderCell>Role</TableHeaderCell>
+                  <TableHeaderCell>Profile</TableHeaderCell>
+                  <TableHeaderCell>Responsibility</TableHeaderCell>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {filteredRoles.map((role) => (
-                  <tr key={role.role}>
-                    <td>
-                      <strong>{role.role}</strong>
-                    </td>
-                    <td>
-                      <span className="badge">{role.profiles}</span>
-                    </td>
-                    <td>{role.responsibility}</td>
-                  </tr>
+                  <TableRow key={role.role}>
+                    <TableCell>
+                      <RoleBadge role={role.role} isDark={isDark} compact />
+                    </TableCell>
+                    <TableCell>
+                      <Badge appearance="tint" color="subtle" shape="rounded">
+                        {role.profiles}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{role.responsibility}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
-        </section>
+        </Card>
 
-        <div className="side-stack">
-          <section className="card" aria-label="Risikoklassen H M L">
-            <div className="card-header">
-              <h2 className="card-title">Risikoklassen (H / M / L)</h2>
+        <div className={styles.stack}>
+          <Card className={styles.card} appearance="filled" aria-label="Risk Classes H M L">
+            <div className={styles.cardHeader}>
+              <h2 className={styles.title}>Risk Classes (H / M / L)</h2>
             </div>
-            <div className="table-scroll">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Klasse</th>
-                    <th>MOBAflow-Bereiche</th>
-                    <th>Prüf- &amp; Team-Regel</th>
-                  </tr>
-                </thead>
-                <tbody>
+
+            <div className={styles.tableScroll}>
+              <Table size="small" aria-label="Risk classes table">
+                <TableHeader>
+                  <TableRow>
+                    <TableHeaderCell>Class</TableHeaderCell>
+                    <TableHeaderCell>MOBAflow Areas</TableHeaderCell>
+                    <TableHeaderCell>Team &amp; Review Rule</TableHeaderCell>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {filteredRiskClasses.map((rc) => (
-                    <tr key={rc.code}>
-                      <td>
+                    <TableRow key={rc.code}>
+                      <TableCell>
                         <GlossaryTooltip term={rc.code} showIcon>
-                          <span
-                            className={`badge badge--outline ${
+                          <Badge
+                            appearance="outline"
+                            color={
                               rc.code === 'H'
-                                ? 'badge--red'
+                                ? 'danger'
                                 : rc.code === 'M'
-                                  ? 'badge--amber'
-                                  : 'badge--green'
-                            }`}
+                                  ? 'warning'
+                                  : 'success'
+                            }
+                            shape="rounded"
                           >
                             {rc.code} · {rc.name}
-                          </span>
+                          </Badge>
                         </GlossaryTooltip>
-                      </td>
-                      <td>{rc.areas}</td>
-                      <td>{rc.requiredDiversity}</td>
-                    </tr>
+                      </TableCell>
+                      <TableCell>{rc.areas}</TableCell>
+                      <TableCell>{rc.requiredDiversity}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
-          </section>
+          </Card>
 
-          <section className="card" aria-label="Versionierte Skills in MOBAdev">
-            <div className="card-header">
-              <h2 className="card-title">Skills ({governance.skills.length})</h2>
+          <Card className={styles.card} appearance="filled" aria-label="Versioned Skills in MOBAdev">
+            <div className={styles.cardHeader}>
+              <h2 className={styles.title}>Skills ({governance.skills.length})</h2>
             </div>
-            <div className="hygiene-list">
+
+            <div className={styles.skillList}>
               {governance.skills.map((skill) => (
-                <div key={skill.name} className="hygiene-row">
-                  <div className="hygiene-row-main">
-                    <span className="hygiene-name">{skill.name}</span>
-                    <span className="hygiene-sub">{skill.description}</span>
+                <div key={skill.name} className={styles.skillRow}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                    <Text weight="semibold" size={200}>
+                      {skill.name}
+                    </Text>
+                    <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                      {skill.description}
+                    </Text>
                   </div>
-                  <span className="model-chip mono">{skill.relativePath}</span>
+                  <Badge appearance="outline" color="subtle" shape="rounded" className="mono">
+                    {skill.relativePath}
+                  </Badge>
                 </div>
               ))}
             </div>
-          </section>
+          </Card>
         </div>
       </div>
     </div>
@@ -305,24 +465,21 @@ function SyncBadge({ status }: { status: string }) {
   switch (status) {
     case 'synced':
       return (
-        <span className="badge badge--green">
-          <CheckCircle2 size={12} aria-hidden="true" />
-          Synchron
-        </span>
+        <Badge appearance="tint" color="success" shape="rounded" icon={<CheckmarkCircle16Regular />}>
+          In Sync
+        </Badge>
       );
     case 'drift':
       return (
-        <span className="badge badge--amber">
-          <AlertTriangle size={12} aria-hidden="true" />
-          Abweichung / Drift
-        </span>
+        <Badge appearance="tint" color="warning" shape="rounded" icon={<Warning16Regular />}>
+          Drift Detected
+        </Badge>
       );
     default:
       return (
-        <span className="badge">
-          <Slash size={12} aria-hidden="true" />
-          Quelle fehlt
-        </span>
+        <Badge appearance="tint" color="subtle" shape="rounded" icon={<Prohibited16Regular />}>
+          Missing Source
+        </Badge>
       );
   }
 }

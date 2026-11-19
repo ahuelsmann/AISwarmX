@@ -202,9 +202,9 @@ public sealed class DashboardSnapshotService
         };
 
         var notice = monitor.ActiveSessionCount > 1
-            ? $"{monitor.ActiveSessionCount} aktive Sessions gefunden – überschüssige Sessions archivieren."
+            ? $"{monitor.ActiveSessionCount} active sessions found — archive extra sessions."
             : monitor.ActiveSessionCount == 0
-                ? "Keine aktive stehende Monitor-Session erkannt."
+                ? "No standing monitor session detected."
                 : null;
 
         return new ToolSessionHygiene(
@@ -221,13 +221,13 @@ public sealed class DashboardSnapshotService
         var list = items.ToList();
         if (list.All(s => s.Status == "unavailable"))
         {
-            return new SourceHealth("unavailable", now, "Keine lokalen Monitor-Quellen erreichbar.");
+            return new SourceHealth("unavailable", now, "No local monitor sources available.");
         }
 
         if (list.Any(s => s.Status is "degraded" or "unavailable"))
         {
             var degradedCount = list.Count(s => s.Status != "ok");
-            return new SourceHealth("degraded", now, $"{degradedCount} von {list.Count} Monitor-Quellen eingeschränkt.");
+            return new SourceHealth("degraded", now, $"{degradedCount} of {list.Count} monitor sources degraded.");
         }
 
         return new SourceHealth("ok", now);

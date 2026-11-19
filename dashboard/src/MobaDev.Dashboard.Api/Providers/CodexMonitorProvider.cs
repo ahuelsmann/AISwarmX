@@ -28,7 +28,7 @@ public sealed partial class CodexMonitorProvider
 
         if (!File.Exists(dbPath))
         {
-            return Task.FromResult(Unavailable(now, "unavailable", "Codex-Datenbank (state_5.sqlite) nicht gefunden.", automationStatus));
+            return Task.FromResult(Unavailable(now, "unavailable", "Codex database (state_5.sqlite) not found.", automationStatus));
         }
 
         try
@@ -60,7 +60,7 @@ public sealed partial class CodexMonitorProvider
 
             if (standingThreads.Count == 0)
             {
-                return Task.FromResult(Unavailable(now, "ok", "Kein aktiver Codex-Monitor-Thread gefunden.", automationStatus));
+                return Task.FromResult(Unavailable(now, "ok", "No active Codex Monitor thread found.", automationStatus));
             }
 
             var selected = standingThreads
@@ -77,7 +77,7 @@ public sealed partial class CodexMonitorProvider
                 : "standby";
 
             var notice = standingThreads.Count > 1
-                ? $"{standingThreads.Count} nicht-archivierte benannte Codex-Threads aktiv (Soll: 1)."
+                ? $"{standingThreads.Count} non-archived named Codex threads active (target: 1)."
                 : null;
 
             return Task.FromResult(new MonitorInfo(
@@ -99,7 +99,7 @@ public sealed partial class CodexMonitorProvider
             return Task.FromResult(Unavailable(
                 now,
                 "degraded",
-                "Datenbank kurz gesperrt – nächster Versuch läuft.",
+                "Database momentarily locked — retrying on next refresh.",
                 automationStatus));
         }
         catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException)
@@ -107,7 +107,7 @@ public sealed partial class CodexMonitorProvider
             return Task.FromResult(Unavailable(
                 now,
                 "unavailable",
-                $"Codex-Status nicht lesbar: {ex.Message}",
+                $"Codex state unreadable: {ex.Message}",
                 automationStatus));
         }
     }

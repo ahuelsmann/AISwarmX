@@ -79,6 +79,11 @@ public sealed class PipelineAndWorktreeProviderTests
                 return new CommandResult(1, string.Empty, "missing required scopes [read:project]");
             }
 
+            if (fileName == "gh" && args.Contains("issue"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
             return new CommandResult(1, string.Empty, "unexpected");
         });
 
@@ -105,7 +110,7 @@ public sealed class PipelineAndWorktreeProviderTests
         var mergedPr = Assert.Single(first.RecentlyMerged);
         Assert.Equal(495, mergedPr.Number);
         Assert.Equal("MERGED", mergedPr.State);
-        Assert.Equal("Gemergt", mergedPr.StateLabel);
+        Assert.Equal("Merged", mergedPr.StateLabel);
         Assert.NotNull(mergedPr.MergedAtUtc);
         Assert.Contains(mergedPr.Participants, p => p.Role == "Final Reviewer" && p.Model == "Claude Opus 5.5" && p.Status == "PASS");
         Assert.Contains(mergedPr.Participants, p => p.Role == "Cross-Family Verifier" && p.Model == "Gemini 4 Argon" && p.Status == "PASS");
@@ -117,6 +122,128 @@ public sealed class PipelineAndWorktreeProviderTests
         Assert.True(second.Source.FromCache);
         Assert.Single(second.PullRequests);
         Assert.Single(second.RecentlyMerged);
+    }
+
+    [Fact]
+    public async Task PipelineProvider_ExtractsLinkedIssuesAndParenthesizedRiskClassAndIgnoresNone()
+    {
+        var issuesJson = """
+            [
+              {
+                "number": 366,
+                "title": "RF-09: Coverage and mutation ratchets",
+                "url": "https://github.com/ahuelsmann/MOBAflow/issues/366",
+                "state": "OPEN"
+              },
+              {
+                "number": 451,
+                "title": "RF-10: Formatting baseline and gate",
+                "url": "https://github.com/ahuelsmann/MOBAflow/issues/451",
+                "state": "OPEN"
+              },
+              {
+                "number": 47,
+                "title": "Quality and refactoring programme: RF-01 through RF-18",
+                "url": "https://github.com/ahuelsmann/MOBAflow/issues/47",
+                "state": "OPEN"
+              }
+            ]
+            """;
+
+        var openPrJson = """
+            [
+              {
+                "number": 499,
+                "title": "docs(format): final-newline rule and RF-10 Windows inventory (#451, slice 1)",
+                "url": "https://github.com/ahuelsmann/MOBAflow/pull/499",
+                "headRefName": "claude/rf10-rules",
+                "isDraft": false,
+                "mergeStateStatus": "CLEAN",
+                "autoMergeRequest": null,
+                "updatedAt": "2026-11-19T14:00:00Z",
+                "body": "## Slice header\n\n- Issue: #451\n- Risk class (H/M/L): M (formatting baseline)",
+                "statusCheckRollup": [],
+                "comments": [],
+                "closingIssuesReferences": []
+              },
+              {
+                "number": 486,
+                "title": "RF-09 completion: further mutation lanes, last Safe-Mode sites and close-out",
+                "url": "https://github.com/ahuelsmann/MOBAflow/pull/486",
+                "headRefName": "claude/issue-366-rf09-completion",
+                "isDraft": true,
+                "mergeStateStatus": "BEHIND",
+                "autoMergeRequest": null,
+                "updatedAt": "2026-11-18T21:00:00Z",
+                "body": "## Related work\nRefs #366\nRefs #47",
+                "statusCheckRollup": [],
+                "comments": [],
+                "closingIssuesReferences": []
+              },
+              {
+                "number": 495,
+                "title": "build(deps): bump Windows App SDK 2.7.0",
+                "url": "https://github.com/ahuelsmann/MOBAflow/pull/495",
+                "headRefName": "claude/deps-494",
+                "isDraft": false,
+                "mergeStateStatus": "CLEAN",
+                "autoMergeRequest": null,
+                "updatedAt": "2026-11-19T12:00:00Z",
+                "body": "## Slice header\n\n- Issue: none (Dependabot #494)\n- Risk class (H/M/L): M (Windows desktop runtime package)",
+                "statusCheckRollup": [],
+                "comments": [],
+                "closingIssuesReferences": []
+              }
+            ]
+            """;
+
+        var runner = new FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("open"))
+            {
+                return new CommandResult(0, openPrJson, string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("merged"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("issue"))
+            {
+                return new CommandResult(0, issuesJson, string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("project"))
+            {
+                return new CommandResult(1, string.Empty, "missing scope");
+            }
+
+            return new CommandResult(1, string.Empty, "unexpected");
+        });
+
+        var provider = new PipelineProvider(runner);
+        var result = await provider.GetPipelineAsync(new DashboardOptions(), CancellationToken.None);
+
+        Assert.Equal("ok", result.Source.Status);
+        Assert.Equal(3, result.PullRequests.Count);
+
+        var pr499 = Assert.Single(result.PullRequests, p => p.Number == 499);
+        Assert.Equal("M", pr499.RiskClass);
+        var issue451 = Assert.Single(pr499.LinkedIssues);
+        Assert.Equal(451, issue451.Number);
+        Assert.Equal("RF-10: Formatting baseline and gate", issue451.Title);
+        Assert.Equal("https://github.com/ahuelsmann/MOBAflow/issues/451", issue451.Url);
+        Assert.Equal("OPEN", issue451.State);
+
+        var pr486 = Assert.Single(result.PullRequests, p => p.Number == 486);
+        Assert.Equal(2, pr486.LinkedIssues.Count);
+        Assert.Contains(pr486.LinkedIssues, i => i.Number == 366 && i.Title == "RF-09: Coverage and mutation ratchets");
+        Assert.Contains(pr486.LinkedIssues, i => i.Number == 47 && i.Title == "Quality and refactoring programme: RF-01 through RF-18");
+
+        var pr495 = Assert.Single(result.PullRequests, p => p.Number == 495);
+        Assert.Equal("M", pr495.RiskClass);
+        Assert.Empty(pr495.LinkedIssues);
     }
 
     [Fact]
@@ -152,7 +279,7 @@ public sealed class PipelineAndWorktreeProviderTests
             new Contracts.PullRequestInfo(
                 492, "docs", "https://github.com/ahuelsmann/MOBAflow/pull/492",
                 "codex/strategy-mobaflow-kanban-board", "OPEN", "Draft", true, false,
-                "BEHIND", "pass", "pass", "L", [], DateTimeOffset.UtcNow, null, null, [])
+                "BEHIND", "pass", "pass", "L", [], DateTimeOffset.UtcNow, null, null, [], [])
         };
 
         var (worktrees, health) = await provider.GetWorktreesAsync(paths, openPrs, CancellationToken.None);

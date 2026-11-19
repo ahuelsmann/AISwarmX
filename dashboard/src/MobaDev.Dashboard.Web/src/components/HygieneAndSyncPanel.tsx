@@ -1,12 +1,107 @@
 import {
-  AlertTriangle,
-  ArrowRight,
-  CheckCircle2,
-  FolderGit2,
-  ShieldCheck
-} from 'lucide-react';
+  Badge,
+  Button,
+  Card,
+  MessageBar,
+  MessageBarBody,
+  Text,
+  makeStyles,
+  tokens
+} from '@fluentui/react-components';
+import {
+  ArrowRight16Regular,
+  CheckmarkCircle16Regular,
+  Folder16Regular,
+  ShieldTask16Regular,
+  Warning16Regular
+} from '@fluentui/react-icons';
 import type { GovernanceResponse, HygieneResponse } from '../types/dashboard';
 import { GlossaryTooltip } from './GlossaryTooltip';
+
+const useStyles = makeStyles({
+  stack: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '14px'
+  },
+  card: {
+    padding: '14px 16px',
+    gap: '12px',
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px',
+    flexWrap: 'wrap'
+  },
+  titleGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap'
+  },
+  title: {
+    margin: 0,
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1
+  },
+  summaryGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gap: '8px'
+  },
+  statTile: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '2px',
+    padding: '10px 8px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  statValue: {
+    fontSize: tokens.fontSizeBase500,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1
+  },
+  statLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2
+  },
+  list: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px'
+  },
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '10px',
+    padding: '8px 10px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  rowMain: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    minWidth: 0
+  },
+  rowSub: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
+  }
+});
 
 interface HygieneAndSyncPanelProps {
   governance: GovernanceResponse;
@@ -19,148 +114,171 @@ export function HygieneAndSyncPanel({
   hygiene,
   onOpenMatrixSync
 }: HygieneAndSyncPanelProps) {
+  const styles = useStyles();
   const driftTotal = governance.driftCount + governance.missingCount;
 
   return (
-    <div className="side-stack">
-      {/* Sync-/Drift-Kurzstatus */}
-      <section className="card" aria-label="Konfigurations-Sync MOBAdev">
-        <div className="card-header">
-          <div className="card-title-row">
-            <ShieldCheck size={17} aria-hidden="true" />
-            <h2 className="card-title">Sync-Status (Lokal vs. MOBAdev)</h2>
+    <div className={styles.stack}>
+      {/* Rules State · Actual vs. Target */}
+      <Card className={styles.card} appearance="filled" aria-label="Rules State Actual vs Target">
+        <div className={styles.header}>
+          <div className={styles.titleGroup}>
+            <ShieldTask16Regular aria-hidden="true" />
+            <h2 className={styles.title}>Rules State · Actual vs. Target</h2>
             <GlossaryTooltip term="Drift" showIcon />
           </div>
+
           {driftTotal === 0 ? (
-            <span className="badge badge--green">
-              <CheckCircle2 size={12} aria-hidden="true" />
-              Synchron
-            </span>
+            <Badge appearance="tint" color="success" shape="rounded" icon={<CheckmarkCircle16Regular />}>
+              In Sync
+            </Badge>
           ) : (
-            <span className="badge badge--amber tabular">
-              <AlertTriangle size={12} aria-hidden="true" />
-              {driftTotal} Abweichung(en)
-            </span>
+            <Badge appearance="tint" color="warning" shape="rounded" icon={<Warning16Regular />}>
+              <span className="tabular">
+                {driftTotal === 1 ? '1 Deviation' : `${driftTotal} Deviations`}
+              </span>
+            </Badge>
           )}
         </div>
 
-        <div className="sync-summary-grid">
-          <div className="stat-tile">
-            <span className="stat-value tabular">{governance.syncedCount}</span>
-            <span className="stat-label">Synchron</span>
+        <div className={styles.summaryGrid}>
+          <div className={styles.statTile}>
+            <span className={`${styles.statValue} tabular`}>{governance.syncedCount}</span>
+            <span className={styles.statLabel}>In Sync</span>
           </div>
-          <div className="stat-tile">
-            <span className="stat-value tabular">{governance.driftCount}</span>
-            <span className="stat-label">Abweichung</span>
+          <div className={styles.statTile}>
+            <span className={`${styles.statValue} tabular`}>{governance.driftCount}</span>
+            <span className={styles.statLabel}>Drift</span>
           </div>
-          <div className="stat-tile">
-            <span className="stat-value tabular">{governance.missingCount}</span>
-            <span className="stat-label">Fehlend</span>
+          <div className={styles.statTile}>
+            <span className={`${styles.statValue} tabular`}>{governance.missingCount}</span>
+            <span className={styles.statLabel}>Missing</span>
           </div>
         </div>
 
-        <button
-          type="button"
-          className="btn btn-link"
+        <Button
+          size="small"
+          appearance="subtle"
+          icon={<ArrowRight16Regular />}
+          iconPosition="after"
           onClick={() => onOpenMatrixSync(driftTotal > 0)}
+          style={{ justifyContent: 'space-between' }}
         >
-          {driftTotal > 0 ? 'Abweichungen prüfen' : 'Matrix & Sync öffnen'}
-          <ArrowRight size={13} aria-hidden="true" />
-        </button>
-      </section>
+          {driftTotal > 0 ? 'Review Deviations' : 'Open Matrix & Rules'}
+        </Button>
+      </Card>
 
-      {/* Session-Hygiene */}
-      <section className="card" aria-label="Session-Hygiene pro Tool">
-        <div className="card-header">
-          <h2 className="card-title">Session-Hygiene</h2>
-          <span className="slot-label">Ziel: 1 stehender Monitor</span>
+      {/* Session Hygiene · Actual vs. Target */}
+      <Card className={styles.card} appearance="filled" aria-label="Session Hygiene per Tool">
+        <div className={styles.header}>
+          <h2 className={styles.title}>Session Hygiene · Actual vs. Target</h2>
+          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+            Target: 1 standing monitor
+          </Text>
         </div>
 
-        <div className="hygiene-list">
+        <div className={styles.list}>
           {hygiene.sessions.map((session) => (
-            <div key={session.tool} className="hygiene-row">
-              <div className="hygiene-row-main">
-                <span className="hygiene-name">{session.tool}</span>
-                <span className="hygiene-sub">
+            <div key={session.tool} className={styles.row}>
+              <div className={styles.rowMain}>
+                <Text weight="semibold" size={200}>
+                  {session.tool}
+                </Text>
+                <span className={styles.rowSub}>
                   {session.notice ? session.notice : session.monitorName}
                 </span>
               </div>
 
               {session.status === 'ok' && (
-                <span className="badge badge--green tabular">
-                  <CheckCircle2 size={12} aria-hidden="true" />
-                  {session.actualCount} / {session.targetCount} Soll
-                </span>
+                <Badge
+                  appearance="tint"
+                  color="success"
+                  shape="rounded"
+                  icon={<CheckmarkCircle16Regular />}
+                >
+                  <span className="tabular">
+                    {session.actualCount} / {session.targetCount} Target
+                  </span>
+                </Badge>
               )}
               {session.status === 'inactive' && (
-                <span className="badge tabular">
-                  {session.actualCount} / {session.targetCount} Inaktiv
-                </span>
+                <Badge appearance="tint" color="subtle" shape="rounded">
+                  <span className="tabular">
+                    {session.actualCount} / {session.targetCount} Inactive
+                  </span>
+                </Badge>
               )}
               {session.status === 'warning' && (
-                <span className="badge badge--amber tabular">
-                  <AlertTriangle size={12} aria-hidden="true" />
-                  {session.actualCount} / {session.targetCount} Warnung
-                </span>
+                <Badge appearance="tint" color="warning" shape="rounded" icon={<Warning16Regular />}>
+                  <span className="tabular">
+                    {session.actualCount} / {session.targetCount} Warning
+                  </span>
+                </Badge>
               )}
             </div>
           ))}
         </div>
-      </section>
+      </Card>
 
-      {/* Git-Worktrees */}
-      <section className="card" aria-label="Git-Worktrees MOBAflow">
-        <div className="card-header">
-          <div className="card-title-row">
-            <FolderGit2 size={17} aria-hidden="true" />
-            <h2 className="card-title">Git-Worktrees (MOBAflow)</h2>
+      {/* Git Worktrees (MOBAflow) */}
+      <Card className={styles.card} appearance="filled" aria-label="Git Worktrees MOBAflow">
+        <div className={styles.header}>
+          <div className={styles.titleGroup}>
+            <Folder16Regular aria-hidden="true" />
+            <h2 className={styles.title}>Git Worktrees (MOBAflow)</h2>
             <GlossaryTooltip term="Worktree" showIcon />
           </div>
+
           {hygiene.staleWorktreeCount > 0 ? (
-            <span className="badge badge--amber tabular">
-              <AlertTriangle size={12} aria-hidden="true" />
-              {hygiene.staleWorktreeCount} veraltet
-            </span>
+            <Badge appearance="tint" color="warning" shape="rounded" icon={<Warning16Regular />}>
+              <span className="tabular">{hygiene.staleWorktreeCount} Stale</span>
+            </Badge>
           ) : (
-            <span className="badge badge--green tabular">{hygiene.worktrees.length} sauber</span>
+            <Badge appearance="tint" color="success" shape="rounded">
+              <span className="tabular">{hygiene.worktrees.length} Clean</span>
+            </Badge>
           )}
         </div>
 
         {hygiene.source.status !== 'ok' && hygiene.source.notice && (
-          <div className="notice-banner notice-banner--amber">
-            <AlertTriangle size={14} aria-hidden="true" />
-            <span>{hygiene.source.notice}</span>
-          </div>
+          <MessageBar intent="warning" layout="multiline">
+            <MessageBarBody>{hygiene.source.notice}</MessageBarBody>
+          </MessageBar>
         )}
 
-        <div className="hygiene-list">
+        <div className={styles.list}>
           {hygiene.worktrees.map((wt) => (
-            <div key={`${wt.folderName}-${wt.branch}`} className="hygiene-row">
-              <div className="hygiene-row-main">
-                <span className="hygiene-name mono" title={wt.branch}>
+            <div key={`${wt.folderName}-${wt.branch}`} className={styles.row}>
+              <div className={styles.rowMain}>
+                <Text weight="semibold" size={200} className="mono" title={wt.branch}>
                   {wt.branch}
-                </span>
-                <span className="hygiene-sub mono" title={wt.folderName}>
+                </Text>
+                <span className={`${styles.rowSub} mono`} title={wt.folderName}>
                   {wt.folderName} · {wt.headShort}
                 </span>
               </div>
 
               {wt.status === 'stale' && (
-                <span className="badge badge--amber">
-                  <AlertTriangle size={12} aria-hidden="true" />
-                  Veraltet / Gemergt
-                </span>
+                <Badge appearance="tint" color="warning" shape="rounded" icon={<Warning16Regular />}>
+                  Stale / Merged
+                </Badge>
               )}
               {wt.status === 'active' && (
-                <span className="badge badge--blue tabular">
-                  Aktiv{wt.linkedPrNumber ? ` (#${wt.linkedPrNumber})` : ''}
-                </span>
+                <Badge appearance="tint" color="brand" shape="rounded">
+                  <span className="tabular">
+                    Active{wt.linkedPrNumber ? ` (#${wt.linkedPrNumber})` : ''}
+                  </span>
+                </Badge>
               )}
-              {wt.status === 'main' && <span className="badge badge--green">Main</span>}
+              {wt.status === 'main' && (
+                <Badge appearance="tint" color="success" shape="rounded">
+                  Main
+                </Badge>
+              )}
             </div>
           ))}
         </div>
-      </section>
+      </Card>
     </div>
   );
 }

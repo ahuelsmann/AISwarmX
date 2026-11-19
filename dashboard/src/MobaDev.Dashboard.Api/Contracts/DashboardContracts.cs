@@ -92,6 +92,12 @@ public sealed record TaskParticipantInfo(
     string Status,
     string EvidenceSource);
 
+public sealed record LinkedIssueInfo(
+    int Number,
+    string? Title,
+    string Url,
+    string? State);
+
 public sealed record PullRequestInfo(
     int Number,
     string Title,
@@ -109,7 +115,8 @@ public sealed record PullRequestInfo(
     DateTimeOffset UpdatedAtUtc,
     DateTimeOffset? MergedAtUtc,
     string? ProjectStatus,
-    IReadOnlyList<TaskParticipantInfo> Participants);
+    IReadOnlyList<TaskParticipantInfo> Participants,
+    IReadOnlyList<LinkedIssueInfo> LinkedIssues);
 
 public sealed record PipelineResponse(
     DateTimeOffset GeneratedAtUtc,

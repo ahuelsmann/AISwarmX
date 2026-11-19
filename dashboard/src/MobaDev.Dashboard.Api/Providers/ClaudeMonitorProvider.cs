@@ -28,13 +28,13 @@ public sealed partial class ClaudeMonitorProvider
         var sessionsDir = Path.Combine(paths.ClaudeHomePath, "sessions");
         if (!Directory.Exists(sessionsDir))
         {
-            return Task.FromResult(Offline(now, "Claude-Sessions-Verzeichnis nicht gefunden."));
+            return Task.FromResult(Offline(now, "Claude sessions directory not found."));
         }
 
         var sessions = LoadSessionRecords(sessionsDir);
         if (sessions.Count == 0)
         {
-            return Task.FromResult(Offline(now, "Keine aktive Claude-Session erkannt."));
+            return Task.FromResult(Offline(now, "No active Claude session detected."));
         }
 
         var selected = sessions
@@ -64,7 +64,7 @@ public sealed partial class ClaudeMonitorProvider
         }
 
         var notice = sessions.Count > 1
-            ? $"{sessions.Count} aktive Claude-Sessions erkannt (Soll: 1)."
+            ? $"{sessions.Count} active Claude sessions detected (target: 1)."
             : null;
 
         return Task.FromResult(new MonitorInfo(
