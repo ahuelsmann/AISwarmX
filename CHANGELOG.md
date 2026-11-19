@@ -5,7 +5,14 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAdev generations (`Gen#1 = 1.x`, `Gen#2 = 2.x`, `Gen#3 = 3.0.0+`).
 
-## [3.1.2] - 2026-11-20
+## [3.1.3] - 2026-11-20
+
+### Added
+- **Claude Scheduled Task Template (`docs/claude-ready-intake-task.md`):** Added a ready-to-paste configuration guide and `COO: Kanban Ready Intake` prompt for Claude Desktop *Geplante Aufgaben*, linked from [`docs/ai-strategy-and-pilots.md`](docs/ai-strategy-and-pilots.md) and [`agents/README.md`](agents/README.md).
+
+---
+
+## [3.1.2] - 2026-11-20 (PR #18)
 
 ### Added
 - **Kanban `Planned` → `Ready` Maintainer Pull-Trigger & Local Automation Strategy (`manifest.md`, `docs/delivery-workflow.md`, `docs/ai-strategy-and-pilots.md`):** Documented `Planned` → `Ready` as the explicit maintainer pull-trigger with `Claude Monitor` (`COO`) as sole intake owner (`In progress` handoff, WIP/lock/`needs-specification` guardrails, read-only dashboard invariant), alongside local GitHub GraphQL polling options (`Zero-Token` Windows pre-check vs. Claude Scheduled Tasks / `/loop` vs. Codex/Antigravity roles).

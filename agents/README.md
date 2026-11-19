@@ -12,6 +12,8 @@ This folder stores sanitized, versioned backups of custom agents and rules acros
 
 When copying `agents/antigravity/agents/head-of-ai-strategy.md` or `agents/antigravity/rules/mobaflow-agent-network.md` to a local machine, replace `<repo-root>/MOBAflow` with your local `MOBAflow` checkout path if desired.
 
+For **Claude Desktop Scheduled Tasks (*Geplante Aufgaben*)**, see the copy-paste `COO: Kanban Ready Intake` prompt template in [`docs/claude-ready-intake-task.md`](../docs/claude-ready-intake-task.md).
+
 ## Antigravity frontmatter rule
 
 Do **not** add a raw `model: <model-id>` field (such as `gemini-pro-orchestrator-neon`) to the YAML frontmatter of `.md` files in `~/.gemini/config/agents/`. The Antigravity loader silently ignores agent files with explicit model IDs in frontmatter. Instead, select the model in the Antigravity UI picker or via CLI flag (`agy --agent <name> --model <model-id>`).
