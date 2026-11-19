@@ -1,0 +1,95 @@
+using System.Net;
+using System.Net.Http.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using MobaDev.Dashboard.Api.Contracts;
+using MobaDev.Dashboard.Api.Providers;
+using Xunit;
+
+namespace MobaDev.Dashboard.Api.Tests;
+
+public sealed class ApiEndpointsIntegrationTests
+{
+    [Fact]
+    public async Task AllGetEndpointsReturnOkAndPostIsRejectedAsReadOnly()
+    {
+        using var fx = new TempDashboardFixture();
+        await File.WriteAllTextAsync(Path.Combine(fx.MobaDevPath, "manifest.md"), "# MOBAdev\n");
+
+        var runner = new PipelineAndWorktreeProviderTests.FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("pr"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("project"))
+            {
+                return new CommandResult(1, string.Empty, "missing scope");
+            }
+
+            if (fileName == "git" && args.Contains("worktree"))
+            {
+                return new CommandResult(
+                    0,
+                    $"worktree {fx.MobaFlowPath.Replace('\\', '/')}\nHEAD abcdef123456\nbranch refs/heads/main\n",
+                    string.Empty);
+            }
+
+            return new CommandResult(1, string.Empty, "unexpected");
+        });
+
+        await using var factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Testing");
+                builder.ConfigureAppConfiguration((_, config) =>
+                {
+                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Dashboard:BindUrl"] = "http://127.0.0.1:5179",
+                        ["Dashboard:MobaDevRepoPath"] = fx.MobaDevPath,
+                        ["Dashboard:MobaFlowRepoPath"] = fx.MobaFlowPath,
+                        ["Dashboard:ClaudeHomePath"] = fx.ClaudeHomePath,
+                        ["Dashboard:CodexHomePath"] = fx.CodexHomePath,
+                        ["Dashboard:AntigravityHomePath"] = fx.AntigravityHomePath,
+                        ["Dashboard:GeminiConfigPath"] = fx.GeminiConfigPath
+                    });
+                });
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<ICommandRunner>();
+                    services.AddSingleton<ICommandRunner>(runner);
+                });
+            });
+
+        using var client = factory.CreateClient();
+
+        var healthRes = await client.GetAsync("/api/health");
+        Assert.Equal(HttpStatusCode.OK, healthRes.StatusCode);
+        var health = await healthRes.Content.ReadFromJsonAsync<HealthResponse>();
+        Assert.NotNull(health);
+        Assert.True(health.ReadOnly);
+        Assert.Equal("http://127.0.0.1:5179", health.BindAddress);
+
+        var snapshotRes = await client.GetAsync("/api/snapshot");
+        Assert.Equal(HttpStatusCode.OK, snapshotRes.StatusCode);
+        var snapshot = await snapshotRes.Content.ReadFromJsonAsync<DashboardSnapshot>();
+        Assert.NotNull(snapshot);
+        Assert.True(snapshot.ReadOnly);
+        Assert.Equal(3, snapshot.Monitors.Monitors.Count);
+        Assert.Single(snapshot.Hygiene.Worktrees);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/monitors")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/governance")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/pipeline")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/hygiene")).StatusCode);
+
+        // Strictly read-only: POST must be rejected
+        using var postRes = await client.PostAsJsonAsync("/api/snapshot", new { });
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, postRes.StatusCode);
+    }
+}
