@@ -418,10 +418,13 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('Read-Only · 127.0.0.1')).toBeInTheDocument();
 
-    // Row 1: Compact monitor cards with human-friendly RRULE label
-    expect(screen.getByRole('heading', { name: 'Claude Monitor' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Codex Monitor' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Antigravity Monitor' })).toBeInTheDocument();
+    // Row 1: Compact monitor cards ordered Codex -> Claude -> Antigravity with human-friendly RRULE label
+    const monitorSection = screen.getByRole('region', { name: 'Live Monitor Status' });
+    expect(
+      within(monitorSection)
+        .getAllByRole('heading', { level: 2 })
+        .map((h) => h.textContent)
+    ).toEqual(['Codex Monitor', 'Claude Monitor', 'Antigravity Monitor']);
     expect(screen.getByText(/Reset: 12am \(Europe\/Berlin\)/)).toBeInTheDocument();
     expect(screen.getByText('Active · Hourly')).toBeInTheDocument();
     expect(screen.getByText('Standby')).toBeInTheDocument();
@@ -515,7 +518,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
   );
 
   it(
-    'renders read-only Config Markdown tab with Formatted and Raw views',
+    'renders read-only Configuration Markdown tab without tab icon and supports Formatted and Raw views',
     async () => {
     const user = userEvent.setup();
     stubDashboardFetch();
@@ -523,7 +526,9 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     render(<App />);
     await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
 
-    await user.click(screen.getByRole('tab', { name: 'Config' }));
+    const configTab = screen.getByRole('tab', { name: 'Configuration' });
+    expect(configTab.querySelector('svg')).toBeNull();
+    await user.click(configTab);
     expect(await screen.findByRole('heading', { name: 'MOBAdev Manifest' })).toBeInTheDocument();
     expect(screen.getByText(/Central configuration baseline for/)).toBeInTheDocument();
 

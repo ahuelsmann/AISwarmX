@@ -18,7 +18,6 @@ import {
   ArrowRight16Regular,
   CheckmarkCircle16Regular,
   Desktop16Regular,
-  DocumentText16Regular,
   Eye16Regular,
   Warning16Regular,
   WeatherMoon16Regular,
@@ -364,9 +363,7 @@ export function StatusHeader({
                 )}
               </span>
             </Tab>
-            <Tab value="mobadev-docs" icon={<DocumentText16Regular />}>
-              Config
-            </Tab>
+            <Tab value="mobadev-docs">Configuration</Tab>
           </TabList>
         </nav>
       </div>

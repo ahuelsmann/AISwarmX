@@ -156,7 +156,7 @@ public sealed class DashboardSnapshotService
 
                 await Task.WhenAll(claudeTask, codexTask, antigravityTask, governanceTask, worktreeTask).ConfigureAwait(false);
 
-                var monitorList = new[] { claudeTask.Result, codexTask.Result, antigravityTask.Result };
+                var monitorList = new[] { codexTask.Result, claudeTask.Result, antigravityTask.Result };
                 var monitorSource = AggregateSourceHealth(monitorList.Select(m => m.Source), now);
                 monitors = new MonitorsResponse(now, monitorList, monitorSource);
 

@@ -85,6 +85,18 @@ const useStyles = makeStyles({
   }
 });
 
+const MONITOR_DISPLAY_ORDER = ['codex-monitor', 'claude-monitor', 'antigravity-monitor'];
+
+function sortMonitors(monitors: MonitorInfo[]): MonitorInfo[] {
+  return [...monitors].sort((a, b) => {
+    const idxA = MONITOR_DISPLAY_ORDER.indexOf(a.id);
+    const idxB = MONITOR_DISPLAY_ORDER.indexOf(b.id);
+    const rankA = idxA === -1 ? Number.MAX_SAFE_INTEGER : idxA;
+    const rankB = idxB === -1 ? Number.MAX_SAFE_INTEGER : idxB;
+    return rankA - rankB;
+  });
+}
+
 interface MonitorCardsProps {
   monitors: MonitorInfo[];
   nowMs: number;
@@ -93,11 +105,12 @@ interface MonitorCardsProps {
 
 export function MonitorCards({ monitors, nowMs, isDark }: MonitorCardsProps) {
   const styles = useStyles();
+  const orderedMonitors = sortMonitors(monitors);
 
   return (
     <section aria-label="Live Monitor Status">
       <div className={styles.grid}>
-        {monitors.map((monitor) => {
+        {orderedMonitors.map((monitor) => {
           const automationLabel = formatAutomationStatusEn(monitor.automationStatus);
 
           return (
