@@ -1,6 +1,6 @@
 # MOBAdev Agent Network Dashboard — Architektur- & UI/UX-Konzept
 
-**Status:** Entwurf (Slice 1 — Design Note)  
+**Status:** Umgesetzt (v1 — Slices 1–3 komplett)  
 **Verantwortlich:** `Antigravity Monitor` (`Head of AI Strategy`, `P3`) gemeinsam mit `Head of UI/UX` (`P3`)  
 **Ziel-Repository:** `ahuelsmann/MOBAdev` (`PRIVATE`, unter `dashboard/`)  
 **Stack:** ASP.NET Core Minimal API (`.NET 10`) + React (`TypeScript` + `Vite`)

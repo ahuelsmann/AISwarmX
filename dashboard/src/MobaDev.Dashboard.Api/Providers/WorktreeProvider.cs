@@ -117,7 +117,8 @@ public sealed class WorktreeProvider
             currentBranch = "(detached)";
         }
 
-        foreach (var rawLine in stdOut.Split(['\r', '\n']))
+        var normalizedStdOut = stdOut.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        foreach (var rawLine in normalizedStdOut.Split('\n'))
         {
             var line = rawLine.Trim();
             if (string.IsNullOrEmpty(line))
