@@ -5,7 +5,14 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAdev generations (`Gen#1 = 1.x`, `Gen#2 = 2.x`, `Gen#3 = 3.0.0+`).
 
-## [3.1.1] - 2026-11-20
+## [3.1.2] - 2026-11-20
+
+### Added
+- **Kanban `Planned` → `Ready` Maintainer Pull-Trigger & Local Automation Strategy (`manifest.md`, `docs/delivery-workflow.md`, `docs/ai-strategy-and-pilots.md`):** Documented `Planned` → `Ready` as the explicit maintainer pull-trigger with `Claude Monitor` (`COO`) as sole intake owner (`In progress` handoff, WIP/lock/`needs-specification` guardrails, read-only dashboard invariant), alongside local GitHub GraphQL polling options (`Zero-Token` Windows pre-check vs. Claude Scheduled Tasks / `/loop` vs. Codex/Antigravity roles).
+
+---
+
+## [3.1.1] - 2026-11-20 (PR #17)
 
 ### Changed
 - **1:1 GitHub Kanban Sync (`PipelineProvider.cs`, `DashboardContracts.cs`, `PipelineCard.tsx`):** Updated the third Task & PR Pipeline toggle to **`Kanban Board (N)`** mirroring GitHub Project #1 (`Ready`, `In progress`, `In review`) 1:1 with both **PRs and Issues**, live column summary counters, direct `Open GitHub Kanban` link, and zero hidden items (board-drift warnings appear inline without filtering items out).

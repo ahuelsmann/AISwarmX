@@ -37,6 +37,15 @@ Document `Orchestrator (Neon)` as an explicit `P3`/`P4` option in `MOBAflow/docs
 - **Updated:** 2026-11-19
 - **Assignment:** `Codex Monitor` (`Technical Director & CPM`, `P2`) runs on **`Sol 6.2`** (`gpt-6.2-sol`) in ChatGPT Codex for backlog precision, Spec Kit alignment, build-graph checks (`Moba.slnx`), and 30-minute board/lock reviews.
 
+## Kanban `Ready` Pull-Trigger & Local Automation Strategy
+
+- **Single Intake Owner (`Claude Monitor` / `COO`):** Only `Claude Monitor` picks up issues moved to **`Ready`** on the MOBAflow Kanban board. Keeping a single intake owner eliminates race conditions across Claude Code, ChatGPT Codex, and Antigravity, while the local MOBAdev dashboard stays strictly read-only.
+- **Local Pull-Polling Instead of Inbound Webhooks:** Because local workstations stay loopback-only (`127.0.0.1`, no open inbound ports or tunnels) and cloud-hosted autonomous agent teams (`MOBAflow #337`) remain deferred, GitHub changes are discovered locally via lightweight filtered GraphQL polling (`status:Ready`, `< 1s`).
+- **Tool-Native Automation Options & Quota Hygiene:**
+  - **Claude Desktop Scheduled Tasks (*Geplante Aufgaben*) / CLI `/loop`:** Native fit for `Claude Monitor` (`COO`), best run on a lightweight `P4`/Sonnet pre-check or conservative 30–60 minute cadence that exits silently whenever `Ready == 0` to protect Opus 5.5 quota.
+  - **Zero-Token Local Pre-Check (Windows Task Scheduler + `gh api graphql`):** Optimal for fast 2–5 minute responsiveness with **0 LLM tokens** consumed while `Ready == 0`; invokes `claude` only when an actual `Ready` issue is waiting.
+  - **ChatGPT Codex Automations & Antigravity `/automation`:** Keep Codex's hourly `automation.toml` strictly as a read-only `TD/CPM` observer and reserve Antigravity `/automation` cron sidecars for periodic strategy/hygiene checks — never create competing intake triggers.
+
 ## Evaluated & Deferred Model Record: `Gemini 4 Carbon`
 
 - **Reviewed:** 2026-11-18
