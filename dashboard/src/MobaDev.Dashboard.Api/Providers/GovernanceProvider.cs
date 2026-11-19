@@ -32,7 +32,7 @@ public sealed partial class GovernanceProvider
         if (profiles.Count == 0 && roles.Count == 0)
         {
             sourceStatus = "degraded";
-            notice = "MOBAflow Governance-Dokumente nicht gefunden; zeige nur MOBAdev-Bestand.";
+            notice = "MOBAflow governance documents not found; showing MOBAdev inventory only.";
         }
 
         return Task.FromResult(new GovernanceResponse(
@@ -174,9 +174,9 @@ public sealed partial class GovernanceProvider
                 {
                     (not null, not null) when repoHash == localHash => ("synced", (string?)null),
                     (not null, not null) => ("drift", DescribeDrift(repoContent!, localContent!, paths.MobaFlowRepoPath)),
-                    (not null, null) => ("missing_local", "Lokal nicht installiert"),
-                    (null, not null) => ("missing_repo", "Fehlt im MOBAdev-Backup"),
-                    _ => ("missing_local", "Quelle fehlt")
+                    (not null, null) => ("missing_local", "Not installed locally"),
+                    (null, not null) => ("missing_repo", "Missing in MOBAdev backup"),
+                    _ => ("missing_local", "Source missing")
                 };
 
                 var primaryText = repoContent ?? localContent ?? string.Empty;
@@ -288,7 +288,7 @@ public sealed partial class GovernanceProvider
 
         var repoOnly = repoLines.Except(localLines).Count();
         var localOnly = localLines.Except(repoLines).Count();
-        return $"Inhalt weicht ab (+{localOnly}/-{repoOnly} Zeilen)";
+        return $"Content differs (+{localOnly}/-{repoOnly} lines)";
     }
 
     private static (string? Name, string? Description) ParseFrontmatter(string markdown)

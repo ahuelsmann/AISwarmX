@@ -63,10 +63,10 @@ public static class PrParticipantExtractor
                 Role: "Writer",
                 Profile: isP4 ? "P4" : "P1",
                 Model: isP4 ? "Claude Fable 5.2" : "Claude Opus 5.5",
-                Status: "Umgesetzt",
+                Status: "Implemented",
                 EvidenceSource: branch.StartsWith("claude/", StringComparison.OrdinalIgnoreCase)
-                    ? "Branch & PR-Body"
-                    : "PR-Body")));
+                    ? "Branch & PR Body"
+                    : "PR Body")));
             return;
         }
 
@@ -79,7 +79,7 @@ public static class PrParticipantExtractor
                 Role: "Writer",
                 Profile: "P2",
                 Model: "GPT-6 Astra",
-                Status: "Umgesetzt",
+                Status: "Implemented",
                 EvidenceSource: "Branch")));
             return;
         }
@@ -94,8 +94,8 @@ public static class PrParticipantExtractor
                 Role: "Writer",
                 Profile: "P3",
                 Model: "Gemini 4 Argon",
-                Status: "Umgesetzt",
-                EvidenceSource: "Branch / PR-Kommentar")));
+                Status: "Implemented",
+                EvidenceSource: "Branch / PR Comment")));
         }
     }
 
@@ -108,13 +108,13 @@ public static class PrParticipantExtractor
         if (string.Equals(authorLogin, "chatgpt-codex-connector", StringComparison.OrdinalIgnoreCase))
         {
             var status = text.Contains("usage limits", StringComparison.OrdinalIgnoreCase)
-                ? "Kontingent-Limit"
+                ? "Quota Limit"
                 : text.Contains("\"has_any_findings\":false", StringComparison.OrdinalIgnoreCase) ||
                   text.Contains("Didn't find any major issues", StringComparison.OrdinalIgnoreCase)
                     ? "PASS"
                     : text.Contains("\"has_any_findings\":true", StringComparison.OrdinalIgnoreCase)
                         ? "Findings"
-                        : "Geprüft";
+                        : "Reviewed";
 
             candidates.Add((2, new TaskParticipantInfo(
                 Agent: "Codex PR Reviewer",
@@ -135,17 +135,17 @@ public static class PrParticipantExtractor
             var status = text.Contains("Arming", StringComparison.OrdinalIgnoreCase) ||
                          text.Contains("**Go (COO", StringComparison.OrdinalIgnoreCase) ||
                          text.Contains("reviews clean", StringComparison.OrdinalIgnoreCase)
-                ? "Freigegeben"
-                : "Aktiv";
+                ? "Approved"
+                : "Active";
 
             candidates.Add((1, new TaskParticipantInfo(
                 Agent: "Claude Monitor",
                 Tool: "Claude Code",
-                Role: "COO (Steuerung & Gate)",
+                Role: "COO (Steering & Gate)",
                 Profile: "P1",
                 Model: "Claude Opus 5.5",
                 Status: status,
-                EvidenceSource: "COO-Kommentar")));
+                EvidenceSource: "COO Comment")));
         }
 
         // Companion Reviewer P2 / P1
@@ -158,8 +158,8 @@ public static class PrParticipantExtractor
                 Role: "Companion Reviewer",
                 Profile: "P2",
                 Model: "GPT-6 Astra",
-                Status: "Geprüft",
-                EvidenceSource: "Companion-Review")));
+                Status: "Reviewed",
+                EvidenceSource: "Companion Review")));
         }
 
         if (text.Contains("P1 companion", StringComparison.OrdinalIgnoreCase))
@@ -170,8 +170,8 @@ public static class PrParticipantExtractor
                 Role: "Companion Reviewer",
                 Profile: "P1",
                 Model: "Claude Opus 5.5",
-                Status: "Geprüft",
-                EvidenceSource: "Companion-Review")));
+                Status: "Reviewed",
+                EvidenceSource: "Companion Review")));
         }
 
         // Domain Specialists
@@ -183,8 +183,8 @@ public static class PrParticipantExtractor
                 Role: "UI/UX Specialist",
                 Profile: "P3",
                 Model: "Gemini 4 Argon",
-                Status: "Konsultiert / PASS",
-                EvidenceSource: "PR-Kommentar")));
+                Status: "Consulted · PASS",
+                EvidenceSource: "PR Comment")));
         }
 
         if (text.Contains("Head of AI Strategy", StringComparison.OrdinalIgnoreCase))
@@ -195,8 +195,8 @@ public static class PrParticipantExtractor
                 Role: "Head of AI Strategy",
                 Profile: "P3",
                 Model: "Gemini 4 Argon",
-                Status: "Beteiligt",
-                EvidenceSource: "PR-Kommentar")));
+                Status: "Involved",
+                EvidenceSource: "PR Comment")));
         }
 
         // Final P1 Reviewer
@@ -209,13 +209,13 @@ public static class PrParticipantExtractor
             text.Contains("Model gate:", StringComparison.OrdinalIgnoreCase))
         {
             var status = text.Contains("Model gate: BLOCKED", StringComparison.OrdinalIgnoreCase)
-                ? "Blockiert"
+                ? "Blocked"
                 : text.Contains("clean", StringComparison.OrdinalIgnoreCase) ||
                   text.Contains("PASS", StringComparison.OrdinalIgnoreCase) ||
                   text.Contains("VERIFIED", StringComparison.OrdinalIgnoreCase) ||
                   text.Contains("no Blocker/High", StringComparison.OrdinalIgnoreCase)
                     ? "PASS"
-                    : "Geprüft";
+                    : "Reviewed";
 
             candidates.Add((4, new TaskParticipantInfo(
                 Agent: "Fresh Claude Reviewer",
@@ -224,14 +224,14 @@ public static class PrParticipantExtractor
                 Profile: "P1",
                 Model: "Claude Opus 5.5",
                 Status: status,
-                EvidenceSource: "P1-Final-Review")));
+                EvidenceSource: "P1 Final Review")));
         }
 
         // Cross-Family Verifier P2 (Codex)
         if (text.Contains("Cross-family verification (P2", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("Technical Director/Codex", StringComparison.OrdinalIgnoreCase))
         {
-            var status = text.Contains("PASS", StringComparison.OrdinalIgnoreCase) ? "PASS" : "Geprüft";
+            var status = text.Contains("PASS", StringComparison.OrdinalIgnoreCase) ? "PASS" : "Reviewed";
             candidates.Add((5, new TaskParticipantInfo(
                 Agent: "Codex Monitor",
                 Tool: "ChatGPT Codex",
@@ -239,7 +239,7 @@ public static class PrParticipantExtractor
                 Profile: "P2",
                 Model: "GPT-6 Astra",
                 Status: status,
-                EvidenceSource: "Cross-Family-Check")));
+                EvidenceSource: "Cross-Family Check")));
         }
 
         // Cross-Family Verifier P3 (Antigravity)
@@ -247,7 +247,7 @@ public static class PrParticipantExtractor
             text.Contains("cross-family P3", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("cross-family verification by Antigravity", StringComparison.OrdinalIgnoreCase))
         {
-            var status = text.Contains("PASS", StringComparison.OrdinalIgnoreCase) ? "PASS" : "Geprüft";
+            var status = text.Contains("PASS", StringComparison.OrdinalIgnoreCase) ? "PASS" : "Reviewed";
             candidates.Add((5, new TaskParticipantInfo(
                 Agent: "Antigravity Verifier",
                 Tool: "Antigravity",
@@ -255,18 +255,18 @@ public static class PrParticipantExtractor
                 Profile: "P3",
                 Model: "Gemini 4 Argon",
                 Status: status,
-                EvidenceSource: "Cross-Family-Check")));
+                EvidenceSource: "Cross-Family Check")));
         }
     }
 
     private static int StatusPriority(string status) => status switch
     {
-        "Blockiert" => 6,
+        "Blocked" => 6,
         "PASS" => 5,
-        "Freigegeben" => 4,
+        "Approved" => 4,
         "Findings" => 3,
-        "Kontingent-Limit" => 2,
-        "Aktiv" => 1,
+        "Quota Limit" => 2,
+        "Active" => 1,
         _ => 0
     };
 }

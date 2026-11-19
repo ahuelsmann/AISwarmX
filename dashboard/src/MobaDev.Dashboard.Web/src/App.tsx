@@ -1,15 +1,58 @@
 import { useCallback, useEffect, useState } from 'react';
-import { WifiOff } from 'lucide-react';
+import {
+  FluentProvider,
+  MessageBar,
+  MessageBarBody,
+  Skeleton,
+  SkeletonItem,
+  makeStyles,
+  tokens
+} from '@fluentui/react-components';
 import { fetchSnapshot } from './api/dashboardClient';
+import { DecisionTriadCard } from './components/DecisionTriadCard';
 import { GovernanceMatrixView } from './components/GovernanceMatrixView';
 import { HygieneAndSyncPanel } from './components/HygieneAndSyncPanel';
 import { MonitorCards } from './components/MonitorCards';
 import { PipelineCard } from './components/PipelineCard';
 import { StatusHeader } from './components/StatusHeader';
+import { mobaDarkTheme, mobaLightTheme } from './theme/mobaFluentTheme';
 import type { DashboardSnapshot, DashboardTab, ThemePreference } from './types/dashboard';
 
 const POLL_INTERVAL_MS = 15_000;
 const THEME_STORAGE_KEY = 'mobadev-theme';
+
+const useStyles = makeStyles({
+  appShell: {
+    minHeight: '100vh',
+    backgroundColor: tokens.colorNeutralBackground2,
+    color: tokens.colorNeutralForeground1
+  },
+  mainContent: {
+    maxWidth: '1440px',
+    margin: '0 auto',
+    padding: '18px 24px 32px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '14px'
+  },
+  liveSplit: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 7fr) minmax(0, 5fr)',
+    gap: '14px',
+    alignItems: 'start',
+    '@media (max-width: 1099px)': {
+      gridTemplateColumns: 'minmax(0, 1fr)'
+    }
+  },
+  monitorsRow: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gap: '14px',
+    '@media (max-width: 959px)': {
+      gridTemplateColumns: 'minmax(0, 1fr)'
+    }
+  }
+});
 
 function readInitialThemePreference(): ThemePreference {
   try {
@@ -37,6 +80,7 @@ function resolveTheme(pref: ThemePreference): 'light' | 'dark' {
 }
 
 export function App() {
+  const styles = useStyles();
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -44,11 +88,16 @@ export function App() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('live');
   const [onlyDrift, setOnlyDrift] = useState(false);
   const [themePreference, setThemePreference] = useState<ThemePreference>(readInitialThemePreference);
+  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() =>
+    resolveTheme(readInitialThemePreference())
+  );
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     const apply = () => {
-      document.documentElement.dataset.theme = resolveTheme(themePreference);
+      const next = resolveTheme(themePreference);
+      setResolvedTheme(next);
+      document.documentElement.dataset.theme = next;
     };
 
     apply();
@@ -81,8 +130,8 @@ export function App() {
         return;
       }
 
-      const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
-      setApiError(`Lokales Dashboard-Backend nicht erreichbar (${message}).`);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setApiError(`Local dashboard backend unreachable (${message}).`);
     } finally {
       if (!signal?.aborted) {
         setLoading(false);
@@ -118,71 +167,88 @@ export function App() {
   const driftBadgeCount = snapshot
     ? snapshot.governance.driftCount + snapshot.governance.missingCount
     : 0;
+  const isDark = resolvedTheme === 'dark';
 
   return (
-    <div className="app-shell">
-      <StatusHeader
-        overallStatus={snapshot?.overallStatus}
-        warningCount={snapshot?.warningCount ?? 0}
-        generatedAtUtc={snapshot?.generatedAtUtc}
-        nowMs={nowMs}
-        refreshing={refreshing}
-        onRefresh={() => void loadSnapshot(true)}
-        themePreference={themePreference}
-        onThemeChange={setThemePreference}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        driftBadgeCount={driftBadgeCount}
-      />
+    <FluentProvider theme={isDark ? mobaDarkTheme : mobaLightTheme}>
+      <div className={styles.appShell}>
+        <StatusHeader
+          overallStatus={snapshot?.overallStatus}
+          warningCount={snapshot?.warningCount ?? 0}
+          generatedAtUtc={snapshot?.generatedAtUtc}
+          nowMs={nowMs}
+          refreshing={refreshing}
+          onRefresh={() => void loadSnapshot(true)}
+          themePreference={themePreference}
+          onThemeChange={setThemePreference}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          driftBadgeCount={driftBadgeCount}
+        />
 
-      <main className="main-content">
-        {apiError && (
-          <div className="notice-banner notice-banner--red" role="alert">
-            <WifiOff size={16} aria-hidden="true" />
-            <span>{apiError}</span>
-          </div>
-        )}
+        <main className={styles.mainContent}>
+          {apiError && (
+            <MessageBar intent="error" role="alert">
+              <MessageBarBody>{apiError}</MessageBarBody>
+            </MessageBar>
+          )}
 
-        {loading && !snapshot && <LoadingSkeleton />}
+          {loading && !snapshot && <LoadingSkeleton styles={styles} />}
 
-        {snapshot && activeTab === 'live' && (
-          <>
-            <MonitorCards monitors={snapshot.monitors.monitors} nowMs={nowMs} />
-            <div className="live-split">
-              <PipelineCard pipeline={snapshot.pipeline} nowMs={nowMs} />
-              <HygieneAndSyncPanel
-                governance={snapshot.governance}
-                hygiene={snapshot.hygiene}
-                onOpenMatrixSync={handleOpenMatrixSync}
+          {snapshot && activeTab === 'live' && (
+            <>
+              <MonitorCards
+                monitors={snapshot.monitors.monitors}
+                nowMs={nowMs}
+                isDark={isDark}
               />
-            </div>
-          </>
-        )}
 
-        {snapshot && activeTab === 'matrix' && (
-          <GovernanceMatrixView
-            governance={snapshot.governance}
-            onlyDrift={onlyDrift}
-            onOnlyDriftChange={setOnlyDrift}
-          />
-        )}
-      </main>
-    </div>
+              <DecisionTriadCard
+                monitors={snapshot.monitors.monitors}
+                governance={snapshot.governance}
+                openPrCount={snapshot.pipeline.pullRequests.length}
+                isDark={isDark}
+                onOpenMatrix={() => handleOpenMatrixSync(false)}
+              />
+
+              <div className={styles.liveSplit}>
+                <PipelineCard pipeline={snapshot.pipeline} nowMs={nowMs} isDark={isDark} />
+                <HygieneAndSyncPanel
+                  governance={snapshot.governance}
+                  hygiene={snapshot.hygiene}
+                  onOpenMatrixSync={handleOpenMatrixSync}
+                />
+              </div>
+            </>
+          )}
+
+          {snapshot && activeTab === 'matrix' && (
+            <GovernanceMatrixView
+              governance={snapshot.governance}
+              onlyDrift={onlyDrift}
+              onOnlyDriftChange={setOnlyDrift}
+              isDark={isDark}
+            />
+          )}
+        </main>
+      </div>
+    </FluentProvider>
   );
 }
 
-function LoadingSkeleton() {
+function LoadingSkeleton({ styles }: { styles: ReturnType<typeof useStyles> }) {
   return (
-    <div className="side-stack" aria-label="Lade Dashboard">
-      <div className="monitors-grid">
-        <div className="skeleton" style={{ height: 174 }} />
-        <div className="skeleton" style={{ height: 174 }} />
-        <div className="skeleton" style={{ height: 174 }} />
+    <Skeleton aria-label="Loading dashboard" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div className={styles.monitorsRow}>
+        <SkeletonItem style={{ height: 156, borderRadius: tokens.borderRadiusMedium }} />
+        <SkeletonItem style={{ height: 156, borderRadius: tokens.borderRadiusMedium }} />
+        <SkeletonItem style={{ height: 156, borderRadius: tokens.borderRadiusMedium }} />
       </div>
-      <div className="live-split">
-        <div className="skeleton" style={{ height: 280 }} />
-        <div className="skeleton" style={{ height: 280 }} />
+      <SkeletonItem style={{ height: 74, borderRadius: tokens.borderRadiusMedium }} />
+      <div className={styles.liveSplit}>
+        <SkeletonItem style={{ height: 280, borderRadius: tokens.borderRadiusMedium }} />
+        <SkeletonItem style={{ height: 280, borderRadius: tokens.borderRadiusMedium }} />
       </div>
-    </div>
+    </Skeleton>
   );
 }

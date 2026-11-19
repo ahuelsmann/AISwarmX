@@ -1,6 +1,6 @@
 # MOBAdev Agent Network Dashboard — Architektur- & UI/UX-Konzept
 
-**Status:** Umgesetzt (v1 — Slices 1–3 komplett)  
+**Status:** Umgesetzt (v1.1 — Slices 1–5 komplett: Fluent UI 2, Plain English, Role/Model Icon System, Decision & Steering Triad, Linked Issues)  
 **Verantwortlich:** `Antigravity Monitor` (`Head of AI Strategy`, `P3`) gemeinsam mit `Head of UI/UX` (`P3`)  
 **Ziel-Repository:** `ahuelsmann/MOBAdev` (`PRIVATE`, unter `dashboard/`)  
 **Stack:** ASP.NET Core Minimal API (`.NET 10`) + React (`TypeScript` + `Vite`)
@@ -156,3 +156,12 @@ Die Umsetzung läuft parallel zum `MOBAflow`-Refactoring in 3 kleinen, unabhäng
 - Keine schreibenden Aktionen (kein Merge, kein Agent-Spawning, kein Prompt-Versand, kein Worktree-Löschen aus der UI).
 - Keine Persistenz historischer Metriken/Charts (erst optional als v2, falls im Alltag gewünscht).
 - Kein Einfluss auf `MOBAflow`-Produktcode, `Moba.slnx` oder `MOBAflow`-CI-Pipelines.
+
+---
+
+## 8. v1.1 Design-Update (Slice 5)
+- **Microsoft Fluent UI 2 (`@fluentui/react-components` + `@fluentui/react-icons`):** WinUI-3-kompatible visuelle Sprache passend zu `MOBAflow` (`#0078D4` Brand-Rampe, Light/Dark Surface Tokens, `Segoe UI Variable`, Fluent `Card`, `TabList`, `MessageBar`, `Tooltip`, `Table`, `ToggleButton`).
+- **Durchgehendes Plain English (UI & API):** Vereinheitlichung aller Frontend-Texte, Tooltips und Backend-Statusmeldungen auf klares Englisch (z. B. `Rules State · Actual vs. Target`, `Hashes (Actual / Target)`, `Live Operations`, `Matrix & Rules`, `Task & PR Pipeline`).
+- **Rollenspezifisches & modellspezifisches Icon-/Farbsystem (`RoleAndModelIcons.tsx`):** Jede Rolle und jedes KI-Modell erhält ein eigenes, konturiertes Fluent-Symbol mit konsistenter 8-Farb-Codierung im Light- und Dark-Theme über Monitore, Triad-Leiste, PR-Beteiligte und Matrix-Tabellen hinweg.
+- **Kompakte zweite Zeile `Decision & Steering Triad`:** Einzeilige Auswahl- & Steuerungsleiste direkt zwischen Monitor-Zeile und Aufgaben-Pipeline (`P1 COO`, `P2 CPM & TD`, `P3 AI Strategy` inkl. Live-Modell/Tool, Quorum, aktivem Slice-WIP und `Escalation: Human`).
+- **Verknüpfte GitHub-Issues in der PR-Pipeline (`LinkedIssueInfo`):** `PipelineProvider` liest `closingIssuesReferences`, `- Issue: #...`, explizite Keywords (`Closes`/`Fixes`/`Refs`) sowie Branch-Muster (`issue-N`) aus und löst Issue-Titel über `gh issue list` als klickbare Issue-Pills direkt pro PR auf.

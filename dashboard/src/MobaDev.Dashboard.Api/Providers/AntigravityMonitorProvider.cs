@@ -25,7 +25,7 @@ public sealed class AntigravityMonitorProvider
         var dbPath = Path.Combine(paths.AntigravityHomePath, "conversation_summaries.db");
         if (!File.Exists(dbPath))
         {
-            return Task.FromResult(Unavailable(now, "unavailable", "Antigravity-Datenbank (conversation_summaries.db) nicht gefunden."));
+            return Task.FromResult(Unavailable(now, "unavailable", "Antigravity database (conversation_summaries.db) not found."));
         }
 
         try
@@ -59,7 +59,7 @@ public sealed class AntigravityMonitorProvider
 
             if (namedDesktopConversations.Count == 0)
             {
-                return Task.FromResult(Unavailable(now, "ok", "Keine benannte Antigravity-Desktop-Session gefunden."));
+                return Task.FromResult(Unavailable(now, "ok", "No named Antigravity desktop session found."));
             }
 
             var selected = namedDesktopConversations
@@ -79,7 +79,7 @@ public sealed class AntigravityMonitorProvider
                 : "standby";
 
             var notice = namedDesktopConversations.Count > 1
-                ? $"{namedDesktopConversations.Count} benannte Antigravity-Sessions in Summaries vorhanden (Soll: 1)."
+                ? $"{namedDesktopConversations.Count} named Antigravity sessions found in summaries (target: 1)."
                 : null;
 
             return Task.FromResult(new MonitorInfo(
@@ -101,14 +101,14 @@ public sealed class AntigravityMonitorProvider
             return Task.FromResult(Unavailable(
                 now,
                 "degraded",
-                "Datenbank kurz gesperrt – nächster Versuch läuft."));
+                "Database temporarily locked — retrying on next poll."));
         }
         catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException)
         {
             return Task.FromResult(Unavailable(
                 now,
                 "unavailable",
-                $"Antigravity-Status nicht lesbar: {ex.Message}"));
+                $"Unable to read Antigravity status: {ex.Message}"));
         }
     }
 

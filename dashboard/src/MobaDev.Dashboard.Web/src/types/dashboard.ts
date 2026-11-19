@@ -89,13 +89,20 @@ export interface TaskParticipantInfo {
   evidenceSource: string;
 }
 
+export interface LinkedIssueInfo {
+  number: number;
+  title?: string | null;
+  url: string;
+  state?: string | null;
+}
+
 export interface PullRequestInfo {
   number: number;
   title: string;
   url: string;
   branch: string;
   state: 'OPEN' | 'MERGED' | string;
-  stateLabel: 'Draft' | 'Ready' | 'Auto-Merge' | 'Gemergt' | string;
+  stateLabel: 'Draft' | 'Ready' | 'Auto-Merge' | 'Merged' | string;
   isDraft: boolean;
   autoMergeEnabled: boolean;
   mergeState: 'CLEAN' | 'BEHIND' | 'DIRTY' | 'BLOCKED' | 'MERGED' | string;
@@ -107,6 +114,7 @@ export interface PullRequestInfo {
   mergedAtUtc?: string | null;
   projectStatus?: string | null;
   participants: TaskParticipantInfo[];
+  linkedIssues: LinkedIssueInfo[];
 }
 
 export interface PipelineResponse {

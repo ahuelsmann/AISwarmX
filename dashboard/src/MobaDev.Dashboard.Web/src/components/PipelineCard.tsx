@@ -1,145 +1,351 @@
 import { useState } from 'react';
 import {
-  AlertTriangle,
-  ArrowUp,
-  Bot,
-  Check,
-  Clock,
-  ExternalLink,
-  GitMerge,
-  GitPullRequest,
-  Info,
-  Lock,
-  WifiOff,
-  X
-} from 'lucide-react';
-import { formatAbsoluteDe, formatRelativeTimeDe } from '../api/dashboardClient';
-import type { PipelineResponse, PullRequestInfo, TaskParticipantInfo } from '../types/dashboard';
+  Badge,
+  Card,
+  Link,
+  MessageBar,
+  MessageBarBody,
+  Text,
+  ToggleButton,
+  makeStyles,
+  shorthands,
+  tokens
+} from '@fluentui/react-components';
+import {
+  ArrowUp16Regular,
+  Bot16Regular,
+  BranchFork16Regular,
+  BranchRequest20Regular,
+  Checkmark16Regular,
+  CheckmarkCircle16Regular,
+  Clock16Regular,
+  Dismiss16Regular,
+  LockClosed16Regular,
+  Merge16Regular,
+  Open16Regular,
+  TicketDiagonal16Regular,
+  Warning16Regular,
+  WifiOff20Regular
+} from '@fluentui/react-icons';
+import { formatAbsoluteEn, formatRelativeTimeEn } from '../api/dashboardClient';
+import type {
+  LinkedIssueInfo,
+  PipelineResponse,
+  PullRequestInfo,
+  TaskParticipantInfo
+} from '../types/dashboard';
 import { GlossaryTooltip } from './GlossaryTooltip';
+import { ModelBadge, ProfileBadge, RoleBadge } from './RoleAndModelIcons';
+
+const useStyles = makeStyles({
+  card: {
+    padding: '16px',
+    gap: '14px',
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderTop: `3px solid ${tokens.colorBrandBackground}`
+  },
+  header: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '10px'
+  },
+  titleGroup: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  title: {
+    margin: 0,
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1
+  },
+  filterGroup: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '2px',
+    padding: '2px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground3,
+    border: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  prList: {
+    display: 'flex',
+    flexDirection: 'column'
+  },
+  prRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    padding: '14px 0',
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+    ':first-child': {
+      paddingTop: '4px',
+      borderTop: 'none'
+    },
+    ':last-child': {
+      paddingBottom: 0
+    }
+  },
+  prTop: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: '10px'
+  },
+  prTitleWrap: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: '8px',
+    minWidth: 0,
+    flex: '1 1 320px'
+  },
+  prMetaRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '6px'
+  },
+  issuesRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '6px'
+  },
+  issuePillLink: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '5px',
+    padding: '2px 8px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    fontSize: tokens.fontSizeBase200,
+    textDecorationLine: 'none',
+    ':hover': {
+      ...shorthands.borderColor(tokens.colorBrandStroke1)
+    }
+  },
+  participantsBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    marginTop: '2px'
+  },
+  participantsHeader: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2
+  },
+  participantsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
+    gap: '8px'
+  },
+  participantChip: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    padding: '8px 10px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  participantTop: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '6px',
+    flexWrap: 'wrap'
+  },
+  emptyState: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    textAlign: 'center',
+    gap: '6px',
+    padding: '28px 16px',
+    color: tokens.colorNeutralForeground2
+  }
+});
 
 interface PipelineCardProps {
   pipeline: PipelineResponse;
   nowMs: number;
+  isDark: boolean;
 }
 
 type PipelineViewMode = 'open' | 'merged';
 
-export function PipelineCard({ pipeline, nowMs }: PipelineCardProps) {
+export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
+  const styles = useStyles();
   const [viewMode, setViewMode] = useState<PipelineViewMode>('open');
   const activeList = viewMode === 'open' ? pipeline.pullRequests : pipeline.recentlyMerged;
 
   return (
-    <section className="card card--mobaflow" aria-label="Aufgaben- und PR-Pipeline MOBAflow">
-      <div className="card-header">
-        <div className="card-title-row">
-          <GitPullRequest size={17} aria-hidden="true" />
-          <h2 className="card-title">Aufgaben- &amp; PR-Pipeline</h2>
-          <span className="badge badge--blue mono">Repository: {pipeline.repository}</span>
+    <Card className={styles.card} appearance="filled" aria-label="Task and PR Pipeline MOBAflow">
+      <div className={styles.header}>
+        <div className={styles.titleGroup}>
+          <BranchRequest20Regular aria-hidden="true" />
+          <h2 className={styles.title}>Task &amp; PR Pipeline</h2>
+          <Badge appearance="tint" color="brand" shape="rounded" className="mono">
+            Repository: {pipeline.repository}
+          </Badge>
         </div>
 
-        <div className="segmented-control" role="group" aria-label="PR-Status filtern">
-          <button
-            type="button"
-            className="segmented-btn tabular"
-            aria-pressed={viewMode === 'open'}
+        <div className={styles.filterGroup} role="group" aria-label="Filter PR status">
+          <ToggleButton
+            size="small"
+            appearance={viewMode === 'open' ? 'primary' : 'subtle'}
+            checked={viewMode === 'open'}
             onClick={() => setViewMode('open')}
           >
-            Offen ({pipeline.pullRequests.length})
-          </button>
-          <button
-            type="button"
-            className="segmented-btn tabular"
-            aria-pressed={viewMode === 'merged'}
+            <span className="tabular">Open ({pipeline.pullRequests.length})</span>
+          </ToggleButton>
+          <ToggleButton
+            size="small"
+            appearance={viewMode === 'merged' ? 'primary' : 'subtle'}
+            checked={viewMode === 'merged'}
             onClick={() => setViewMode('merged')}
           >
-            Zuletzt abgeschlossen ({pipeline.recentlyMerged.length})
-          </button>
+            <span className="tabular">Recently Merged ({pipeline.recentlyMerged.length})</span>
+          </ToggleButton>
         </div>
       </div>
 
       {pipeline.source.status === 'degraded' && (
-        <div className="notice-banner notice-banner--amber">
-          <AlertTriangle size={15} aria-hidden="true" />
-          <span>
-            {pipeline.source.notice ?? 'GitHub nicht erreichbar – zeige letzten Cache-Stand.'}{' '}
-            <span className="tabular">({formatRelativeTimeDe(pipeline.source.updatedAtUtc, nowMs)})</span>
-          </span>
-        </div>
+        <MessageBar intent="warning">
+          <MessageBarBody>
+            {pipeline.source.notice ?? 'GitHub unreachable — showing last cached snapshot.'}{' '}
+            <span className="tabular">({formatRelativeTimeEn(pipeline.source.updatedAtUtc, nowMs)})</span>
+          </MessageBarBody>
+        </MessageBar>
       )}
 
       {pipeline.source.status === 'unavailable' && (
-        <div className="empty-state">
-          <WifiOff size={20} aria-hidden="true" />
-          <strong>GitHub nicht erreichbar</strong>
-          <span>{pipeline.source.notice ?? 'PR-Daten konnten aktuell nicht geladen werden.'}</span>
+        <div className={styles.emptyState}>
+          <WifiOff20Regular aria-hidden="true" />
+          <Text weight="semibold">GitHub Unreachable</Text>
+          <Text size={200}>{pipeline.source.notice ?? 'Unable to load PR data right now.'}</Text>
         </div>
       )}
 
       {!pipeline.projectBoardAvailable && pipeline.projectBoardNotice && (
-        <div className="notice-banner">
-          <Info size={15} aria-hidden="true" />
-          <span>{pipeline.projectBoardNotice}</span>
-        </div>
+        <MessageBar intent="info">
+          <MessageBarBody>{pipeline.projectBoardNotice}</MessageBarBody>
+        </MessageBar>
       )}
 
       {pipeline.source.status !== 'unavailable' && activeList.length === 0 && (
-        <div className="empty-state">
-          <Check size={20} aria-hidden="true" />
-          <strong>
+        <div className={styles.emptyState}>
+          <CheckmarkCircle16Regular style={{ width: 22, height: 22 }} aria-hidden="true" />
+          <Text weight="semibold">
+            {viewMode === 'open' ? 'No open PRs in MOBAflow' : 'No recently merged PRs found'}
+          </Text>
+          <Text size={200}>
             {viewMode === 'open'
-              ? 'Keine offenen PRs in MOBAflow'
-              : 'Keine kürzlich abgeschlossenen PRs gefunden'}
-          </strong>
-          <span>
-            {viewMode === 'open'
-              ? 'Alle Änderungen sind aktuell auf main integriert.'
-              : 'Sobald Aufgaben gemergt sind, erscheinen sie hier mit ihren Beteiligten.'}
-          </span>
+              ? 'All changes are currently integrated on main.'
+              : 'Merged tasks will appear here with their participating agents.'}
+          </Text>
         </div>
       )}
 
       {activeList.length > 0 && (
-        <div className="pr-list">
+        <div className={styles.prList}>
           {activeList.map((pr) => (
-            <PullRequestRow key={`${pr.state}-${pr.number}`} pr={pr} nowMs={nowMs} />
+            <PullRequestRow
+              key={`${pr.state}-${pr.number}`}
+              pr={pr}
+              nowMs={nowMs}
+              isDark={isDark}
+              styles={styles}
+            />
           ))}
         </div>
       )}
-    </section>
+    </Card>
   );
 }
 
-function PullRequestRow({ pr, nowMs }: { pr: PullRequestInfo; nowMs: number }) {
+function PullRequestRow({
+  pr,
+  nowMs,
+  isDark,
+  styles
+}: {
+  pr: PullRequestInfo;
+  nowMs: number;
+  isDark: boolean;
+  styles: ReturnType<typeof useStyles>;
+}) {
   const isMerged = pr.state === 'MERGED';
   const timeStamp = isMerged ? (pr.mergedAtUtc ?? pr.updatedAtUtc) : pr.updatedAtUtc;
 
   return (
-    <div className="pr-item">
-      <div className="pr-top">
-        <div className="pr-title-wrap">
-          <a
+    <div className={styles.prRow}>
+      <div className={styles.prTop}>
+        <div className={styles.prTitleWrap}>
+          <Link
             href={pr.url}
             target="_blank"
             rel="noreferrer"
-            className="pr-number mono"
-            title={`PR #${pr.number} auf GitHub öffnen`}
+            className="mono"
+            title={`Open PR #${pr.number} on GitHub`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontWeight: tokens.fontWeightSemibold,
+              flexShrink: 0
+            }}
           >
-            #{pr.number} <ExternalLink size={11} aria-hidden="true" />
-          </a>
-          <span className="pr-title">{pr.title}</span>
+            #{pr.number} <Open16Regular style={{ width: 12, height: 12 }} aria-hidden="true" />
+          </Link>
+          <Text weight="semibold">{pr.title}</Text>
         </div>
 
-        <div className="pr-meta-row">
+        <div className={styles.prMetaRow}>
           <PrStateBadge stateLabel={pr.stateLabel} isMerged={isMerged} />
           {!isMerged && <MergeStateBadge mergeState={pr.mergeState} />}
           <RiskClassBadge riskClass={pr.riskClass} />
         </div>
       </div>
 
-      <div className="pr-meta-row">
-        <span className="model-chip mono" title={pr.branch}>
+      {pr.linkedIssues && pr.linkedIssues.length > 0 && (
+        <div className={styles.issuesRow}>
+          <TicketDiagonal16Regular
+            style={{ color: tokens.colorNeutralForeground2, flexShrink: 0 }}
+            aria-hidden="true"
+          />
+          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+            Linked Issues:
+          </Text>
+          {pr.linkedIssues.map((issue) => (
+            <LinkedIssuePill key={issue.number} issue={issue} className={styles.issuePillLink} />
+          ))}
+        </div>
+      )}
+
+      <div className={styles.prMetaRow}>
+        <Badge
+          appearance="outline"
+          color="subtle"
+          shape="rounded"
+          className="mono"
+          icon={<BranchFork16Regular />}
+          title={pr.branch}
+        >
           {pr.branch}
-        </span>
+        </Badge>
 
         {!isMerged && (
           <>
@@ -148,42 +354,63 @@ function PullRequestRow({ pr, nowMs }: { pr: PullRequestInfo; nowMs: number }) {
           </>
         )}
 
-        {pr.projectStatus && <span className="badge badge--blue">Kanban: {pr.projectStatus}</span>}
+        {pr.projectStatus && (
+          <Badge appearance="tint" color="brand" shape="rounded">
+            Kanban: {pr.projectStatus}
+          </Badge>
+        )}
 
-        <span className="slot-label tabular" title={formatAbsoluteDe(timeStamp)}>
-          {isMerged ? 'Gemergt' : 'Update'} {formatRelativeTimeDe(timeStamp, nowMs)}
-        </span>
+        <Text
+          size={200}
+          className="tabular"
+          style={{ color: tokens.colorNeutralForeground2 }}
+          title={formatAbsoluteEn(timeStamp)}
+        >
+          {isMerged ? 'Merged' : 'Updated'} {formatRelativeTimeEn(timeStamp, nowMs)}
+        </Text>
       </div>
 
       {pr.lockedAreas.length > 0 && (
-        <div className="lock-tags">
-          <Lock size={12} aria-hidden="true" />
-          <span className="slot-label">Gesperrte Bereiche:</span>
+        <div className={styles.prMetaRow}>
+          <LockClosed16Regular
+            style={{ width: 14, height: 14, color: tokens.colorNeutralForeground2 }}
+            aria-hidden="true"
+          />
+          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+            Locked Areas:
+          </Text>
           {pr.lockedAreas.map((area) => (
-            <span
+            <Badge
               key={area}
-              className={`badge mono ${pr.riskClass === 'H' ? 'badge--red' : ''}`}
+              appearance="tint"
+              color={pr.riskClass === 'H' ? 'danger' : 'subtle'}
+              shape="rounded"
+              className="mono"
             >
               {area}
-            </span>
+            </Badge>
           ))}
         </div>
       )}
 
-      <div className="participants-section">
-        <div className="participants-header">
-          <Bot size={13} aria-hidden="true" />
-          <span>Beteiligte Agenten, Rollen &amp; Modelle</span>
+      <div className={styles.participantsBlock}>
+        <div className={styles.participantsHeader}>
+          <Bot16Regular aria-hidden="true" />
+          <span>Participating Agents, Roles &amp; Models</span>
         </div>
 
         {pr.participants.length === 0 ? (
-          <span className="slot-label">Noch keine Agenten-Nachweise im PR vermerkt.</span>
+          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+            No agent evidence recorded on this PR yet.
+          </Text>
         ) : (
-          <div className="participants-grid">
+          <div className={styles.participantsGrid}>
             {pr.participants.map((participant) => (
               <ParticipantChip
                 key={`${participant.role}-${participant.tool}-${participant.profile}`}
                 participant={participant}
+                isDark={isDark}
+                styles={styles}
               />
             ))}
           </div>
@@ -193,68 +420,119 @@ function PullRequestRow({ pr, nowMs }: { pr: PullRequestInfo; nowMs: number }) {
   );
 }
 
-function ParticipantChip({ participant }: { participant: TaskParticipantInfo }) {
-  const profileBadgeClass =
-    participant.profile === 'P1'
-      ? 'badge--blue'
-      : participant.profile === 'P2'
-        ? 'badge--violet'
-        : participant.profile === 'P3'
-          ? 'badge--green'
-          : '';
+function LinkedIssuePill({ issue, className }: { issue: LinkedIssueInfo; className: string }) {
+  return (
+    <Link
+      href={issue.url}
+      target="_blank"
+      rel="noreferrer"
+      className={className}
+      title={`Open Issue #${issue.number} on GitHub`}
+    >
+      <span className="mono" style={{ fontWeight: tokens.fontWeightSemibold }}>
+        Issue #{issue.number}
+      </span>
+      {issue.title && (
+        <span
+          style={{
+            color: tokens.colorNeutralForeground1,
+            maxWidth: 340,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          · {issue.title}
+        </span>
+      )}
+      {issue.state === 'CLOSED' && (
+        <Badge appearance="tint" color="subtle" shape="rounded" size="small">
+          Closed
+        </Badge>
+      )}
+      <Open16Regular style={{ width: 12, height: 12, flexShrink: 0 }} aria-hidden="true" />
+    </Link>
+  );
+}
 
-  const statusBadgeClass =
+function ParticipantChip({
+  participant,
+  isDark,
+  styles
+}: {
+  participant: TaskParticipantInfo;
+  isDark: boolean;
+  styles: ReturnType<typeof useStyles>;
+}) {
+  const statusColor: 'success' | 'warning' | 'danger' | 'brand' | 'subtle' =
     participant.status === 'PASS' ||
-    participant.status === 'Freigegeben' ||
-    participant.status === 'Konsultiert / PASS'
-      ? 'badge--green'
-      : participant.status === 'Findings' || participant.status === 'Kontingent-Limit'
-        ? 'badge--amber'
-        : participant.status === 'Blockiert'
-          ? 'badge--red'
-          : participant.status === 'Umgesetzt' || participant.status === 'Aktiv'
-            ? 'badge--blue'
-            : '';
+    participant.status === 'Approved' ||
+    participant.status === 'Consulted · PASS'
+      ? 'success'
+      : participant.status === 'Findings' || participant.status === 'Quota Limit'
+        ? 'warning'
+        : participant.status === 'Blocked'
+          ? 'danger'
+          : participant.status === 'Implemented' || participant.status === 'Active'
+            ? 'brand'
+            : 'subtle';
 
   return (
     <div
-      className="participant-chip"
-      title={`${participant.agent} · Beleg: ${participant.evidenceSource}`}
+      className={styles.participantChip}
+      title={`${participant.agent} · Evidence: ${participant.evidenceSource}`}
     >
-      <div className="participant-top">
-        <GlossaryTooltip term={participant.profile}>
-          <span className={`badge ${profileBadgeClass}`}>{participant.profile}</span>
-        </GlossaryTooltip>
-        <span className="participant-role">{participant.role}</span>
-        <span className={`badge ${statusBadgeClass}`}>{participant.status}</span>
+      <div className={styles.participantTop}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <GlossaryTooltip term={participant.profile}>
+            <ProfileBadge profile={participant.profile} isDark={isDark} />
+          </GlossaryTooltip>
+          <RoleBadge role={participant.role} isDark={isDark} compact />
+        </div>
+        <Badge appearance="tint" color={statusColor} shape="rounded" size="small">
+          {participant.status}
+        </Badge>
       </div>
-      <div className="participant-meta mono">
-        {participant.tool} · {participant.model}
-      </div>
+
+      <ModelBadge
+        model={participant.model}
+        toolPrefix={participant.tool}
+        isDark={isDark}
+        mono
+      />
     </div>
   );
 }
 
 function PrStateBadge({ stateLabel, isMerged }: { stateLabel: string; isMerged: boolean }) {
-  if (isMerged || stateLabel === 'Gemergt') {
+  if (isMerged || stateLabel === 'Merged') {
     return (
-      <span className="badge badge--violet">
-        <GitMerge size={12} aria-hidden="true" />
-        Gemergt
-      </span>
+      <Badge appearance="tint" color="informative" shape="rounded" icon={<Merge16Regular />}>
+        Merged
+      </Badge>
     );
   }
   if (stateLabel === 'Auto-Merge') {
     return (
       <GlossaryTooltip term="Auto-Merge">
-        <span className="badge badge--violet">Auto-Merge</span>
+        <Badge appearance="tint" color="informative" shape="rounded">
+          Auto-Merge
+        </Badge>
       </GlossaryTooltip>
     );
   }
   if (stateLabel === 'Draft') {
-    return <span className="badge badge--dashed">Draft</span>;
+    return (
+      <Badge appearance="outline" color="subtle" shape="rounded">
+        Draft
+      </Badge>
+    );
   }
-  return <span className="badge badge--blue">Ready</span>;
+  return (
+    <Badge appearance="tint" color="brand" shape="rounded">
+      Ready
+    </Badge>
+  );
 }
 
 function MergeStateBadge({ mergeState }: { mergeState: string }) {
@@ -262,31 +540,32 @@ function MergeStateBadge({ mergeState }: { mergeState: string }) {
     case 'CLEAN':
       return (
         <GlossaryTooltip term="CLEAN">
-          <span className="badge badge--green">
-            <Check size={12} aria-hidden="true" />
+          <Badge appearance="tint" color="success" shape="rounded" icon={<Checkmark16Regular />}>
             CLEAN
-          </span>
+          </Badge>
         </GlossaryTooltip>
       );
     case 'BEHIND':
       return (
         <GlossaryTooltip term="BEHIND">
-          <span className="badge badge--amber">
-            <ArrowUp size={12} aria-hidden="true" />
+          <Badge appearance="tint" color="warning" shape="rounded" icon={<ArrowUp16Regular />}>
             BEHIND
-          </span>
+          </Badge>
         </GlossaryTooltip>
       );
     case 'DIRTY':
     case 'BLOCKED':
       return (
-        <span className="badge badge--red">
-          <AlertTriangle size={12} aria-hidden="true" />
+        <Badge appearance="tint" color="danger" shape="rounded" icon={<Warning16Regular />}>
           {mergeState.toUpperCase()}
-        </span>
+        </Badge>
       );
     default:
-      return <span className="badge">{mergeState}</span>;
+      return (
+        <Badge appearance="tint" color="subtle" shape="rounded">
+          {mergeState}
+        </Badge>
+      );
   }
 }
 
@@ -294,27 +573,28 @@ function CheckBadge({ label, status }: { label: string; status: string }) {
   switch (status) {
     case 'pass':
       return (
-        <span className="badge badge--green">
-          <Check size={11} aria-hidden="true" />
+        <Badge appearance="tint" color="success" shape="rounded" icon={<Checkmark16Regular />}>
           {label}
-        </span>
+        </Badge>
       );
     case 'pending':
       return (
-        <span className="badge badge--amber">
-          <Clock size={11} aria-hidden="true" />
+        <Badge appearance="tint" color="warning" shape="rounded" icon={<Clock16Regular />}>
           {label}
-        </span>
+        </Badge>
       );
     case 'fail':
       return (
-        <span className="badge badge--red">
-          <X size={11} aria-hidden="true" />
+        <Badge appearance="tint" color="danger" shape="rounded" icon={<Dismiss16Regular />}>
           {label}
-        </span>
+        </Badge>
       );
     default:
-      return <span className="badge">{label}: –</span>;
+      return (
+        <Badge appearance="tint" color="subtle" shape="rounded">
+          {label}: –
+        </Badge>
+      );
   }
 }
 
@@ -322,23 +602,33 @@ function RiskClassBadge({ riskClass }: { riskClass: string }) {
   if (riskClass === 'H') {
     return (
       <GlossaryTooltip term="H" showIcon>
-        <span className="badge badge--red badge--outline">Klasse H</span>
+        <Badge appearance="outline" color="danger" shape="rounded">
+          Class H
+        </Badge>
       </GlossaryTooltip>
     );
   }
   if (riskClass === 'M') {
     return (
       <GlossaryTooltip term="M" showIcon>
-        <span className="badge badge--amber badge--outline">Klasse M</span>
+        <Badge appearance="outline" color="warning" shape="rounded">
+          Class M
+        </Badge>
       </GlossaryTooltip>
     );
   }
   if (riskClass === 'L') {
     return (
       <GlossaryTooltip term="L" showIcon>
-        <span className="badge badge--green badge--outline">Klasse L</span>
+        <Badge appearance="outline" color="success" shape="rounded">
+          Class L
+        </Badge>
       </GlossaryTooltip>
     );
   }
-  return <span className="badge badge--outline">Klasse ?</span>;
+  return (
+    <Badge appearance="outline" color="subtle" shape="rounded">
+      Class ?
+    </Badge>
+  );
 }

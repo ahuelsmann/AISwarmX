@@ -24,7 +24,7 @@ public sealed class WorktreeProvider
 
         if (string.IsNullOrWhiteSpace(paths.MobaFlowRepoPath) || !Directory.Exists(paths.MobaFlowRepoPath))
         {
-            return ([], new SourceHealth("unavailable", now, "MOBAflow-Repository-Pfad nicht gefunden."));
+            return ([], new SourceHealth("unavailable", now, "MOBAflow repository path not found."));
         }
 
         var result = await _commandRunner.RunAsync(
@@ -36,7 +36,7 @@ public sealed class WorktreeProvider
 
         if (!result.Succeeded)
         {
-            return ([], new SourceHealth("unavailable", now, "git worktree list konnte nicht ausgeführt werden."));
+            return ([], new SourceHealth("unavailable", now, "Unable to execute git worktree list."));
         }
 
         var openPrByBranch = openPullRequests

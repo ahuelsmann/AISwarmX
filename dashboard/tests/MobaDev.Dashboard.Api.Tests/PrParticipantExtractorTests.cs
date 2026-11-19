@@ -29,7 +29,7 @@ public sealed class PrParticipantExtractorTests
         var participants = PrParticipantExtractor.Extract(branch, body, comments);
 
         Assert.Contains(participants, p => p.Role == "Writer" && p.Profile == "P1" && p.Model == "Claude Opus 5.5");
-        Assert.Contains(participants, p => p.Role == "COO (Steuerung & Gate)" && p.Profile == "P1" && p.Status == "Freigegeben");
+        Assert.Contains(participants, p => p.Role == "COO (Steering & Gate)" && p.Profile == "P1" && p.Status == "Approved");
         Assert.Contains(participants, p => p.Role == "Companion / Auto-Review" && p.Profile == "P2" && p.Status == "PASS");
         Assert.Contains(participants, p => p.Role == "Companion Reviewer" && p.Profile == "P2");
         Assert.Contains(participants, p => p.Role == "UI/UX Specialist" && p.Profile == "P3" && p.Model == "Gemini 4 Argon");
@@ -50,7 +50,7 @@ public sealed class PrParticipantExtractorTests
             ]);
 
         Assert.Contains(participants, p => p.Role == "Writer" && p.Profile == "P2" && p.Model == "GPT-6 Astra");
-        Assert.Contains(participants, p => p.Role == "Companion / Auto-Review" && p.Status == "Kontingent-Limit");
-        Assert.Contains(participants, p => p.Role == "Final Reviewer" && p.Status == "Blockiert");
+        Assert.Contains(participants, p => p.Role == "Companion / Auto-Review" && p.Status == "Quota Limit");
+        Assert.Contains(participants, p => p.Role == "Final Reviewer" && p.Status == "Blocked");
     }
 }

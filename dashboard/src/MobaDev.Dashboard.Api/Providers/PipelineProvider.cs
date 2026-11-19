@@ -30,7 +30,7 @@ public sealed partial class PipelineProvider
                 "pr", "list",
                 "--repo", options.GitHubRepository,
                 "--state", "open",
-                "--json", "number,title,url,headRefName,isDraft,mergeStateStatus,autoMergeRequest,updatedAt,body,statusCheckRollup,comments"
+                "--json", "number,title,url,headRefName,isDraft,mergeStateStatus,autoMergeRequest,updatedAt,body,statusCheckRollup,comments,closingIssuesReferences"
             ],
             workingDirectory: null,
             timeout: TimeSpan.FromSeconds(12),
@@ -43,15 +43,16 @@ public sealed partial class PipelineProvider
                 "--repo", options.GitHubRepository,
                 "--state", "merged",
                 "--limit", "5",
-                "--json", "number,title,url,headRefName,mergedAt,updatedAt,body,comments"
+                "--json", "number,title,url,headRefName,mergedAt,updatedAt,body,comments,closingIssuesReferences"
             ],
             workingDirectory: null,
             timeout: TimeSpan.FromSeconds(12),
             cancellationToken);
 
         var projectTask = TryLoadProjectStatusesAsync(options, cancellationToken);
+        var issuesTask = TryLoadIssuesAsync(options, cancellationToken);
 
-        await Task.WhenAll(openPrTask, mergedPrTask, projectTask).ConfigureAwait(false);
+        await Task.WhenAll(openPrTask, mergedPrTask, projectTask, issuesTask).ConfigureAwait(false);
 
         var openResult = openPrTask.Result;
         if (!openResult.Succeeded)
@@ -60,13 +61,24 @@ public sealed partial class PipelineProvider
         }
 
         var (projectAvailable, projectNotice, projectStatuses) = projectTask.Result;
+        var issuesByNumber = issuesTask.Result;
 
         try
         {
-            var openPullRequests = ParsePullRequests(openResult.StdOut, isMergedList: false, projectStatuses);
             var mergedResult = mergedPrTask.Result;
+            var mergedJson = mergedResult.Succeeded ? mergedResult.StdOut : null;
+            var knownPrNumbers = CollectPrNumbers(openResult.StdOut, mergedJson);
+
+            var openPullRequests = ParsePullRequests(
+                openResult.StdOut,
+                isMergedList: false,
+                options.GitHubRepository,
+                projectStatuses,
+                issuesByNumber,
+                knownPrNumbers);
+
             var recentlyMerged = mergedResult.Succeeded
-                ? ParseMergedSafe(mergedResult.StdOut)
+                ? ParseMergedSafe(mergedResult.StdOut, options.GitHubRepository, issuesByNumber, knownPrNumbers)
                 : [];
 
             var response = new PipelineResponse(
@@ -106,10 +118,10 @@ public sealed partial class PipelineProvider
         }
 
         var reason = failedResult.NotFound
-            ? "GitHub CLI (gh) nicht installiert."
+            ? "GitHub CLI (gh) is not installed."
             : failedResult.TimedOut
-                ? "GitHub-Abfrage hat das Zeitlimit überschritten."
-                : "GitHub nicht erreichbar.";
+                ? "GitHub query timed out."
+                : "GitHub is unreachable.";
 
         if (cached is not null)
         {
@@ -119,7 +131,7 @@ public sealed partial class PipelineProvider
                 Source = new SourceHealth(
                     "degraded",
                     cached.Source.UpdatedAtUtc,
-                    $"{reason} Zeige letzten Cache-Stand.",
+                    $"{reason} Showing last cached snapshot.",
                     FromCache: true)
             };
         }
@@ -141,7 +153,7 @@ public sealed partial class PipelineProvider
         var statuses = new Dictionary<int, string>();
         if (options.GitHubProjectNumber <= 0 || string.IsNullOrWhiteSpace(options.GitHubProjectOwner))
         {
-            return (false, "Kein GitHub-Projekt konfiguriert.", statuses);
+            return (false, "No GitHub project configured.", statuses);
         }
 
         var projectResult = await _commandRunner.RunAsync(
@@ -161,7 +173,7 @@ public sealed partial class PipelineProvider
         {
             return (
                 false,
-                "Projekt-Daten ausgeblendet: Scope read:project fehlt oder Kanban-CLI nicht erreichbar.",
+                "Project board data hidden: missing read:project scope or Kanban CLI unreachable.",
                 statuses);
         }
 
@@ -195,15 +207,127 @@ public sealed partial class PipelineProvider
         }
         catch (JsonException)
         {
-            return (false, "Projekt-Daten konnten nicht geparst werden.", statuses);
+            return (false, "Unable to parse GitHub project data.", statuses);
         }
     }
 
-    private static List<PullRequestInfo> ParseMergedSafe(string json)
+    private async Task<Dictionary<int, LinkedIssueInfo>> TryLoadIssuesAsync(
+        DashboardOptions options,
+        CancellationToken cancellationToken)
+    {
+        var issues = new Dictionary<int, LinkedIssueInfo>();
+        if (string.IsNullOrWhiteSpace(options.GitHubRepository))
+        {
+            return issues;
+        }
+
+        var issueResult = await _commandRunner.RunAsync(
+            "gh",
+            [
+                "issue", "list",
+                "--repo", options.GitHubRepository,
+                "--state", "all",
+                "--limit", "100",
+                "--json", "number,title,url,state"
+            ],
+            workingDirectory: null,
+            timeout: TimeSpan.FromSeconds(8),
+            cancellationToken).ConfigureAwait(false);
+
+        if (!issueResult.Succeeded || string.IsNullOrWhiteSpace(issueResult.StdOut))
+        {
+            return issues;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(issueResult.StdOut);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return issues;
+            }
+
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object ||
+                    !item.TryGetProperty("number", out var numberProp) ||
+                    !numberProp.TryGetInt32(out var issueNumber))
+                {
+                    continue;
+                }
+
+                var title = GetString(item, "title");
+                var url = GetString(item, "url") ?? $"https://github.com/{options.GitHubRepository}/issues/{issueNumber}";
+                var state = GetString(item, "state");
+
+                issues[issueNumber] = new LinkedIssueInfo(
+                    Number: issueNumber,
+                    Title: string.IsNullOrWhiteSpace(title) ? null : title.Trim(),
+                    Url: url,
+                    State: string.IsNullOrWhiteSpace(state) ? null : state.Trim().ToUpperInvariant());
+            }
+        }
+        catch (JsonException)
+        {
+            // Keep graceful empty map on malformed CLI output.
+        }
+
+        return issues;
+    }
+
+    private static HashSet<int> CollectPrNumbers(string openJson, string? mergedJson)
+    {
+        var set = new HashSet<int>();
+        AddPrNumbersFromJson(openJson, set);
+        if (!string.IsNullOrWhiteSpace(mergedJson))
+        {
+            AddPrNumbersFromJson(mergedJson, set);
+        }
+
+        return set;
+    }
+
+    private static void AddPrNumbersFromJson(string json, HashSet<int> target)
     {
         try
         {
-            var merged = ParsePullRequests(json, isMergedList: true, projectStatuses: new Dictionary<int, string>());
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return;
+            }
+
+            foreach (var el in doc.RootElement.EnumerateArray())
+            {
+                if (el.ValueKind == JsonValueKind.Object &&
+                    el.TryGetProperty("number", out var prop) &&
+                    prop.TryGetInt32(out var num))
+                {
+                    target.Add(num);
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Ignore; caller handles JSON errors when building pull requests.
+        }
+    }
+
+    private static List<PullRequestInfo> ParseMergedSafe(
+        string json,
+        string repository,
+        IReadOnlyDictionary<int, LinkedIssueInfo> issuesByNumber,
+        IReadOnlySet<int> knownPrNumbers)
+    {
+        try
+        {
+            var merged = ParsePullRequests(
+                json,
+                isMergedList: true,
+                repository,
+                projectStatuses: new Dictionary<int, string>(),
+                issuesByNumber,
+                knownPrNumbers);
             return merged
                 .OrderByDescending(p => p.MergedAtUtc ?? p.UpdatedAtUtc)
                 .ToList();
@@ -217,7 +341,10 @@ public sealed partial class PipelineProvider
     private static List<PullRequestInfo> ParsePullRequests(
         string json,
         bool isMergedList,
-        IReadOnlyDictionary<int, string> projectStatuses)
+        string repository,
+        IReadOnlyDictionary<int, string> projectStatuses,
+        IReadOnlyDictionary<int, LinkedIssueInfo> issuesByNumber,
+        IReadOnlySet<int> knownPrNumbers)
     {
         using var doc = JsonDocument.Parse(json);
         if (doc.RootElement.ValueKind != JsonValueKind.Array)
@@ -245,7 +372,7 @@ public sealed partial class PipelineProvider
             var mergedAt = isMergedList ? ParseDateTimeOffset(el, "mergedAt") : null;
 
             var stateLabel = isMergedList
-                ? "Gemergt"
+                ? "Merged"
                 : autoMergeEnabled
                     ? "Auto-Merge"
                     : isDraft
@@ -259,6 +386,7 @@ public sealed partial class PipelineProvider
 
             var comments = ParseComments(el);
             var participants = PrParticipantExtractor.Extract(branch, body, comments);
+            var linkedIssues = ExtractLinkedIssues(el, number, repository, branch, body, issuesByNumber, knownPrNumbers);
 
             list.Add(new PullRequestInfo(
                 Number: number,
@@ -277,12 +405,125 @@ public sealed partial class PipelineProvider
                 UpdatedAtUtc: updatedAt,
                 MergedAtUtc: mergedAt,
                 ProjectStatus: projectStatus,
-                Participants: participants));
+                Participants: participants,
+                LinkedIssues: linkedIssues));
         }
 
         return list
             .OrderByDescending(p => p.Number)
             .ToList();
+    }
+
+    private static List<LinkedIssueInfo> ExtractLinkedIssues(
+        JsonElement prElement,
+        int prNumber,
+        string repository,
+        string branch,
+        string body,
+        IReadOnlyDictionary<int, LinkedIssueInfo> issuesByNumber,
+        IReadOnlySet<int> knownPrNumbers)
+    {
+        var results = new List<LinkedIssueInfo>();
+        var seen = new HashSet<int>();
+
+        void TryAddIssue(int issueNumber, string? fallbackUrl = null)
+        {
+            if (issueNumber <= 0 || issueNumber == prNumber || seen.Contains(issueNumber))
+            {
+                return;
+            }
+
+            if (issuesByNumber.TryGetValue(issueNumber, out var resolved))
+            {
+                seen.Add(issueNumber);
+                results.Add(resolved);
+                return;
+            }
+
+            if (knownPrNumbers.Contains(issueNumber))
+            {
+                return;
+            }
+
+            seen.Add(issueNumber);
+            var url = !string.IsNullOrWhiteSpace(fallbackUrl)
+                ? fallbackUrl
+                : $"https://github.com/{repository}/issues/{issueNumber}";
+            results.Add(new LinkedIssueInfo(issueNumber, Title: null, Url: url, State: null));
+        }
+
+        // 1. GitHub GraphQL closingIssuesReferences
+        if (prElement.TryGetProperty("closingIssuesReferences", out var closingRefs) &&
+            closingRefs.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var refEl in closingRefs.EnumerateArray())
+            {
+                if (refEl.ValueKind == JsonValueKind.Object &&
+                    refEl.TryGetProperty("number", out var numProp) &&
+                    numProp.TryGetInt32(out var issueNum))
+                {
+                    var refUrl = GetString(refEl, "url");
+                    if (seen.Add(issueNum) && issueNum != prNumber)
+                    {
+                        if (issuesByNumber.TryGetValue(issueNum, out var enriched))
+                        {
+                            results.Add(enriched);
+                        }
+                        else
+                        {
+                            var fallback = !string.IsNullOrWhiteSpace(refUrl)
+                                ? refUrl
+                                : $"https://github.com/{repository}/issues/{issueNum}";
+                            results.Add(new LinkedIssueInfo(issueNum, Title: null, Url: fallback, State: null));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Slice header "- Issue: ..." lines in PR body
+        foreach (Match lineMatch in IssueHeaderLineRegex().Matches(body))
+        {
+            var lineValue = lineMatch.Groups[1].Value.Trim();
+            if (lineValue.StartsWith("none", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var isFollowUpOnly = lineValue.Contains("follow-up to #", StringComparison.OrdinalIgnoreCase);
+            foreach (Match numMatch in HashNumberRegex().Matches(lineValue))
+            {
+                if (int.TryParse(numMatch.Groups[1].Value, out var issueNum))
+                {
+                    if (isFollowUpOnly && !issuesByNumber.ContainsKey(issueNum))
+                    {
+                        continue;
+                    }
+
+                    TryAddIssue(issueNum);
+                }
+            }
+        }
+
+        // 3. Explicit Closes / Fixes / Resolves / Part of / Refs #N in PR body
+        foreach (Match kwMatch in ExplicitIssueRefRegex().Matches(body))
+        {
+            if (int.TryParse(kwMatch.Groups[1].Value, out var issueNum))
+            {
+                TryAddIssue(issueNum);
+            }
+        }
+
+        // 4. Branch naming convention (e.g. claude/issue-366-rf09-completion)
+        foreach (Match branchMatch in BranchIssueRegex().Matches(branch))
+        {
+            if (int.TryParse(branchMatch.Groups[1].Value, out var issueNum))
+            {
+                TryAddIssue(issueNum);
+            }
+        }
+
+        return results;
     }
 
     private static List<PrCommentInput> ParseComments(JsonElement prElement)
@@ -441,9 +682,21 @@ public sealed partial class PipelineProvider
             : null;
     }
 
-    [GeneratedRegex(@"(?:Risk\s*class|Risikoklasse|Class)\s*[:\-]?\s*`?([HML])`?\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?:Risk\s*class(?:\s*\([^)]*\))?|Risikoklasse(?:\s*\([^)]*\))?|Class)\s*[:\-]?\s*`?([HML])`?\b", RegexOptions.IgnoreCase)]
     private static partial Regex RiskClassRegex();
 
     [GeneratedRegex(@"(?:Locked\s*areas?|Gesperrte\s*Bereiche?)\s*[:\-]\s*([^\r\n]+)", RegexOptions.IgnoreCase)]
     private static partial Regex LockedAreasRegex();
+
+    [GeneratedRegex(@"^[-*]\s*Issue\s*:\s*(.+)$", RegexOptions.IgnoreCase | RegexOptions.Multiline)]
+    private static partial Regex IssueHeaderLineRegex();
+
+    [GeneratedRegex(@"\b(?:Closes|Fixes|Resolves|Part\s+of|Refs)\s+#(\d+)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ExplicitIssueRefRegex();
+
+    [GeneratedRegex(@"(?:^|[-_/])issue[-_]?(\d+)(?:[-_/]|$)", RegexOptions.IgnoreCase)]
+    private static partial Regex BranchIssueRegex();
+
+    [GeneratedRegex(@"#(\d+)")]
+    private static partial Regex HashNumberRegex();
 }

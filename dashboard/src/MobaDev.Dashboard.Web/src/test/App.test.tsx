@@ -72,6 +72,11 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
       ],
       roles: [
         {
+          role: 'Decision & Steering Triad',
+          profiles: 'P1 (COO) + P2 (CPM/TD) + P3 (Product/UX)',
+          responsibility: 'Cross-model steering for slice cutting, risk classification, design Go and escalations'
+        },
+        {
           role: 'Chief Operating Officer (COO)',
           profiles: 'P1 (Claude)',
           responsibility: 'Operational steering'
@@ -96,7 +101,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           syncStatus: 'drift',
           repoHash: '5df3fc1eba23',
           localHash: '4c75aab1d12b',
-          driftSummary: 'Inhalt weicht ab (+2/-1 Zeilen)'
+          driftSummary: 'Content differs (+2/-1 lines)'
         },
         {
           tool: 'Antigravity',
@@ -128,7 +133,8 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
       generatedAtUtc: nowIso,
       repository: 'ahuelsmann/MOBAflow',
       projectBoardAvailable: false,
-      projectBoardNotice: 'Projekt-Daten ausgeblendet: Scope read:project fehlt oder Kanban-CLI nicht erreichbar.',
+      projectBoardNotice:
+        'Project board data hidden: missing read:project scope or Kanban CLI unreachable.',
       source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
       pullRequests: [
         {
@@ -155,8 +161,16 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
               role: 'Writer',
               profile: 'P2',
               model: 'GPT-6 Astra',
-              status: 'Umgesetzt',
+              status: 'Implemented',
               evidenceSource: 'Branch'
+            }
+          ],
+          linkedIssues: [
+            {
+              number: 366,
+              title: 'RF-09: Coverage and mutation ratchets',
+              url: 'https://github.com/ahuelsmann/MOBAflow/issues/366',
+              state: 'OPEN'
             }
           ]
         }
@@ -168,7 +182,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           url: 'https://github.com/ahuelsmann/MOBAflow/pull/495',
           branch: 'claude/deps-494',
           state: 'MERGED',
-          stateLabel: 'Gemergt',
+          stateLabel: 'Merged',
           isDraft: false,
           autoMergeEnabled: false,
           mergeState: 'MERGED',
@@ -187,7 +201,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
               profile: 'P1',
               model: 'Claude Opus 5.5',
               status: 'PASS',
-              evidenceSource: 'P1-Final-Review'
+              evidenceSource: 'P1 Final Review'
             },
             {
               agent: 'Antigravity Verifier',
@@ -196,9 +210,10 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
               profile: 'P3',
               model: 'Gemini 4 Argon',
               status: 'PASS',
-              evidenceSource: 'Cross-Family-Check'
+              evidenceSource: 'Cross-Family Check'
             }
-          ]
+          ],
+          linkedIssues: []
         }
       ]
     },
@@ -221,7 +236,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           targetCount: 1,
           actualCount: 2,
           status: 'warning',
-          notice: '2 aktive Sessions gefunden – überschüssige Sessions archivieren.'
+          notice: '2 active sessions found — archive extra sessions.'
         }
       ],
       worktrees: [
@@ -253,7 +268,7 @@ describe('MOBAdev Agent Network Dashboard', () => {
     window.localStorage.clear();
   });
 
-  it('renders live monitor states, PR pipeline with participants, missing scope notice, and recently merged toggle', async () => {
+  it('renders live monitor states, compact Decision & Steering Triad strip, PR pipeline with linked issues & participants, and recently merged toggle', async () => {
     const user = userEvent.setup();
     const fixture = createSnapshotFixture();
     vi.stubGlobal(
@@ -266,33 +281,46 @@ describe('MOBAdev Agent Network Dashboard', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('Nur Lesen · 127.0.0.1')).toBeInTheDocument();
+    expect(await screen.findByText('Read-Only · 127.0.0.1')).toBeInTheDocument();
+
+    // Row 1: Monitor cards
     expect(screen.getByRole('heading', { name: 'Claude Monitor' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Codex Monitor' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Antigravity Monitor' })).toBeInTheDocument();
-    expect(screen.getByText('Reset: 12am (Europe/Berlin)')).toBeInTheDocument();
+    expect(screen.getByText(/Reset: 12am \(Europe\/Berlin\)/)).toBeInTheDocument();
     expect(screen.getByText('Standby')).toBeInTheDocument();
-    expect(screen.getByText('Aktiv / Busy')).toBeInTheDocument();
+    expect(screen.getByText('Active / Busy')).toBeInTheDocument();
 
-    // Pipeline keeps rendering PR #492 despite read:project notice and displays participant chips
+    // Row 2: Compact Decision & Steering Triad bar
+    expect(screen.getByRole('heading', { name: 'Decision & Steering Triad' })).toBeInTheDocument();
+    expect(screen.getByText('Quorum 2 / 3 · 1 Quota Pause')).toBeInTheDocument();
+    expect(screen.getByText('Active Slices: 1 / 3')).toBeInTheDocument();
+    expect(screen.getByText('COO')).toBeInTheDocument();
+    expect(screen.getByText('CPM & TD')).toBeInTheDocument();
+    expect(screen.getByText('AI Strategy')).toBeInTheDocument();
+    expect(screen.getByText('Escalation: Human')).toBeInTheDocument();
+
+    // Row 3: Pipeline with linked GitHub issue, participant chips & missing scope notice
     expect(screen.getByText('Repository: ahuelsmann/MOBAflow')).toBeInTheDocument();
     expect(screen.getByText('#492')).toBeInTheDocument();
+    expect(screen.getByText('Issue #366')).toBeInTheDocument();
+    expect(screen.getByText(/RF-09: Coverage and mutation ratchets/)).toBeInTheDocument();
     expect(screen.getByText(/ChatGPT Codex · GPT-6 Astra/)).toBeInTheDocument();
-    expect(screen.getByText(/Scope read:project fehlt/i)).toBeInTheDocument();
+    expect(screen.getByText(/missing read:project scope/i)).toBeInTheDocument();
 
     // Hygiene & stale worktree warnings
-    expect(screen.getByText('2 / 1 Warnung')).toBeInTheDocument();
-    expect(screen.getByText('Veraltet / Gemergt')).toBeInTheDocument();
+    expect(screen.getByText('2 / 1 Warning')).toBeInTheDocument();
+    expect(screen.getByText('Stale / Merged')).toBeInTheDocument();
 
     // Switch to Recently Merged tasks and verify multi-model participation
-    await user.click(screen.getByRole('button', { name: /Zuletzt abgeschlossen \(1\)/i }));
+    await user.click(screen.getByRole('button', { name: /Recently Merged \(1\)/i }));
     expect(screen.getByText('#495')).toBeInTheDocument();
     expect(screen.getByText('Final Reviewer')).toBeInTheDocument();
     expect(screen.getByText(/Claude Code · Claude Opus 5.5/)).toBeInTheDocument();
     expect(screen.getByText(/Antigravity · Gemini 4 Argon/)).toBeInTheDocument();
   });
 
-  it('navigates from drift summary to Matrix & Sync pre-filtered to deviations and switches themes', async () => {
+  it('navigates from Rules State deviations to Matrix & Rules pre-filtered to Drift Only, checks Actual/Target hash order, and switches themes', async () => {
     const user = userEvent.setup();
     const fixture = createSnapshotFixture();
     vi.stubGlobal(
@@ -304,22 +332,27 @@ describe('MOBAdev Agent Network Dashboard', () => {
     );
 
     render(<App />);
-    const driftBtn = await screen.findByRole('button', { name: /Abweichungen prüfen/i });
+    const driftBtn = await screen.findByRole('button', { name: /Review Deviations/i });
     await user.click(driftBtn);
 
-    // Pre-filtered to drift only: drifted item shown, synced item hidden
+    // Pre-filtered to drift only: Actual / Target labels and 1 Entry count
+    expect(screen.getByRole('heading', { name: /Rules State · Actual vs\. Target/i })).toBeInTheDocument();
+    expect(screen.getByText('1 Entry')).toBeInTheDocument();
+    expect(screen.getByText('Actual: 4c75aab1d12b')).toBeInTheDocument();
+    expect(screen.getByText('Target: 5df3fc1eba23')).toBeInTheDocument();
     expect(screen.getByText('head-of-ai-strategy.md')).toBeInTheDocument();
     expect(screen.queryByText('mobaflow-agent-network.md')).not.toBeInTheDocument();
 
-    // Toggle off drift-only filter -> synced item appears
-    await user.click(screen.getByRole('button', { name: /Nur Abweichungen/i }));
+    // Toggle off drift-only filter -> 2 Entries & synced item appears
+    await user.click(screen.getByRole('button', { name: /Drift Only/i }));
+    expect(screen.getByText('2 Entries')).toBeInTheDocument();
     expect(screen.getByText('mobaflow-agent-network.md')).toBeInTheDocument();
 
     // Theme switching
-    await user.click(screen.getByRole('button', { name: 'Hell' }));
+    await user.click(screen.getByRole('button', { name: 'Light' }));
     expect(document.documentElement.dataset.theme).toBe('light');
 
-    await user.click(screen.getByRole('button', { name: 'Dunkel' }));
+    await user.click(screen.getByRole('button', { name: 'Dark' }));
     expect(document.documentElement.dataset.theme).toBe('dark');
   });
 
@@ -332,7 +365,7 @@ describe('MOBAdev Agent Network Dashboard', () => {
     render(<App />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      /Lokales Dashboard-Backend nicht erreichbar/i
+      /Local dashboard backend unreachable/i
     );
   });
 });

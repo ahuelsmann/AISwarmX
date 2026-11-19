@@ -1,75 +1,163 @@
-import { AlertTriangle, CheckCircle2, Clock, Hourglass, Slash } from 'lucide-react';
-import { formatAbsoluteDe, formatRelativeTimeDe } from '../api/dashboardClient';
+import {
+  Badge,
+  Card,
+  MessageBar,
+  MessageBarBody,
+  Text,
+  makeStyles,
+  tokens
+} from '@fluentui/react-components';
+import {
+  CheckmarkCircle16Regular,
+  Clock16Regular,
+  Prohibited16Regular,
+  Timer16Regular
+} from '@fluentui/react-icons';
+import { formatAbsoluteEn, formatRelativeTimeEn } from '../api/dashboardClient';
 import type { MonitorInfo } from '../types/dashboard';
 import { GlossaryTooltip } from './GlossaryTooltip';
+import { ModelBadge, ProfileBadge, RoleBadge } from './RoleAndModelIcons';
+
+const useStyles = makeStyles({
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gap: '14px',
+    '@media (max-width: 959px)': {
+      gridTemplateColumns: 'minmax(0, 1fr)'
+    }
+  },
+  card: {
+    padding: '14px 16px',
+    gap: '12px',
+    justifyContent: 'space-between',
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  cardTop: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px'
+  },
+  headerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px',
+    flexWrap: 'wrap'
+  },
+  titleGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap'
+  },
+  title: {
+    margin: 0,
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1
+  },
+  subtitleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    flexWrap: 'wrap'
+  },
+  slots: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    paddingTop: '10px',
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  slotRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px',
+    flexWrap: 'wrap'
+  },
+  slotLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2
+  }
+});
 
 interface MonitorCardsProps {
   monitors: MonitorInfo[];
   nowMs: number;
+  isDark: boolean;
 }
 
-export function MonitorCards({ monitors, nowMs }: MonitorCardsProps) {
+export function MonitorCards({ monitors, nowMs, isDark }: MonitorCardsProps) {
+  const styles = useStyles();
+
   return (
-    <section aria-label="Monitor-Ampel (Live)">
-      <div className="monitors-grid">
+    <section aria-label="Live Monitor Status">
+      <div className={styles.grid}>
         {monitors.map((monitor) => (
-          <article key={monitor.id} className="card monitor-card">
-            <div className="monitor-meta">
-              <div className="card-header">
-                <div className="card-title-row">
-                  <h2 className="card-title">{monitor.displayName}</h2>
+          <Card key={monitor.id} className={styles.card} appearance="filled">
+            <div className={styles.cardTop}>
+              <div className={styles.headerRow}>
+                <div className={styles.titleGroup}>
+                  <h2 className={styles.title}>{monitor.displayName}</h2>
                   <GlossaryTooltip term={monitor.profile} showIcon>
-                    <span className="badge">{monitor.profile}</span>
+                    <ProfileBadge profile={monitor.profile} isDark={isDark} />
                   </GlossaryTooltip>
                 </div>
                 <MonitorStateBadge state={monitor.state} />
               </div>
 
-              <div className="monitor-subtitle">
-                {monitor.role} · {monitor.tool}
+              <div className={styles.subtitleRow}>
+                <RoleBadge role={monitor.role} isDark={isDark} />
+                <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                  · {monitor.tool}
+                </Text>
               </div>
 
               {monitor.state === 'rate_limited' && monitor.rateLimitResetLabel && (
-                <div className="rate-limit-box tabular">
-                  <span>Kontingent-Pause</span>
-                  <span>Reset: {monitor.rateLimitResetLabel}</span>
-                </div>
+                <MessageBar intent="warning" layout="singleline">
+                  <MessageBarBody className="tabular">
+                    Quota Pause — Reset: {monitor.rateLimitResetLabel}
+                  </MessageBarBody>
+                </MessageBar>
               )}
 
               {monitor.source.status !== 'ok' && monitor.source.notice && (
-                <div className="notice-banner notice-banner--amber">
-                  <AlertTriangle size={14} aria-hidden="true" />
-                  <span>{monitor.source.notice}</span>
-                </div>
+                <MessageBar intent="warning" layout="multiline">
+                  <MessageBarBody>{monitor.source.notice}</MessageBarBody>
+                </MessageBar>
               )}
             </div>
 
-            <div className="monitor-slots">
-              <div className="slot-row">
-                <span className="slot-label">Aktives Modell</span>
-                <span className="model-chip mono">
-                  {monitor.model ? monitor.model : 'nicht erkannt'}
-                </span>
+            <div className={styles.slots}>
+              <div className={styles.slotRow}>
+                <span className={styles.slotLabel}>Active Model</span>
+                <ModelBadge model={monitor.model} isDark={isDark} mono />
               </div>
 
-              <div className="slot-row">
-                <span className="slot-label">Letzte Aktivität</span>
-                <span
+              <div className={styles.slotRow}>
+                <span className={styles.slotLabel}>Last Activity</span>
+                <Text
+                  size={200}
                   className="tabular"
-                  title={formatAbsoluteDe(monitor.lastActivityUtc)}
+                  title={formatAbsoluteEn(monitor.lastActivityUtc)}
                 >
-                  {formatRelativeTimeDe(monitor.lastActivityUtc, nowMs)}
-                </span>
+                  {formatRelativeTimeEn(monitor.lastActivityUtc, nowMs)}
+                </Text>
               </div>
 
               {monitor.automationStatus && (
-                <div className="slot-row">
-                  <span className="slot-label">Automation</span>
-                  <span className="model-chip mono">{monitor.automationStatus}</span>
+                <div className={styles.slotRow}>
+                  <span className={styles.slotLabel}>Automation</span>
+                  <Badge appearance="outline" color="subtle" shape="rounded" className="mono">
+                    {monitor.automationStatus}
+                  </Badge>
                 </div>
               )}
             </div>
-          </article>
+          </Card>
         ))}
       </div>
     </section>
@@ -80,31 +168,35 @@ function MonitorStateBadge({ state }: { state: string }) {
   switch (state) {
     case 'busy':
       return (
-        <span className="badge badge--blue">
-          <span className="pulse-dot" aria-hidden="true" />
-          Aktiv / Busy
-        </span>
+        <Badge appearance="tint" color="brand" shape="rounded">
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <span className="pulse-dot" aria-hidden="true" />
+            Active / Busy
+          </span>
+        </Badge>
       );
     case 'standby':
       return (
-        <span className="badge badge--green">
-          <CheckCircle2 size={13} aria-hidden="true" />
+        <Badge appearance="tint" color="success" shape="rounded" icon={<CheckmarkCircle16Regular />}>
           Standby
-        </span>
+        </Badge>
       );
     case 'rate_limited':
       return (
-        <span className="badge badge--amber">
-          <Hourglass size={13} aria-hidden="true" />
-          Kontingent-Pause
-        </span>
+        <Badge appearance="tint" color="warning" shape="rounded" icon={<Timer16Regular />}>
+          Quota Pause
+        </Badge>
       );
     default:
       return (
-        <span className="badge">
-          {state === 'offline' ? <Slash size={13} aria-hidden="true" /> : <Clock size={13} aria-hidden="true" />}
-          Offline / Unbekannt
-        </span>
+        <Badge
+          appearance="tint"
+          color="subtle"
+          shape="rounded"
+          icon={state === 'offline' ? <Prohibited16Regular /> : <Clock16Regular />}
+        >
+          Offline / Unknown
+        </Badge>
       );
   }
 }
