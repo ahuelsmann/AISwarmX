@@ -178,7 +178,8 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
               url: 'https://github.com/ahuelsmann/MOBAflow/issues/366',
               state: 'OPEN'
             }
-          ]
+          ],
+          mergeBlockReasons: []
         }
       ],
       recentlyMerged: [
@@ -219,7 +220,8 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
               evidenceSource: 'Cross-Family Check'
             }
           ],
-          linkedIssues: []
+          linkedIssues: [],
+          mergeBlockReasons: []
         }
       ]
     },
@@ -534,6 +536,39 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
 
     await user.click(screen.getByRole('button', { name: 'Raw' }));
     expect(screen.getByText(/# MOBAdev Manifest/)).toBeInTheDocument();
+    },
+    10_000
+  );
+
+  it(
+    'displays explicit BLOCKED reason banner directly under blocked PRs',
+    async () => {
+      const blockedSnapshot = createSnapshotFixture();
+      blockedSnapshot.pipeline.pullRequests = [
+        {
+          ...blockedSnapshot.pipeline.pullRequests[0],
+          number: 501,
+          title: 'ci(quality): enforce C# whitespace gate (RF-10 slice 3)',
+          mergeState: 'BLOCKED',
+          ciStatus: 'pending',
+          sonarStatus: 'pass',
+          projectStatus: 'In review',
+          mergeBlockReasons: [
+            'Draft PR (not yet marked Ready for review)',
+            '2 checks running: Windows desktop build, Backend mutation testing'
+          ]
+        }
+      ];
+      stubDashboardFetch(blockedSnapshot);
+
+      render(<App />);
+      expect(await screen.findByText('BLOCKED')).toBeInTheDocument();
+      expect(screen.getByText('Kanban: In review')).toBeInTheDocument();
+      const blockedLabel = screen.getByText('Blocked reason:');
+      expect(blockedLabel).toBeInTheDocument();
+      expect(blockedLabel.parentElement).toHaveTextContent(
+        /Draft PR \(not yet marked Ready for review\).*2 checks running/
+      );
     },
     10_000
   );

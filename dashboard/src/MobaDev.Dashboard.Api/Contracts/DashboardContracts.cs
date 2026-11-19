@@ -162,7 +162,8 @@ public sealed record PullRequestInfo(
     DateTimeOffset? MergedAtUtc,
     string? ProjectStatus,
     IReadOnlyList<TaskParticipantInfo> Participants,
-    IReadOnlyList<LinkedIssueInfo> LinkedIssues);
+    IReadOnlyList<LinkedIssueInfo> LinkedIssues,
+    IReadOnlyList<string> MergeBlockReasons);
 
 public sealed record PipelineResponse(
     DateTimeOffset GeneratedAtUtc,

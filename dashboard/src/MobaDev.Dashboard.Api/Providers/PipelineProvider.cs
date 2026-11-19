@@ -30,7 +30,7 @@ public sealed partial class PipelineProvider
                 "pr", "list",
                 "--repo", options.GitHubRepository,
                 "--state", "open",
-                "--json", "number,title,url,headRefName,isDraft,mergeStateStatus,autoMergeRequest,updatedAt,body,statusCheckRollup,comments,closingIssuesReferences"
+                "--json", "number,title,url,headRefName,isDraft,mergeStateStatus,mergeable,reviewDecision,autoMergeRequest,updatedAt,body,statusCheckRollup,comments,closingIssuesReferences,projectItems"
             ],
             workingDirectory: null,
             timeout: TimeSpan.FromSeconds(12),
@@ -382,11 +382,18 @@ public sealed partial class PipelineProvider
             var (ciStatus, sonarStatus) = isMergedList ? ("pass", "pass") : ClassifyChecks(el);
             var riskClass = ExtractRiskClass(body, title);
             var lockedAreas = ExtractLockedAreas(body);
-            projectStatuses.TryGetValue(number, out var projectStatus);
+            var projectStatus = isMergedList ? null : ExtractInlineProjectStatus(el);
+            if (string.IsNullOrWhiteSpace(projectStatus))
+            {
+                projectStatuses.TryGetValue(number, out projectStatus);
+            }
 
             var comments = ParseComments(el);
             var participants = PrParticipantExtractor.Extract(branch, body, comments);
             var linkedIssues = ExtractLinkedIssues(el, number, repository, branch, body, issuesByNumber, knownPrNumbers);
+            var mergeBlockReasons = isMergedList
+                ? []
+                : ExtractMergeBlockReasons(el, isDraft, mergeState, participants);
 
             list.Add(new PullRequestInfo(
                 Number: number,
@@ -406,7 +413,8 @@ public sealed partial class PipelineProvider
                 MergedAtUtc: mergedAt,
                 ProjectStatus: projectStatus,
                 Participants: participants,
-                LinkedIssues: linkedIssues));
+                LinkedIssues: linkedIssues,
+                MergeBlockReasons: mergeBlockReasons));
         }
 
         return list
@@ -603,6 +611,150 @@ public sealed partial class PipelineProvider
         }
 
         return (AggregateOutcome(ciChecks), AggregateOutcome(sonarChecks));
+    }
+
+    private static string? ExtractInlineProjectStatus(JsonElement prElement)
+    {
+        if (!prElement.TryGetProperty("projectItems", out var projectItems) ||
+            projectItems.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        string? fallback = null;
+        foreach (var item in projectItems.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object ||
+                !item.TryGetProperty("status", out var statusEl) ||
+                statusEl.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var statusName = GetString(statusEl, "name");
+            if (string.IsNullOrWhiteSpace(statusName))
+            {
+                continue;
+            }
+
+            var projectTitle = GetString(item, "title");
+            if (string.Equals(projectTitle, "Kanban", StringComparison.OrdinalIgnoreCase))
+            {
+                return statusName.Trim();
+            }
+
+            fallback ??= statusName.Trim();
+        }
+
+        return fallback;
+    }
+
+    private static IReadOnlyList<string> ExtractMergeBlockReasons(
+        JsonElement prElement,
+        bool isDraft,
+        string mergeState,
+        IReadOnlyList<TaskParticipantInfo> participants)
+    {
+        var normalizedState = mergeState.ToUpperInvariant();
+        if (normalizedState is not ("BLOCKED" or "DIRTY" or "UNSTABLE" or "BEHIND"))
+        {
+            return [];
+        }
+
+        var reasons = new List<string>();
+
+        if (isDraft)
+        {
+            reasons.Add("Draft PR (not yet marked Ready for review)");
+        }
+
+        var mergeable = GetString(prElement, "mergeable") ?? string.Empty;
+        if (string.Equals(mergeable, "CONFLICTING", StringComparison.OrdinalIgnoreCase) ||
+            normalizedState == "DIRTY")
+        {
+            reasons.Add("Merge conflict with main — merge main and resolve conflicts");
+        }
+        else if (normalizedState == "BEHIND")
+        {
+            reasons.Add("Branch is behind main — merge current main");
+        }
+
+        var reviewDecision = GetString(prElement, "reviewDecision") ?? string.Empty;
+        if (string.Equals(reviewDecision, "CHANGES_REQUESTED", StringComparison.OrdinalIgnoreCase))
+        {
+            reasons.Add("Changes requested in GitHub review");
+        }
+        else if (string.Equals(reviewDecision, "REVIEW_REQUIRED", StringComparison.OrdinalIgnoreCase))
+        {
+            reasons.Add("Required approving review missing");
+        }
+
+        if (participants.Any(p => string.Equals(p.Status, "Blocked", StringComparison.OrdinalIgnoreCase)))
+        {
+            reasons.Add("Review/Model gate marked BLOCKED (see PR comments)");
+        }
+
+        var failingChecks = CollectCheckNames(prElement, "fail");
+        if (failingChecks.Count > 0)
+        {
+            reasons.Add(FormatCheckReason(failingChecks, "Check failing", "checks failing"));
+        }
+
+        var runningChecks = CollectCheckNames(prElement, "pending");
+        if (runningChecks.Count > 0)
+        {
+            reasons.Add(FormatCheckReason(runningChecks, "Check running", "checks running"));
+        }
+
+        if (normalizedState == "BLOCKED" && reasons.Count == 0)
+        {
+            reasons.Add("Blocked by GitHub branch protection rule or required check/review");
+        }
+
+        return reasons;
+    }
+
+    private static List<string> CollectCheckNames(JsonElement prElement, string targetOutcome)
+    {
+        var names = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!prElement.TryGetProperty("statusCheckRollup", out var checks) ||
+            checks.ValueKind != JsonValueKind.Array)
+        {
+            return names;
+        }
+
+        foreach (var check in checks.EnumerateArray())
+        {
+            if (check.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            if (!string.Equals(ClassifySingleCheck(check), targetOutcome, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var name = GetString(check, "name") ?? GetString(check, "context");
+            if (!string.IsNullOrWhiteSpace(name) && seen.Add(name.Trim()))
+            {
+                names.Add(name.Trim());
+            }
+        }
+
+        return names;
+    }
+
+    private static string FormatCheckReason(IReadOnlyList<string> checkNames, string singularPrefix, string pluralSuffix)
+    {
+        return checkNames.Count switch
+        {
+            1 => $"{singularPrefix}: {checkNames[0]}",
+            2 => $"2 {pluralSuffix}: {checkNames[0]}, {checkNames[1]}",
+            _ => $"{checkNames.Count} {pluralSuffix}: {checkNames[0]}, {checkNames[1]} (+{checkNames.Count - 2} more)"
+        };
     }
 
     private static string ClassifySingleCheck(JsonElement check)
