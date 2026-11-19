@@ -489,27 +489,38 @@ public sealed class PipelineAndWorktreeProviderTests
         var result = await provider.GetPipelineAsync(new DashboardOptions(), CancellationToken.None);
 
         Assert.True(result.ProjectBoardAvailable);
+        Assert.Equal("https://github.com/users/ahuelsmann/projects/1", result.ProjectBoardUrl);
         Assert.Equal("In review", Assert.Single(result.PullRequests, p => p.Number == 501).ProjectStatus);
 
-        Assert.Equal([451, 47, 136, 266], result.ActiveIssues.Select(i => i.Number).ToArray());
+        Assert.Equal([501, 451, 47, 136, 266], result.ActiveIssues.Select(i => i.Number).ToArray());
 
-        var issue451 = result.ActiveIssues[0];
+        var pr501Item = result.ActiveIssues[0];
+        Assert.Equal("PullRequest", pr501Item.ItemKind);
+        Assert.Equal("In review", pr501Item.KanbanStatus);
+        Assert.Equal("L", pr501Item.RiskClass);
+        Assert.Equal(["quality.yml", "CONTRIBUTING.md"], pr501Item.LockedAreas);
+        Assert.Single(pr501Item.LinkedIssues, li => li.Number == 451);
+        Assert.Null(pr501Item.BoardDriftReason);
+
+        var issue451 = result.ActiveIssues[1];
+        Assert.Equal("Issue", issue451.ItemKind);
         Assert.Equal("In progress", issue451.KanbanStatus);
         Assert.Equal("L", issue451.RiskClass);
         Assert.Equal(["quality.yml", "CONTRIBUTING.md"], issue451.LockedAreas);
         Assert.Single(issue451.LinkedPullRequests, p => p.Number == 501);
         Assert.Null(issue451.BoardDriftReason);
 
-        var issue47 = result.ActiveIssues[1];
+        var issue47 = result.ActiveIssues[2];
+        Assert.Equal("Issue", issue47.ItemKind);
         Assert.Equal("P0", issue47.Priority);
         Assert.Equal("Infrastructure", issue47.Area);
         Assert.Empty(issue47.LinkedPullRequests);
         Assert.Null(issue47.BoardDriftReason);
 
-        var issue136 = result.ActiveIssues[2];
+        var issue136 = result.ActiveIssues[3];
         Assert.Equal("No active PR or Writer (stale on board)", issue136.BoardDriftReason);
 
-        var issue266 = result.ActiveIssues[3];
+        var issue266 = result.ActiveIssues[4];
         Assert.Equal("Closed on GitHub — move to Done on Kanban", issue266.BoardDriftReason);
     }
 

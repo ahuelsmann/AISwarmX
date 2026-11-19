@@ -5,7 +5,15 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAdev generations (`Gen#1 = 1.x`, `Gen#2 = 2.x`, `Gen#3 = 3.0.0+`).
 
-## [3.1.0] - 2026-11-19
+## [3.1.1] - 2026-11-20
+
+### Changed
+- **1:1 GitHub Kanban Sync (`PipelineProvider.cs`, `DashboardContracts.cs`, `PipelineCard.tsx`):** Updated the third Task & PR Pipeline toggle to **`Kanban Board (N)`** mirroring GitHub Project #1 (`Ready`, `In progress`, `In review`) 1:1 with both **PRs and Issues**, live column summary counters, direct `Open GitHub Kanban` link, and zero hidden items (board-drift warnings appear inline without filtering items out).
+- **Kanban Cleanup (Option A):** Returned legacy idle issues (`#35`, `#36`, `#136`, `#140`) on MOBAflow Kanban Project #1 back to `Planned`.
+
+---
+
+## [3.1.0] - 2026-11-19 (PR #16)
 
 ### Added
 - **Active Issues Kanban View (`PipelineProvider.cs`, `DashboardContracts.cs`, `PipelineCard.tsx`):** Queries active GitHub Project Kanban columns (`In progress`, `In review`, `Ready`) via a single filtered GraphQL call (`TryLoadActiveKanbanBoardAsync`), enriches issues with PR links/writers/locks/participants, surfaces issues that do not have an open PR yet (`No PR yet`), and isolates `Closed on GitHub` / `Stale / No Writer` board entries into a collapsible **Board Drift** section.

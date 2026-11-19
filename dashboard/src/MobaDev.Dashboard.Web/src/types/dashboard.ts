@@ -159,9 +159,10 @@ export interface LinkedPullRequestRef {
 
 export interface ActiveIssueInfo {
   number: number;
+  itemKind?: 'Issue' | 'PullRequest' | string;
   title: string;
   url: string;
-  gitHubState: 'OPEN' | 'CLOSED' | string;
+  gitHubState: 'OPEN' | 'CLOSED' | 'MERGED' | string;
   kanbanStatus: string;
   priority?: string | null;
   area?: string | null;
@@ -171,6 +172,7 @@ export interface ActiveIssueInfo {
   lockedAreas: string[];
   updatedAtUtc: string;
   linkedPullRequests: LinkedPullRequestRef[];
+  linkedIssues?: LinkedIssueInfo[];
   participants: TaskParticipantInfo[];
   boardDriftReason?: string | null;
 }
@@ -205,6 +207,7 @@ export interface PipelineResponse {
   activeIssues?: ActiveIssueInfo[];
   projectBoardAvailable: boolean;
   projectBoardNotice?: string | null;
+  projectBoardUrl?: string | null;
   source: SourceHealth;
 }
 

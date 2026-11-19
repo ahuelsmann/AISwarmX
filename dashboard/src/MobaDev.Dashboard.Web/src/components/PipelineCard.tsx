@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import {
   Badge,
-  Button,
   Card,
   Link,
   MessageBar,
@@ -20,8 +19,6 @@ import {
   BranchRequest20Regular,
   Checkmark16Regular,
   CheckmarkCircle16Regular,
-  ChevronDown16Regular,
-  ChevronUp16Regular,
   Circle16Regular,
   Clock16Regular,
   Dismiss16Regular,
@@ -201,7 +198,7 @@ const useStyles = makeStyles({
     padding: '28px 16px',
     color: tokens.colorNeutralForeground2
   },
-  driftBar: {
+  kanbanSummaryStrip: {
     display: 'flex',
     flexWrap: 'wrap',
     alignItems: 'center',
@@ -210,14 +207,29 @@ const useStyles = makeStyles({
     padding: '8px 10px',
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground2,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    marginTop: '6px'
+    border: `1px solid ${tokens.colorNeutralStroke2}`
   },
-  driftSummaryGroup: {
+  kanbanCountsGroup: {
     display: 'inline-flex',
     flexWrap: 'wrap',
     alignItems: 'center',
-    gap: '6px'
+    gap: '8px'
+  },
+  kanbanGroupHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px',
+    marginTop: '4px',
+    paddingTop: '8px',
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  kanbanGroupTitle: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2,
+    textTransform: 'uppercase',
+    letterSpacing: '0.03em'
   }
 });
 
@@ -229,20 +241,26 @@ interface PipelineCardProps {
 
 type PipelineViewMode = 'open' | 'issues' | 'merged';
 
+const KANBAN_GROUPS = ['In review', 'In progress', 'Ready', 'Via Open PR'] as const;
+
 export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
   const styles = useStyles();
   const [viewMode, setViewMode] = useState<PipelineViewMode>('open');
-  const [showBoardDrift, setShowBoardDrift] = useState(false);
 
-  const allActiveIssues = pipeline.activeIssues ?? [];
-  const cleanIssues = allActiveIssues.filter((i) => !i.boardDriftReason);
-  const driftIssues = allActiveIssues.filter((i) => Boolean(i.boardDriftReason));
-  const closedDriftCount = driftIssues.filter((i) => i.gitHubState === 'CLOSED').length;
-  const staleDriftCount = driftIssues.length - closedDriftCount;
-  const driftSummaryParts = [
-    closedDriftCount > 0 ? `${closedDriftCount} Closed on GitHub` : null,
-    staleDriftCount > 0 ? `${staleDriftCount} Stale / No Writer` : null
-  ].filter(Boolean);
+  const allKanbanItems = pipeline.activeIssues ?? [];
+  const inReviewItems = allKanbanItems.filter((i) => i.kanbanStatus.toLowerCase() === 'in review');
+  const inProgressItems = allKanbanItems.filter((i) => i.kanbanStatus.toLowerCase() === 'in progress');
+  const readyItems = allKanbanItems.filter((i) => i.kanbanStatus.toLowerCase() === 'ready');
+  const fallbackItems = allKanbanItems.filter(
+    (i) => !['in review', 'in progress', 'ready'].includes(i.kanbanStatus.toLowerCase())
+  );
+
+  const columnGroups: { label: string; items: ActiveIssueInfo[] }[] = [
+    { label: 'In review', items: inReviewItems },
+    { label: 'In progress', items: inProgressItems },
+    { label: 'Ready', items: readyItems },
+    ...(fallbackItems.length > 0 ? [{ label: 'Via Open PR', items: fallbackItems }] : [])
+  ].filter((g) => g.items.length > 0);
 
   const activePrList = viewMode === 'open' ? pipeline.pullRequests : pipeline.recentlyMerged;
 
@@ -272,7 +290,7 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
             checked={viewMode === 'issues'}
             onClick={() => setViewMode('issues')}
           >
-            <span className="tabular">Active Issues ({cleanIssues.length})</span>
+            <span className="tabular">Kanban Board ({allKanbanItems.length})</span>
           </ToggleButton>
           <ToggleButton
             size="small"
@@ -338,80 +356,67 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
 
       {pipeline.source.status !== 'unavailable' && viewMode === 'issues' && (
         <>
-          {cleanIssues.length === 0 && driftIssues.length === 0 && (
+          <div className={styles.kanbanSummaryStrip}>
+            <div className={styles.kanbanCountsGroup}>
+              <Badge appearance="tint" color="brand" shape="rounded" className="tabular">
+                In review: {inReviewItems.length}
+              </Badge>
+              <Badge appearance="tint" color="warning" shape="rounded" className="tabular">
+                In progress: {inProgressItems.length}
+              </Badge>
+              <Badge appearance="tint" color="success" shape="rounded" className="tabular">
+                Ready: {readyItems.length}
+              </Badge>
+            </div>
+
+            {pipeline.projectBoardUrl && (
+              <Link
+                href={pipeline.projectBoardUrl}
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: tokens.fontSizeBase200,
+                  fontWeight: tokens.fontWeightSemibold
+                }}
+              >
+                Open GitHub Kanban{' '}
+                <Open16Regular style={{ width: 12, height: 12 }} aria-hidden="true" />
+              </Link>
+            )}
+          </div>
+
+          {allKanbanItems.length === 0 ? (
             <div className={styles.emptyState}>
               <CheckmarkCircle16Regular style={{ width: 22, height: 22 }} aria-hidden="true" />
-              <Text weight="semibold">No active issues on the Kanban board</Text>
+              <Text weight="semibold">No active items on Kanban ({KANBAN_GROUPS.slice(0, 3).join(' / ')})</Text>
               <Text size={200}>
-                Issues moved to In progress, In review, or Ready will appear here even before a PR is opened.
+                Issues and PRs in Ready, In progress, or In review appear here 1:1 with GitHub Kanban.
               </Text>
             </div>
-          )}
-
-          {cleanIssues.length === 0 && driftIssues.length > 0 && (
-            <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-              No current active issues without board drift.
-            </Text>
-          )}
-
-          {cleanIssues.length > 0 && (
-            <div className={styles.prList}>
-              {cleanIssues.map((issue) => (
-                <ActiveIssueRow
-                  key={issue.number}
-                  issue={issue}
-                  nowMs={nowMs}
-                  isDark={isDark}
-                  styles={styles}
-                />
-              ))}
-            </div>
-          )}
-
-          {driftIssues.length > 0 && (
-            <>
-              <div className={styles.driftBar}>
-                <div className={styles.driftSummaryGroup}>
-                  <Warning16Regular
-                    style={{ color: tokens.colorPaletteMarigoldForeground1, flexShrink: 0 }}
-                    aria-hidden="true"
-                  />
-                  <Text size={200} weight="semibold">
-                    Board Drift
-                  </Text>
-                  <GlossaryTooltip term="Board Drift" iconOnly />
-                  <Text size={200} className="tabular" style={{ color: tokens.colorNeutralForeground2 }}>
-                    ({driftSummaryParts.join(' · ')})
-                  </Text>
+          ) : (
+            columnGroups.map((group) => (
+              <div key={group.label}>
+                <div className={styles.kanbanGroupHeader}>
+                  <span className={styles.kanbanGroupTitle}>
+                    {group.label} ({group.items.length})
+                  </span>
                 </div>
-
-                <Button
-                  size="small"
-                  appearance="subtle"
-                  icon={showBoardDrift ? <ChevronUp16Regular /> : <ChevronDown16Regular />}
-                  iconPosition="after"
-                  onClick={() => setShowBoardDrift((prev) => !prev)}
-                >
-                  {showBoardDrift
-                    ? 'Hide Board Drift'
-                    : `Show Board Drift (${driftIssues.length})`}
-                </Button>
-              </div>
-
-              {showBoardDrift && (
                 <div className={styles.prList}>
-                  {driftIssues.map((issue) => (
-                    <ActiveIssueRow
-                      key={`drift-${issue.number}`}
-                      issue={issue}
+                  {group.items.map((item) => (
+                    <KanbanItemRow
+                      key={`${item.itemKind ?? 'Issue'}-${item.number}`}
+                      issue={item}
                       nowMs={nowMs}
                       isDark={isDark}
                       styles={styles}
                     />
                   ))}
                 </div>
-              )}
-            </>
+              </div>
+            ))
           )}
         </>
       )}
@@ -961,7 +966,7 @@ function RiskClassBadge({ riskClass }: { riskClass: string }) {
   );
 }
 
-function ActiveIssueRow({
+function KanbanItemRow({
   issue,
   nowMs,
   isDark,
@@ -972,20 +977,29 @@ function ActiveIssueRow({
   isDark: boolean;
   styles: ReturnType<typeof useStyles>;
 }) {
-  const hasOpenPr = issue.linkedPullRequests.some((p) => !p.isMerged);
+  const isPr = issue.itemKind?.toLowerCase() === 'pullrequest';
+  const hasOpenPr = isPr || issue.linkedPullRequests.some((p) => !p.isMerged);
   const hasDrift = Boolean(issue.boardDriftReason);
-  const isClosed = issue.gitHubState.toUpperCase() === 'CLOSED';
+  const isClosed = ['CLOSED', 'MERGED'].includes(issue.gitHubState.toUpperCase());
 
   return (
     <div className={styles.prRow}>
       <div className={styles.prTop}>
         <div className={styles.prTitleWrap}>
+          <Badge
+            appearance={isPr ? 'tint' : 'outline'}
+            color={isPr ? 'brand' : 'subtle'}
+            shape="rounded"
+            size="small"
+          >
+            {isPr ? 'PR' : 'Issue'}
+          </Badge>
           <Link
             href={issue.url}
             target="_blank"
             rel="noreferrer"
             className="mono"
-            title={`Open Issue #${issue.number} on GitHub`}
+            title={`Open ${isPr ? 'PR' : 'Issue'} #${issue.number} on GitHub`}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -1003,7 +1017,7 @@ function ActiveIssueRow({
           <KanbanStatusBadge status={issue.kanbanStatus} />
           {issue.priority && <PriorityBadge priority={issue.priority} />}
           {issue.riskClass && <RiskClassBadge riskClass={issue.riskClass} />}
-          {!hasOpenPr && !hasDrift && (
+          {!isPr && !hasOpenPr && !hasDrift && (
             <Badge appearance="outline" color="subtle" shape="rounded">
               No PR yet
             </Badge>
@@ -1017,6 +1031,21 @@ function ActiveIssueRow({
             <strong>Board drift:</strong> {issue.boardDriftReason}
           </MessageBarBody>
         </MessageBar>
+      )}
+
+      {issue.linkedIssues && issue.linkedIssues.length > 0 && (
+        <div className={styles.issuesRow}>
+          <TicketDiagonal16Regular
+            style={{ color: tokens.colorNeutralForeground2, flexShrink: 0 }}
+            aria-hidden="true"
+          />
+          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+            Linked Issues:
+          </Text>
+          {issue.linkedIssues.map((linked) => (
+            <LinkedIssuePill key={linked.number} issue={linked} className={styles.issuePillLink} />
+          ))}
+        </div>
       )}
 
       {issue.linkedPullRequests.length > 0 && (
