@@ -153,6 +153,7 @@ public sealed record LinkedPullRequestRef(
 
 public sealed record ActiveIssueInfo(
     int Number,
+    string ItemKind,
     string Title,
     string Url,
     string GitHubState,
@@ -165,6 +166,7 @@ public sealed record ActiveIssueInfo(
     IReadOnlyList<string> LockedAreas,
     DateTimeOffset UpdatedAtUtc,
     IReadOnlyList<LinkedPullRequestRef> LinkedPullRequests,
+    IReadOnlyList<LinkedIssueInfo> LinkedIssues,
     IReadOnlyList<TaskParticipantInfo> Participants,
     string? BoardDriftReason);
 
@@ -197,6 +199,7 @@ public sealed record PipelineResponse(
     IReadOnlyList<ActiveIssueInfo> ActiveIssues,
     bool ProjectBoardAvailable,
     string? ProjectBoardNotice,
+    string? ProjectBoardUrl,
     SourceHealth Source);
 
 public sealed record ToolSessionHygiene(

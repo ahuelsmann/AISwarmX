@@ -141,6 +141,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
       projectBoardAvailable: false,
       projectBoardNotice:
         'Project board data hidden: missing read:project scope or Kanban CLI unreachable.',
+      projectBoardUrl: 'https://github.com/users/ahuelsmann/projects/1',
       source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
       pullRequests: [
         {
@@ -226,7 +227,34 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
       ],
       activeIssues: [
         {
+          number: 501,
+          itemKind: 'PullRequest',
+          title: 'ci(quality): enforce C# whitespace gate (RF-10 slice 3)',
+          url: 'https://github.com/ahuelsmann/MOBAflow/pull/501',
+          gitHubState: 'OPEN',
+          kanbanStatus: 'In review',
+          priority: null,
+          area: null,
+          issueType: null,
+          riskClass: 'L',
+          writer: 'COO (Claude)',
+          lockedAreas: ['quality.yml'],
+          updatedAtUtc: nowIso,
+          linkedPullRequests: [],
+          linkedIssues: [
+            {
+              number: 451,
+              title: 'RF-10: Formatting baseline and gate',
+              url: 'https://github.com/ahuelsmann/MOBAflow/issues/451',
+              state: 'OPEN'
+            }
+          ],
+          participants: [],
+          boardDriftReason: null
+        },
+        {
           number: 451,
+          itemKind: 'Issue',
           title: 'RF-10: Formatting baseline and gate',
           url: 'https://github.com/ahuelsmann/MOBAflow/issues/451',
           gitHubState: 'OPEN',
@@ -235,7 +263,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           area: 'Infrastructure',
           issueType: 'Refactoring',
           riskClass: 'L',
-          writer: 'Claude Writer',
+          writer: 'COO (Claude)',
           lockedAreas: ['quality.yml'],
           updatedAtUtc: nowIso,
           linkedPullRequests: [
@@ -247,11 +275,13 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
               isMerged: false
             }
           ],
+          linkedIssues: [],
           participants: [],
           boardDriftReason: null
         },
         {
           number: 47,
+          itemKind: 'Issue',
           title: 'Quality and refactoring programme: RF-01 through RF-18',
           url: 'https://github.com/ahuelsmann/MOBAflow/issues/47',
           gitHubState: 'OPEN',
@@ -264,28 +294,13 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           lockedAreas: [],
           updatedAtUtc: nowIso,
           linkedPullRequests: [],
+          linkedIssues: [],
           participants: [],
           boardDriftReason: null
         },
         {
-          number: 136,
-          title: 'Text-to-Speech interface modularization',
-          url: 'https://github.com/ahuelsmann/MOBAflow/issues/136',
-          gitHubState: 'OPEN',
-          kanbanStatus: 'In progress',
-          priority: null,
-          area: null,
-          issueType: null,
-          riskClass: null,
-          writer: null,
-          lockedAreas: [],
-          updatedAtUtc: nowIso,
-          linkedPullRequests: [],
-          participants: [],
-          boardDriftReason: 'No active PR or Writer (stale on board)'
-        },
-        {
           number: 266,
+          itemKind: 'Issue',
           title: 'ci: keep documentation consistent within each pull request',
           url: 'https://github.com/ahuelsmann/MOBAflow/issues/266',
           gitHubState: 'CLOSED',
@@ -298,6 +313,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           lockedAreas: [],
           updatedAtUtc: nowIso,
           linkedPullRequests: [],
+          linkedIssues: [],
           participants: [],
           boardDriftReason: 'Closed on GitHub — move to Done on Kanban'
         }
@@ -652,7 +668,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
   );
 
   it(
-    'displays Active Issues view with linked PRs, No PR yet issues, and collapsible Board Drift',
+    'displays 1:1 Kanban Board view with In review PRs, In progress Issues, No PR yet, and inline drift without hiding items',
     async () => {
       const user = userEvent.setup();
       stubDashboardFetch();
@@ -660,23 +676,27 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
       render(<App />);
       await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
 
-      await user.click(screen.getByRole('button', { name: /Active Issues \(2\)/i }));
+      await user.click(screen.getByRole('button', { name: /Kanban Board \(4\)/i }));
 
-      expect(await screen.findByText('RF-10: Formatting baseline and gate')).toBeInTheDocument();
+      expect(await screen.findByText('In review: 1')).toBeInTheDocument();
+      expect(screen.getByText('In progress: 3')).toBeInTheDocument();
+      expect(screen.getByText('Ready: 0')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /Open GitHub Kanban/i })).toHaveAttribute(
+        'href',
+        'https://github.com/users/ahuelsmann/projects/1'
+      );
+
+      expect(
+        screen.getByText('ci(quality): enforce C# whitespace gate (RF-10 slice 3)')
+      ).toBeInTheDocument();
+      expect(screen.getByText('RF-10: Formatting baseline and gate')).toBeInTheDocument();
       expect(screen.getByText('PR #501')).toBeInTheDocument();
       expect(
         screen.getByText('Quality and refactoring programme: RF-01 through RF-18')
       ).toBeInTheDocument();
       expect(screen.getByText('No PR yet')).toBeInTheDocument();
 
-      // Drift items remain collapsed until expanded
-      expect(
-        screen.queryByText('ci: keep documentation consistent within each pull request')
-      ).not.toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: /Show Board Drift \(2\)/i }));
-
-      expect(screen.getByText('Text-to-Speech interface modularization')).toBeInTheDocument();
-      expect(screen.getByText(/No active PR or Writer \(stale on board\)/)).toBeInTheDocument();
+      // Drift item is shown inline immediately (zero hidden items)
       expect(
         screen.getByText('ci: keep documentation consistent within each pull request')
       ).toBeInTheDocument();

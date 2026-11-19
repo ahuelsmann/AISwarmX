@@ -60,7 +60,7 @@ public sealed partial class PipelineProvider
             return BuildUnavailableOrCached(options.GitHubRepository, now, openResult);
         }
 
-        var (projectAvailable, projectNotice, projectStatuses, kanbanIssues) = projectTask.Result;
+        var (projectAvailable, projectNotice, projectStatuses, kanbanItems) = projectTask.Result;
         var issuesByNumber = issuesTask.Result;
 
         try
@@ -81,7 +81,17 @@ public sealed partial class PipelineProvider
                 ? ParseMergedSafe(mergedResult.StdOut, options.GitHubRepository, issuesByNumber, knownPrNumbers)
                 : [];
 
-            var activeIssues = BuildActiveIssues(kanbanIssues, openPullRequests, recentlyMerged, now);
+            var activeIssues = BuildActiveIssues(
+                kanbanItems,
+                projectAvailable,
+                openPullRequests,
+                recentlyMerged,
+                now);
+
+            var projectBoardUrl = options.GitHubProjectNumber > 0 &&
+                                  !string.IsNullOrWhiteSpace(options.GitHubProjectOwner)
+                ? $"https://github.com/users/{options.GitHubProjectOwner}/projects/{options.GitHubProjectNumber}"
+                : null;
 
             var response = new PipelineResponse(
                 GeneratedAtUtc: now,
@@ -91,6 +101,7 @@ public sealed partial class PipelineProvider
                 ActiveIssues: activeIssues,
                 ProjectBoardAvailable: projectAvailable,
                 ProjectBoardNotice: projectNotice,
+                ProjectBoardUrl: projectBoardUrl,
                 Source: new SourceHealth("ok", now));
 
             lock (_fallbackLock)
@@ -147,14 +158,16 @@ public sealed partial class PipelineProvider
             ActiveIssues: [],
             ProjectBoardAvailable: false,
             ProjectBoardNotice: null,
+            ProjectBoardUrl: null,
             Source: new SourceHealth("unavailable", now, reason));
     }
 
     private const string ActiveKanbanGraphQlQuery =
         "query($owner:String!,$num:Int!){user(login:$owner){projectV2(number:$num){items(first:100,query:\"status:\\\"In progress\\\",\\\"In review\\\",Ready\"){nodes{fieldValues(first:12){nodes{... on ProjectV2ItemFieldSingleSelectValue{name field{... on ProjectV2SingleSelectField{name}}}... on ProjectV2ItemFieldTextValue{text field{... on ProjectV2Field{name}}}}}content{__typename ... on Issue{number title url state updatedAt}... on PullRequest{number title url state isDraft updatedAt}}}}}}}";
 
-    private sealed record RawKanbanIssue(
+    private sealed record RawKanbanItem(
         int Number,
+        string ItemKind,
         string Title,
         string Url,
         string GitHubState,
@@ -171,16 +184,16 @@ public sealed partial class PipelineProvider
         bool Available,
         string? Notice,
         Dictionary<int, string> PrStatuses,
-        List<RawKanbanIssue> RawIssues)> TryLoadActiveKanbanBoardAsync(
+        List<RawKanbanItem> RawItems)> TryLoadActiveKanbanBoardAsync(
         DashboardOptions options,
         CancellationToken cancellationToken)
     {
         var prStatuses = new Dictionary<int, string>();
-        var rawIssues = new List<RawKanbanIssue>();
+        var rawItems = new List<RawKanbanItem>();
 
         if (options.GitHubProjectNumber <= 0 || string.IsNullOrWhiteSpace(options.GitHubProjectOwner))
         {
-            return (false, "No GitHub project configured.", prStatuses, rawIssues);
+            return (false, "No GitHub project configured.", prStatuses, rawItems);
         }
 
         var projectResult = await _commandRunner.RunAsync(
@@ -201,7 +214,7 @@ public sealed partial class PipelineProvider
                 false,
                 "Project board data hidden: missing read:project scope or Kanban CLI unreachable.",
                 prStatuses,
-                rawIssues);
+                rawItems);
         }
 
         try
@@ -216,7 +229,7 @@ public sealed partial class PipelineProvider
                     false,
                     "Project board data hidden: missing read:project scope or Kanban CLI unreachable.",
                     prStatuses,
-                    rawIssues);
+                    rawItems);
             }
 
             if (!root.TryGetProperty("data", out var dataEl) ||
@@ -234,7 +247,7 @@ public sealed partial class PipelineProvider
                     false,
                     "Unable to parse GitHub project data.",
                     prStatuses,
-                    rawIssues);
+                    rawItems);
             }
 
             foreach (var node in nodesEl.EnumerateArray())
@@ -255,31 +268,24 @@ public sealed partial class PipelineProvider
                 var fields = ReadKanbanFields(node);
                 var status = fields.GetValueOrDefault("Status");
                 var typeName = GetString(contentEl, "__typename");
+                var isPr = string.Equals(typeName, "PullRequest", StringComparison.OrdinalIgnoreCase);
+                var isIssue = string.Equals(typeName, "Issue", StringComparison.OrdinalIgnoreCase);
 
-                if (string.Equals(typeName, "PullRequest", StringComparison.OrdinalIgnoreCase))
+                if (isPr && !string.IsNullOrWhiteSpace(status))
                 {
-                    if (!string.IsNullOrWhiteSpace(status))
-                    {
-                        prStatuses[number] = status;
-                    }
-
-                    continue;
+                    prStatuses[number] = status;
                 }
 
-                if (!string.Equals(typeName, "Issue", StringComparison.OrdinalIgnoreCase) ||
-                    string.IsNullOrWhiteSpace(status))
+                if ((!isPr && !isIssue) || string.IsNullOrWhiteSpace(status) || !IsActiveKanbanColumn(status))
                 {
                     continue;
                 }
 
-                if (!IsActiveKanbanColumn(status))
-                {
-                    continue;
-                }
-
-                var title = GetString(contentEl, "title")?.Trim() ?? $"Issue #{number}";
+                var itemKind = isPr ? "PullRequest" : "Issue";
+                var title = GetString(contentEl, "title")?.Trim() ??
+                            $"{(isPr ? "PR" : "Issue")} #{number}";
                 var url = GetString(contentEl, "url") ??
-                          $"https://github.com/{options.GitHubRepository}/issues/{number}";
+                          $"https://github.com/{options.GitHubRepository}/{(isPr ? "pull" : "issues")}/{number}";
                 var gitHubState = (GetString(contentEl, "state") ?? "OPEN").Trim().ToUpperInvariant();
                 var updatedAt = ParseDateTimeOffset(contentEl, "updatedAt") ?? DateTimeOffset.UtcNow;
 
@@ -295,8 +301,9 @@ public sealed partial class PipelineProvider
                         .Where(s => !string.IsNullOrWhiteSpace(s))
                         .ToList();
 
-                rawIssues.Add(new RawKanbanIssue(
+                rawItems.Add(new RawKanbanItem(
                     Number: number,
+                    ItemKind: itemKind,
                     Title: title,
                     Url: url,
                     GitHubState: gitHubState,
@@ -310,11 +317,11 @@ public sealed partial class PipelineProvider
                     UpdatedAtUtc: updatedAt));
             }
 
-            return (true, null, prStatuses, rawIssues);
+            return (true, null, prStatuses, rawItems);
         }
         catch (JsonException)
         {
-            return (false, "Unable to parse GitHub project data.", prStatuses, rawIssues);
+            return (false, "Unable to parse GitHub project data.", prStatuses, rawItems);
         }
     }
 
@@ -386,143 +393,197 @@ public sealed partial class PipelineProvider
     }
 
     private static IReadOnlyList<ActiveIssueInfo> BuildActiveIssues(
-        IReadOnlyList<RawKanbanIssue> kanbanIssues,
+        IReadOnlyList<RawKanbanItem> kanbanItems,
+        bool projectBoardAvailable,
         IReadOnlyList<PullRequestInfo> openPullRequests,
         IReadOnlyList<PullRequestInfo> recentlyMerged,
         DateTimeOffset now)
     {
         var results = new List<(bool HasOpenPr, ActiveIssueInfo Info)>();
-        var seenNumbers = new HashSet<int>();
+        var seenItems = new HashSet<(string ItemKind, int Number)>();
 
-        foreach (var issue in kanbanIssues)
+        if (projectBoardAvailable)
         {
-            if (!seenNumbers.Add(issue.Number))
+            foreach (var item in kanbanItems)
             {
-                continue;
+                if (!seenItems.Add((item.ItemKind, item.Number)))
+                {
+                    continue;
+                }
+
+                if (string.Equals(item.ItemKind, "PullRequest", StringComparison.OrdinalIgnoreCase))
+                {
+                    var matchingOpenPr = openPullRequests.FirstOrDefault(p => p.Number == item.Number);
+                    var matchingMergedPr = recentlyMerged.FirstOrDefault(p => p.Number == item.Number);
+                    var matchedPr = matchingOpenPr ?? matchingMergedPr;
+
+                    var riskClass = item.RiskClass ??
+                                    (matchedPr?.RiskClass is "H" or "M" or "L" ? matchedPr.RiskClass : null);
+
+                    var writer = !string.IsNullOrWhiteSpace(item.Writer)
+                        ? item.Writer
+                        : matchedPr?.Participants
+                            .FirstOrDefault(pt => string.Equals(pt.Role, "Writer", StringComparison.OrdinalIgnoreCase))
+                            ?.Agent;
+
+                    var lockedAreas = item.LockedAreas.Count > 0
+                        ? item.LockedAreas
+                        : matchedPr?.LockedAreas ?? [];
+
+                    var participants = matchedPr?.Participants ?? [];
+                    var linkedIssues = matchedPr?.LinkedIssues ?? [];
+                    var driftReason = item.GitHubState is "MERGED" or "CLOSED"
+                        ? "Merged/Closed on GitHub — move to Done on Kanban"
+                        : null;
+
+                    results.Add((matchingOpenPr is not null, new ActiveIssueInfo(
+                        Number: item.Number,
+                        ItemKind: "PullRequest",
+                        Title: item.Title,
+                        Url: item.Url,
+                        GitHubState: item.GitHubState,
+                        KanbanStatus: item.KanbanStatus,
+                        Priority: item.Priority,
+                        Area: item.Area,
+                        IssueType: item.IssueType,
+                        RiskClass: riskClass,
+                        Writer: writer,
+                        LockedAreas: lockedAreas,
+                        UpdatedAtUtc: item.UpdatedAtUtc,
+                        LinkedPullRequests: [],
+                        LinkedIssues: linkedIssues,
+                        Participants: participants,
+                        BoardDriftReason: driftReason)));
+                    continue;
+                }
+
+                var linkedOpenPrs = openPullRequests
+                    .Where(p => p.LinkedIssues.Any(li => li.Number == item.Number))
+                    .OrderByDescending(p => p.Number)
+                    .ToList();
+
+                var linkedMergedPrs = recentlyMerged
+                    .Where(p => p.LinkedIssues.Any(li => li.Number == item.Number))
+                    .OrderByDescending(p => p.Number)
+                    .ToList();
+
+                var linkedPullRequests = BuildLinkedPrRefs(linkedOpenPrs, linkedMergedPrs);
+                var issueParticipants = MergeParticipants(linkedOpenPrs.Count > 0 ? linkedOpenPrs : linkedMergedPrs);
+
+                var issueRiskClass = item.RiskClass ??
+                                     linkedOpenPrs
+                                         .Select(p => p.RiskClass)
+                                         .FirstOrDefault(r => r is "H" or "M" or "L");
+
+                var issueWriter = !string.IsNullOrWhiteSpace(item.Writer)
+                    ? item.Writer
+                    : linkedOpenPrs
+                        .SelectMany(p => p.Participants)
+                        .FirstOrDefault(pt => string.Equals(pt.Role, "Writer", StringComparison.OrdinalIgnoreCase))
+                        ?.Agent;
+
+                var issueLockedAreas = item.LockedAreas.Count > 0
+                    ? item.LockedAreas
+                    : linkedOpenPrs
+                        .SelectMany(p => p.LockedAreas)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                var issueDriftReason = ComputeBoardDriftReason(
+                    item.GitHubState,
+                    item.KanbanStatus,
+                    hasOpenPr: linkedOpenPrs.Count > 0,
+                    effectiveWriter: issueWriter,
+                    effectiveRiskClass: issueRiskClass,
+                    updatedAtUtc: item.UpdatedAtUtc,
+                    now: now);
+
+                results.Add((linkedOpenPrs.Count > 0, new ActiveIssueInfo(
+                    Number: item.Number,
+                    ItemKind: "Issue",
+                    Title: item.Title,
+                    Url: item.Url,
+                    GitHubState: item.GitHubState,
+                    KanbanStatus: item.KanbanStatus,
+                    Priority: item.Priority,
+                    Area: item.Area,
+                    IssueType: item.IssueType,
+                    RiskClass: issueRiskClass,
+                    Writer: issueWriter,
+                    LockedAreas: issueLockedAreas,
+                    UpdatedAtUtc: item.UpdatedAtUtc,
+                    LinkedPullRequests: linkedPullRequests,
+                    LinkedIssues: [],
+                    Participants: issueParticipants,
+                    BoardDriftReason: issueDriftReason)));
             }
+        }
+        else
+        {
+            // Fallback only when Kanban board API is unavailable (e.g., missing read:project scope):
+            // surface OPEN issues referenced from open PRs so the tab stays useful.
+            var prReferencedIssues = openPullRequests
+                .SelectMany(p => p.LinkedIssues)
+                .Where(li => li.Number > 0 && !string.Equals(li.State, "CLOSED", StringComparison.OrdinalIgnoreCase))
+                .GroupBy(li => li.Number)
+                .Select(g => g.First());
 
-            var linkedOpenPrs = openPullRequests
-                .Where(p => p.LinkedIssues.Any(li => li.Number == issue.Number))
-                .OrderByDescending(p => p.Number)
-                .ToList();
+            foreach (var li in prReferencedIssues)
+            {
+                if (!seenItems.Add(("Issue", li.Number)))
+                {
+                    continue;
+                }
 
-            var linkedMergedPrs = recentlyMerged
-                .Where(p => p.LinkedIssues.Any(li => li.Number == issue.Number))
-                .OrderByDescending(p => p.Number)
-                .ToList();
+                var linkedOpenPrs = openPullRequests
+                    .Where(p => p.LinkedIssues.Any(x => x.Number == li.Number))
+                    .OrderByDescending(p => p.Number)
+                    .ToList();
 
-            var linkedPullRequests = BuildLinkedPrRefs(linkedOpenPrs, linkedMergedPrs);
-            var participants = MergeParticipants(linkedOpenPrs.Count > 0 ? linkedOpenPrs : linkedMergedPrs);
+                var linkedMergedPrs = recentlyMerged
+                    .Where(p => p.LinkedIssues.Any(x => x.Number == li.Number))
+                    .OrderByDescending(p => p.Number)
+                    .ToList();
 
-            var riskClass = issue.RiskClass ??
-                            linkedOpenPrs
-                                .Select(p => p.RiskClass)
-                                .FirstOrDefault(r => r is "H" or "M" or "L");
+                var riskClass = linkedOpenPrs
+                    .Select(p => p.RiskClass)
+                    .FirstOrDefault(r => r is "H" or "M" or "L");
 
-            var writer = !string.IsNullOrWhiteSpace(issue.Writer)
-                ? issue.Writer
-                : linkedOpenPrs
+                var writer = linkedOpenPrs
                     .SelectMany(p => p.Participants)
                     .FirstOrDefault(pt => string.Equals(pt.Role, "Writer", StringComparison.OrdinalIgnoreCase))
                     ?.Agent;
 
-            var lockedAreas = issue.LockedAreas.Count > 0
-                ? issue.LockedAreas
-                : linkedOpenPrs
+                var lockedAreas = linkedOpenPrs
                     .SelectMany(p => p.LockedAreas)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
 
-            var driftReason = ComputeBoardDriftReason(
-                issue.GitHubState,
-                issue.KanbanStatus,
-                hasOpenPr: linkedOpenPrs.Count > 0,
-                effectiveWriter: writer,
-                effectiveRiskClass: riskClass,
-                updatedAtUtc: issue.UpdatedAtUtc,
-                now: now);
-
-            results.Add((linkedOpenPrs.Count > 0, new ActiveIssueInfo(
-                Number: issue.Number,
-                Title: issue.Title,
-                Url: issue.Url,
-                GitHubState: issue.GitHubState,
-                KanbanStatus: issue.KanbanStatus,
-                Priority: issue.Priority,
-                Area: issue.Area,
-                IssueType: issue.IssueType,
-                RiskClass: riskClass,
-                Writer: writer,
-                LockedAreas: lockedAreas,
-                UpdatedAtUtc: issue.UpdatedAtUtc,
-                LinkedPullRequests: linkedPullRequests,
-                Participants: participants,
-                BoardDriftReason: driftReason)));
-        }
-
-        // Supplement any OPEN issue referenced on an open PR that wasn't returned from Kanban
-        // (e.g., when read:project scope is missing or issue is still in Planned on Kanban).
-        var prReferencedIssues = openPullRequests
-            .SelectMany(p => p.LinkedIssues)
-            .Where(li => li.Number > 0 && !string.Equals(li.State, "CLOSED", StringComparison.OrdinalIgnoreCase))
-            .GroupBy(li => li.Number)
-            .Select(g => g.First());
-
-        foreach (var li in prReferencedIssues)
-        {
-            if (!seenNumbers.Add(li.Number))
-            {
-                continue;
+                results.Add((true, new ActiveIssueInfo(
+                    Number: li.Number,
+                    ItemKind: "Issue",
+                    Title: !string.IsNullOrWhiteSpace(li.Title) ? li.Title! : $"Issue #{li.Number}",
+                    Url: li.Url,
+                    GitHubState: li.State ?? "OPEN",
+                    KanbanStatus: "Via Open PR",
+                    Priority: null,
+                    Area: null,
+                    IssueType: null,
+                    RiskClass: riskClass,
+                    Writer: writer,
+                    LockedAreas: lockedAreas,
+                    UpdatedAtUtc: linkedOpenPrs.Max(p => p.UpdatedAtUtc),
+                    LinkedPullRequests: BuildLinkedPrRefs(linkedOpenPrs, linkedMergedPrs),
+                    LinkedIssues: [],
+                    Participants: MergeParticipants(linkedOpenPrs),
+                    BoardDriftReason: null)));
             }
-
-            var linkedOpenPrs = openPullRequests
-                .Where(p => p.LinkedIssues.Any(x => x.Number == li.Number))
-                .OrderByDescending(p => p.Number)
-                .ToList();
-
-            var linkedMergedPrs = recentlyMerged
-                .Where(p => p.LinkedIssues.Any(x => x.Number == li.Number))
-                .OrderByDescending(p => p.Number)
-                .ToList();
-
-            var riskClass = linkedOpenPrs
-                .Select(p => p.RiskClass)
-                .FirstOrDefault(r => r is "H" or "M" or "L");
-
-            var writer = linkedOpenPrs
-                .SelectMany(p => p.Participants)
-                .FirstOrDefault(pt => string.Equals(pt.Role, "Writer", StringComparison.OrdinalIgnoreCase))
-                ?.Agent;
-
-            var lockedAreas = linkedOpenPrs
-                .SelectMany(p => p.LockedAreas)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            results.Add((true, new ActiveIssueInfo(
-                Number: li.Number,
-                Title: !string.IsNullOrWhiteSpace(li.Title) ? li.Title! : $"Issue #{li.Number}",
-                Url: li.Url,
-                GitHubState: li.State ?? "OPEN",
-                KanbanStatus: "Via Open PR",
-                Priority: null,
-                Area: null,
-                IssueType: null,
-                RiskClass: riskClass,
-                Writer: writer,
-                LockedAreas: lockedAreas,
-                UpdatedAtUtc: linkedOpenPrs.Max(p => p.UpdatedAtUtc),
-                LinkedPullRequests: BuildLinkedPrRefs(linkedOpenPrs, linkedMergedPrs),
-                Participants: MergeParticipants(linkedOpenPrs),
-                BoardDriftReason: null)));
         }
 
         return results
-            .OrderBy(item => item.Info.BoardDriftReason is null ? 0 : 1)
-            .ThenBy(item => item.Info.BoardDriftReason is null
-                ? (item.HasOpenPr ? 0 : 1)
-                : (string.Equals(item.Info.GitHubState, "CLOSED", StringComparison.OrdinalIgnoreCase) ? 1 : 0))
-            .ThenBy(item => KanbanStatusRank(item.Info.KanbanStatus))
+            .OrderBy(item => KanbanStatusRank(item.Info.KanbanStatus))
+            .ThenBy(item => item.Info.BoardDriftReason is null ? 0 : 1)
+            .ThenBy(item => string.Equals(item.Info.ItemKind, "PullRequest", StringComparison.OrdinalIgnoreCase) || item.HasOpenPr ? 0 : 1)
             .ThenByDescending(item => item.Info.UpdatedAtUtc)
             .Select(item => item.Info)
             .ToList();
