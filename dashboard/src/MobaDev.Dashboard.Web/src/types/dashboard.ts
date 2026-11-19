@@ -168,6 +168,7 @@ export interface PullRequestInfo {
   projectStatus?: string | null;
   participants: TaskParticipantInfo[];
   linkedIssues: LinkedIssueInfo[];
+  mergeBlockReasons?: string[];
 }
 
 export interface PipelineResponse {

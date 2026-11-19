@@ -19,6 +19,10 @@ const GLOSSARY_ENTRIES: Record<string, string> = {
     'Branch is behind current main. Merge main into the branch before merging (never rebase shared branches).',
   UNSTABLE:
     'One or more GitHub status checks are still running or failing (GitHub mergeStateStatus: UNSTABLE).',
+  BLOCKED:
+    'GitHub blocks merging right now (for example Draft PR, running required checks, or missing/requested review).',
+  DIRTY:
+    'Branch has merge conflicts with main. Merge main in the writer worktree and resolve conflicts first.',
   'Auto-Merge':
     'GitHub merges the PR automatically once all required checks and reviews are green.',
   'Read-Only':

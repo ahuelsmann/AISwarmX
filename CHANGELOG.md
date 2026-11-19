@@ -5,7 +5,15 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAdev generations (`Gen#1 = 1.x`, `Gen#2 = 2.x`, `Gen#3 = 3.0.0+`).
 
-## [3.0.2] - 2026-11-19
+## [3.0.3] - 2026-11-19
+
+### Added
+- **Explicit PR `BLOCKED` / `DIRTY` Reasons (`PipelineProvider.cs`, `PipelineCard.tsx`):** Extracts concrete blocking causes (`Draft PR`, merge conflicts, behind `main`, `REVIEW_REQUIRED` / `CHANGES_REQUESTED`, `BLOCKED` review gates, plus failing/running check names from `statusCheckRollup`) and renders them directly inline under blocked PR rows and in badge tooltips.
+- **Inline Kanban Status on Open PRs (`PipelineProvider.cs`):** Reads `projectItems` directly on open PRs so items like PR `#501` display their live Kanban column (e.g., `Kanban: In review`) regardless of overall GitHub Project item count.
+
+---
+
+## [3.0.2] - 2026-11-19 (PR #14)
 
 ### Changed
 - **`Configuration` Tab Header (`StatusHeader.tsx`):** Renamed the third header tab from `Config` to `Configuration` and removed the leading document icon.

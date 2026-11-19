@@ -7,6 +7,7 @@ import {
   MessageBarBody,
   Text,
   ToggleButton,
+  Tooltip,
   makeStyles,
   shorthands,
   tokens
@@ -308,6 +309,21 @@ function PullRequestRow({
 }) {
   const isMerged = pr.state === 'MERGED';
   const timeStamp = isMerged ? (pr.mergedAtUtc ?? pr.updatedAtUtc) : pr.updatedAtUtc;
+  const blockReasons = pr.mergeBlockReasons ?? [];
+  const normalizedMergeState = pr.mergeState.toUpperCase();
+  const showBlockBanner =
+    !isMerged &&
+    blockReasons.length > 0 &&
+    (normalizedMergeState === 'BLOCKED' || normalizedMergeState === 'DIRTY');
+  const isHardBlock =
+    normalizedMergeState === 'DIRTY' ||
+    blockReasons.some(
+      (r) =>
+        r.includes('conflict') ||
+        r.includes('failing') ||
+        r.includes('Changes requested') ||
+        r.includes('gate marked BLOCKED')
+    );
 
   return (
     <div className={styles.prRow}>
@@ -339,11 +355,23 @@ function PullRequestRow({
               mergeState={pr.mergeState}
               ciStatus={pr.ciStatus}
               sonarStatus={pr.sonarStatus}
+              mergeBlockReasons={blockReasons}
             />
           )}
           <RiskClassBadge riskClass={pr.riskClass} />
         </div>
       </div>
+
+      {showBlockBanner && (
+        <MessageBar intent={isHardBlock ? 'error' : 'warning'} layout="multiline">
+          <MessageBarBody>
+            <strong>
+              {normalizedMergeState === 'DIRTY' ? 'Merge conflict:' : 'Blocked reason:'}
+            </strong>{' '}
+            {blockReasons.join(' · ')}
+          </MessageBarBody>
+        </MessageBar>
+      )}
 
       {pr.linkedIssues && pr.linkedIssues.length > 0 && (
         <div className={styles.issuesRow}>
@@ -671,11 +699,13 @@ function PrStateBadge({ stateLabel, isMerged }: { stateLabel: string; isMerged: 
 function MergeStateBadge({
   mergeState,
   ciStatus,
-  sonarStatus
+  sonarStatus,
+  mergeBlockReasons
 }: {
   mergeState: string;
   ciStatus: string;
   sonarStatus: string;
+  mergeBlockReasons?: string[];
 }) {
   switch (mergeState.toUpperCase()) {
     case 'CLEAN':
@@ -710,12 +740,31 @@ function MergeStateBadge({
       );
     }
     case 'DIRTY':
-    case 'BLOCKED':
-      return (
+    case 'BLOCKED': {
+      const normalized = mergeState.toUpperCase();
+      const badge = (
         <Badge appearance="tint" color="danger" shape="rounded" icon={<Warning16Regular />}>
-          {mergeState.toUpperCase()}
+          {normalized}
         </Badge>
       );
+
+      if (mergeBlockReasons && mergeBlockReasons.length > 0) {
+        return (
+          <Tooltip
+            content={mergeBlockReasons.join(' · ')}
+            relationship="description"
+            withArrow
+            positioning="above"
+          >
+            <span tabIndex={0} style={{ display: 'inline-flex', borderRadius: tokens.borderRadiusSmall }}>
+              {badge}
+            </span>
+          </Tooltip>
+        );
+      }
+
+      return <GlossaryTooltip term={normalized}>{badge}</GlossaryTooltip>;
+    }
     default:
       return (
         <Badge appearance="tint" color="subtle" shape="rounded">

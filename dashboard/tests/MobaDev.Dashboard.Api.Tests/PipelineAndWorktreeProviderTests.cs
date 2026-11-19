@@ -247,6 +247,96 @@ public sealed class PipelineAndWorktreeProviderTests
     }
 
     [Fact]
+    public async Task PipelineProvider_ExtractsBlockedReasonsAndInlineKanbanStatus()
+    {
+        var openPrJson = """
+            [
+              {
+                "number": 501,
+                "title": "ci(quality): enforce whitespace gate (RF-10 slice 3)",
+                "url": "https://github.com/ahuelsmann/MOBAflow/pull/501",
+                "headRefName": "claude/rf10-gate",
+                "isDraft": true,
+                "mergeStateStatus": "BLOCKED",
+                "mergeable": "MERGEABLE",
+                "reviewDecision": "REVIEW_REQUIRED",
+                "autoMergeRequest": null,
+                "updatedAt": "2026-11-19T22:41:28Z",
+                "body": "## Slice header\n\n- Issue: #451\n- Risk class (H/M/L): L",
+                "statusCheckRollup": [
+                  { "name": "Windows desktop build, tests, and coverage", "status": "IN_PROGRESS", "conclusion": "" },
+                  { "name": "Backend mutation testing", "status": "IN_PROGRESS", "conclusion": "" },
+                  { "name": "SharedUI mutation testing", "status": "QUEUED", "conclusion": "" }
+                ],
+                "comments": [],
+                "closingIssuesReferences": [],
+                "projectItems": [
+                  { "title": "Kanban", "status": { "name": "In review" } }
+                ]
+              },
+              {
+                "number": 502,
+                "title": "fix(ui): resolve merge conflict",
+                "url": "https://github.com/ahuelsmann/MOBAflow/pull/502",
+                "headRefName": "codex/ui-fix",
+                "isDraft": false,
+                "mergeStateStatus": "DIRTY",
+                "mergeable": "CONFLICTING",
+                "reviewDecision": "",
+                "autoMergeRequest": null,
+                "updatedAt": "2026-11-19T22:42:00Z",
+                "body": "## Slice header\n\n- Risk class (H/M/L): M",
+                "statusCheckRollup": [
+                  { "name": "SonarCloud Code Analysis", "status": "COMPLETED", "conclusion": "FAILURE" }
+                ],
+                "comments": [],
+                "closingIssuesReferences": []
+              }
+            ]
+            """;
+
+        var runner = new FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("open"))
+            {
+                return new CommandResult(0, openPrJson, string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("merged"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("issue"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("project"))
+            {
+                return new CommandResult(1, string.Empty, "missing scope");
+            }
+
+            return new CommandResult(1, string.Empty, "unexpected");
+        });
+
+        var provider = new PipelineProvider(runner);
+        var result = await provider.GetPipelineAsync(new DashboardOptions(), CancellationToken.None);
+
+        var pr501 = Assert.Single(result.PullRequests, p => p.Number == 501);
+        Assert.Equal("In review", pr501.ProjectStatus);
+        Assert.Contains("Draft PR (not yet marked Ready for review)", pr501.MergeBlockReasons);
+        Assert.Contains("Required approving review missing", pr501.MergeBlockReasons);
+        Assert.Contains(
+            "3 checks running: Windows desktop build, tests, and coverage, Backend mutation testing (+1 more)",
+            pr501.MergeBlockReasons);
+
+        var pr502 = Assert.Single(result.PullRequests, p => p.Number == 502);
+        Assert.Contains("Merge conflict with main — merge main and resolve conflicts", pr502.MergeBlockReasons);
+        Assert.Contains("Check failing: SonarCloud Code Analysis", pr502.MergeBlockReasons);
+    }
+
+    [Fact]
     public async Task WorktreeProvider_ClassifiesMainActiveAndStaleAndSortsStaleFirst()
     {
         using var fx = new TempDashboardFixture();
@@ -279,7 +369,7 @@ public sealed class PipelineAndWorktreeProviderTests
             new Contracts.PullRequestInfo(
                 492, "docs", "https://github.com/ahuelsmann/MOBAflow/pull/492",
                 "codex/strategy-mobaflow-kanban-board", "OPEN", "Draft", true, false,
-                "BEHIND", "pass", "pass", "L", [], DateTimeOffset.UtcNow, null, null, [], [])
+                "BEHIND", "pass", "pass", "L", [], DateTimeOffset.UtcNow, null, null, [], [], [])
         };
 
         var (worktrees, health) = await provider.GetWorktreesAsync(paths, openPrs, CancellationToken.None);
