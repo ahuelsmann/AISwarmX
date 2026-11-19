@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MobaDev.Dashboard.Api/MobaDev.Dashboard.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MobaDev.Dashboard.Api.Tests/MobaDev.Dashboard.Api.Tests.csproj" />
+  </Folder>
+</Solution>
