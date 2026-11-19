@@ -17,25 +17,35 @@ const GLOSSARY_ENTRIES: Record<string, string> = {
   CLEAN: 'Branch can be merged cleanly without conflicts or missing commits from main.',
   BEHIND:
     'Branch is behind current main. Merge main into the branch before merging (never rebase shared branches).',
+  UNSTABLE:
+    'One or more GitHub status checks are still running or failing (GitHub mergeStateStatus: UNSTABLE).',
   'Auto-Merge':
     'GitHub merges the PR automatically once all required checks and reviews are green.',
   'Read-Only':
     'This cockpit only reads and displays live state. It never writes, edits, merges, or starts anything.',
   Triad:
-    'Decision & Steering Triad: Cross-model council (P1 COO, P2 CPM/TD, P3 AI Strategy & UI/UX) that cuts tasks into slices, assigns risk classes (H/M/L), selects participating agents and AI models, and grants Design Go.'
+    'Decision & Steering Triad: Cross-model council (P1 COO, P2 CPM/TD, P3 AI Strategy & UI/UX) that cuts tasks into slices, assigns risk classes (H/M/L), selects participating agents and AI models, and grants Design Go.',
+  WIP:
+    'MOBAflow WIP limit: at most 3 open code slices (Class H/M) at once. Documentation slices (Class L) do not count toward the code WIP limit.'
 };
 
 interface GlossaryTooltipProps {
   term: string;
   children?: ReactNode;
   showIcon?: boolean;
+  iconOnly?: boolean;
 }
 
-export function GlossaryTooltip({ term, children, showIcon = false }: GlossaryTooltipProps) {
+export function GlossaryTooltip({
+  term,
+  children,
+  showIcon = false,
+  iconOnly = false
+}: GlossaryTooltipProps) {
   const description = GLOSSARY_ENTRIES[term];
 
   if (!description) {
-    return <>{children ?? term}</>;
+    return iconOnly ? null : <>{children ?? term}</>;
   }
 
   return (
@@ -53,8 +63,8 @@ export function GlossaryTooltip({ term, children, showIcon = false }: GlossaryTo
           borderRadius: tokens.borderRadiusSmall
         }}
       >
-        {children ?? <span>{term}</span>}
-        {showIcon && (
+        {!iconOnly && (children ?? <span>{term}</span>)}
+        {(showIcon || iconOnly) && (
           <QuestionCircle16Regular
             style={{ width: 14, height: 14, flexShrink: 0 }}
             aria-hidden="true"

@@ -41,6 +41,7 @@ builder.Services.AddSingleton<ClaudeMonitorProvider>();
 builder.Services.AddSingleton<CodexMonitorProvider>();
 builder.Services.AddSingleton<AntigravityMonitorProvider>();
 builder.Services.AddSingleton<GovernanceProvider>();
+builder.Services.AddSingleton<ConfigDocsProvider>();
 builder.Services.AddSingleton<PipelineProvider>();
 builder.Services.AddSingleton<WorktreeProvider>();
 builder.Services.AddSingleton<DashboardSnapshotService>();
@@ -71,6 +72,56 @@ api.MapGet("/monitors", async (DashboardSnapshotService service, bool? refresh, 
 
 api.MapGet("/governance", async (DashboardSnapshotService service, bool? refresh, CancellationToken ct) =>
     Results.Ok(await service.GetGovernanceAsync(refresh ?? false, ct)));
+
+api.MapGet("/governance/diff", async (
+    DashboardSnapshotService service,
+    string tool,
+    string kind,
+    string fileName,
+    CancellationToken ct) =>
+{
+    try
+    {
+        var diff = await service.GetRuleDiffAsync(tool, kind, fileName, ct);
+        return diff is null ? Results.NotFound() : Results.Ok(diff);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+api.MapGet("/docs", async (
+    DashboardSnapshotService service,
+    string scope,
+    CancellationToken ct) =>
+{
+    try
+    {
+        return Results.Ok(await service.GetConfigDocsCatalogAsync(scope, ct));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+api.MapGet("/docs/content", async (
+    DashboardSnapshotService service,
+    string scope,
+    string path,
+    CancellationToken ct) =>
+{
+    try
+    {
+        var doc = await service.GetConfigDocContentAsync(scope, path, ct);
+        return doc is null ? Results.NotFound() : Results.Ok(doc);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
 
 api.MapGet("/pipeline", async (DashboardSnapshotService service, bool? refresh, CancellationToken ct) =>
     Results.Ok(await service.GetPipelineAsync(refresh ?? false, ct)));

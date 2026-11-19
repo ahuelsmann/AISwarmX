@@ -83,6 +83,52 @@ public sealed record GovernanceResponse(
     int MissingCount,
     SourceHealth Source);
 
+public sealed record DiffLineInfo(
+    string Kind,
+    int? TargetLineNumber,
+    int? ActualLineNumber,
+    string Text);
+
+public sealed record RuleDiffResponse(
+    string Tool,
+    string Kind,
+    string FileName,
+    string SyncStatus,
+    string? TargetHash,
+    string? ActualHash,
+    int AddedLines,
+    int RemovedLines,
+    bool Truncated,
+    IReadOnlyList<DiffLineInfo> Lines);
+
+public sealed record ConfigDocItem(
+    string Scope,
+    string RelativePath,
+    string FileName,
+    string Group,
+    string Repository,
+    long SizeBytes,
+    DateTimeOffset LastModifiedUtc);
+
+public sealed record ConfigDocsCatalogResponse(
+    DateTimeOffset GeneratedAtUtc,
+    string Scope,
+    string Repository,
+    IReadOnlyList<ConfigDocItem> Files,
+    SourceHealth Source);
+
+public sealed record ConfigDocContentResponse(
+    string Scope,
+    string RelativePath,
+    string FileName,
+    string Group,
+    string Repository,
+    long SizeBytes,
+    int LineCount,
+    DateTimeOffset LastModifiedUtc,
+    bool Truncated,
+    string Content);
+
 public sealed record TaskParticipantInfo(
     string Agent,
     string Tool,

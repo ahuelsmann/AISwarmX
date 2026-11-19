@@ -7,13 +7,13 @@ import {
   Warning16Regular
 } from '@fluentui/react-icons';
 import { getToneStyles } from '../theme/mobaFluentTheme';
-import type { GovernanceResponse, MonitorInfo } from '../types/dashboard';
+import type { GovernanceResponse, MonitorInfo, PullRequestInfo } from '../types/dashboard';
 import { GlossaryTooltip } from './GlossaryTooltip';
 import { IconGlyphBox, ModelBadge, ProfileBadge, RoleBadge } from './RoleAndModelIcons';
 
 const useStyles = makeStyles({
   card: {
-    padding: '10px 14px',
+    padding: '9px 14px',
     gap: '8px',
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`
@@ -118,7 +118,7 @@ function formatMonitorStateText(state: string | undefined): string {
 interface DecisionTriadCardProps {
   monitors: MonitorInfo[];
   governance: GovernanceResponse;
-  openPrCount: number;
+  pullRequests: PullRequestInfo[];
   isDark: boolean;
   onOpenMatrix: () => void;
 }
@@ -126,7 +126,7 @@ interface DecisionTriadCardProps {
 export function DecisionTriadCard({
   monitors,
   governance,
-  openPrCount,
+  pullRequests,
   isDark,
   onOpenMatrix
 }: DecisionTriadCardProps) {
@@ -137,6 +137,10 @@ export function DecisionTriadCard({
   const totalSeats = monitors.length > 0 ? monitors.length : 3;
   const readyCount = monitors.filter((m) => m.state === 'busy' || m.state === 'standby').length;
   const rateLimitedCount = monitors.filter((m) => m.state === 'rate_limited').length;
+
+  const codeSliceCount = pullRequests.filter((p) => p.riskClass !== 'L').length;
+  const docSliceCount = pullRequests.filter((p) => p.riskClass === 'L').length;
+  const wipText = `Code WIP: ${codeSliceCount} / 3${docSliceCount > 0 ? ` (+${docSliceCount} Docs)` : ''}`;
 
   return (
     <Card
@@ -154,7 +158,7 @@ export function DecisionTriadCard({
             size="sm"
           />
           <h2 className={styles.title}>Decision &amp; Steering Triad</h2>
-          <GlossaryTooltip term="Triad" showIcon />
+          <GlossaryTooltip term="Triad" iconOnly />
           <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
             Selection Council
           </Text>
@@ -186,13 +190,27 @@ export function DecisionTriadCard({
             </Badge>
           )}
 
-          <Badge
-            appearance="tint"
-            color={openPrCount > 3 ? 'warning' : 'subtle'}
-            shape="rounded"
+          <GlossaryTooltip term="WIP">
+            <Badge
+              appearance="tint"
+              color={codeSliceCount > 3 ? 'warning' : 'subtle'}
+              shape="rounded"
+            >
+              <span className="tabular">{wipText}</span>
+            </Badge>
+          </GlossaryTooltip>
+
+          <div
+            className={styles.seatPill}
+            title="Human (Maintainer): Product goals, priorities, material UX, architecture & hardware authorizations"
           >
-            <span className="tabular">Active Slices: {openPrCount} / 3</span>
-          </Badge>
+            <RoleBadge
+              role="Human (maintainer)"
+              label="Escalation: Human"
+              isDark={isDark}
+              compact
+            />
+          </div>
 
           <Button
             size="small"
@@ -210,38 +228,22 @@ export function DecisionTriadCard({
         {COUNCIL_SEATS.map((seat) => {
           const monitor = monitors.find((m) => m.id === seat.monitorId);
           const stateLabel = formatMonitorStateText(monitor?.state);
+          const toolName = monitor?.tool ?? seat.tool;
 
           return (
             <div
               key={seat.monitorId}
               className={styles.seatPill}
-              title={`${seat.roleMatch} · ${stateLabel} · ${seat.mandate}`}
+              title={`${seat.roleMatch} · ${toolName} · ${stateLabel} · ${seat.mandate}`}
             >
               <GlossaryTooltip term={seat.profile}>
                 <ProfileBadge profile={seat.profile} isDark={isDark} />
               </GlossaryTooltip>
               <RoleBadge role={seat.roleMatch} label={seat.shortTag} isDark={isDark} compact />
-              <ModelBadge
-                model={monitor?.model ?? seat.fallbackModel}
-                toolPrefix={monitor?.tool ?? seat.tool}
-                isDark={isDark}
-                mono
-              />
+              <ModelBadge model={monitor?.model ?? seat.fallbackModel} isDark={isDark} mono />
             </div>
           );
         })}
-
-        <div
-          className={styles.seatPill}
-          title="Human (Maintainer): Product goals, priorities, material UX, architecture & hardware authorizations"
-        >
-          <RoleBadge
-            role="Human (maintainer)"
-            label="Escalation: Human"
-            isDark={isDark}
-            compact
-          />
-        </div>
       </div>
     </Card>
   );

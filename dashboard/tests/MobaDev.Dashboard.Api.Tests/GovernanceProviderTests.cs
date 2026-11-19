@@ -126,4 +126,49 @@ public sealed class GovernanceProviderTests
         Assert.Equal("missing_local", missingClaude.SyncStatus);
         Assert.Equal("P1", missingClaude.ProfileHint);
     }
+
+    [Fact]
+    public async Task GetRuleDiffAsync_ComputesNormalizedDiffAndRejectsPathTraversal()
+    {
+        using var fx = new TempDashboardFixture();
+        var repoAgyDir = Path.Combine(fx.MobaDevPath, "agents", "antigravity", "agents");
+        var localAgyDir = Path.Combine(fx.GeminiConfigPath, "agents");
+        Directory.CreateDirectory(repoAgyDir);
+        Directory.CreateDirectory(localAgyDir);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(repoAgyDir, "head-of-ai-strategy.md"),
+            $"# Head of AI Strategy\nWorkspace: `{fx.MobaFlowPath}`\nLine Old\nFooter\n");
+
+        await File.WriteAllTextAsync(
+            Path.Combine(localAgyDir, "head-of-ai-strategy.md"),
+            $"# Head of AI Strategy\nWorkspace: `{fx.MobaFlowPath.Replace('\\', '/')}`\nLine New\nExtra Line\nFooter\n");
+
+        var provider = new GovernanceProvider();
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
+            fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
+
+        var diff = await provider.GetRuleDiffAsync(
+            paths,
+            "Antigravity",
+            "agent",
+            "head-of-ai-strategy.md",
+            CancellationToken.None);
+
+        Assert.NotNull(diff);
+        Assert.Equal("drift", diff.SyncStatus);
+        Assert.Equal(2, diff.AddedLines);
+        Assert.Equal(1, diff.RemovedLines);
+        Assert.False(diff.Truncated);
+        Assert.Contains(diff.Lines, l => l.Kind == "removed" && l.Text == "Line Old");
+        Assert.Contains(diff.Lines, l => l.Kind == "added" && l.Text == "Line New");
+        Assert.Contains(diff.Lines, l => l.Kind == "added" && l.Text == "Extra Line");
+        Assert.Contains(diff.Lines, l => l.Kind == "context" && l.Text.Contains("<repo-root>/MOBAflow"));
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            provider.GetRuleDiffAsync(paths, "Antigravity", "agent", "../secret.md", CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            provider.GetRuleDiffAsync(paths, "Antigravity", "agent", "sub/file.md", CancellationToken.None));
+    }
 }

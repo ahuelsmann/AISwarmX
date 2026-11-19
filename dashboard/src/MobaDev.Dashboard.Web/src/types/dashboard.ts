@@ -79,6 +79,59 @@ export interface GovernanceResponse {
   source: SourceHealth;
 }
 
+export interface DiffLineInfo {
+  kind: 'context' | 'added' | 'removed' | 'hunk' | string;
+  targetLineNumber?: number | null;
+  actualLineNumber?: number | null;
+  text: string;
+}
+
+export interface RuleDiffResponse {
+  tool: string;
+  kind: string;
+  fileName: string;
+  syncStatus: string;
+  targetHash?: string | null;
+  actualHash?: string | null;
+  addedLines: number;
+  removedLines: number;
+  truncated: boolean;
+  lines: DiffLineInfo[];
+}
+
+export type ConfigDocsScope = 'mobadev' | 'mobaflow';
+
+export interface ConfigDocItem {
+  scope: ConfigDocsScope | string;
+  relativePath: string;
+  fileName: string;
+  group: string;
+  repository: string;
+  sizeBytes: number;
+  lastModifiedUtc: string;
+}
+
+export interface ConfigDocsCatalogResponse {
+  generatedAtUtc: string;
+  scope: ConfigDocsScope | string;
+  repository: string;
+  files: ConfigDocItem[];
+  source: SourceHealth;
+}
+
+export interface ConfigDocContentResponse {
+  scope: ConfigDocsScope | string;
+  relativePath: string;
+  fileName: string;
+  group: string;
+  repository: string;
+  sizeBytes: number;
+  lineCount: number;
+  lastModifiedUtc: string;
+  truncated: boolean;
+  content: string;
+}
+
 export interface TaskParticipantInfo {
   agent: string;
   tool: string;
@@ -105,7 +158,7 @@ export interface PullRequestInfo {
   stateLabel: 'Draft' | 'Ready' | 'Auto-Merge' | 'Merged' | string;
   isDraft: boolean;
   autoMergeEnabled: boolean;
-  mergeState: 'CLEAN' | 'BEHIND' | 'DIRTY' | 'BLOCKED' | 'MERGED' | string;
+  mergeState: 'CLEAN' | 'BEHIND' | 'DIRTY' | 'BLOCKED' | 'UNSTABLE' | 'MERGED' | string;
   ciStatus: 'pass' | 'pending' | 'fail' | 'none' | string;
   sonarStatus: 'pass' | 'pending' | 'fail' | 'none' | string;
   riskClass: 'H' | 'M' | 'L' | '?' | string;
@@ -153,6 +206,13 @@ export interface HygieneResponse {
   source: SourceHealth;
 }
 
+export interface WarningBreakdown {
+  rulesDrift: number;
+  staleWorktrees: number;
+  extraSessions: number;
+  quotaPauses: number;
+}
+
 export interface DashboardSnapshot {
   generatedAtUtc: string;
   readOnly: boolean;
@@ -166,4 +226,4 @@ export interface DashboardSnapshot {
 }
 
 export type ThemePreference = 'system' | 'light' | 'dark';
-export type DashboardTab = 'live' | 'matrix';
+export type DashboardTab = 'live' | 'matrix' | 'mobadev-docs' | 'mobaflow-docs';

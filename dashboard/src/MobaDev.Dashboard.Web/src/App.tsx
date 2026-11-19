@@ -9,14 +9,21 @@ import {
   tokens
 } from '@fluentui/react-components';
 import { fetchSnapshot } from './api/dashboardClient';
+import { ConfigDocsView } from './components/ConfigDocsView';
 import { DecisionTriadCard } from './components/DecisionTriadCard';
 import { GovernanceMatrixView } from './components/GovernanceMatrixView';
 import { HygieneAndSyncPanel } from './components/HygieneAndSyncPanel';
 import { MonitorCards } from './components/MonitorCards';
 import { PipelineCard } from './components/PipelineCard';
-import { StatusHeader } from './components/StatusHeader';
+import { StatusHeader, type WarningTarget } from './components/StatusHeader';
 import { mobaDarkTheme, mobaLightTheme } from './theme/mobaFluentTheme';
-import type { DashboardSnapshot, DashboardTab, ThemePreference } from './types/dashboard';
+import type {
+  ConfigDocsScope,
+  DashboardSnapshot,
+  DashboardTab,
+  ThemePreference,
+  WarningBreakdown
+} from './types/dashboard';
 
 const POLL_INTERVAL_MS = 15_000;
 const THEME_STORAGE_KEY = 'mobadev-theme';
@@ -30,10 +37,10 @@ const useStyles = makeStyles({
   mainContent: {
     maxWidth: '1440px',
     margin: '0 auto',
-    padding: '18px 24px 32px',
+    padding: '16px 24px 32px',
     display: 'flex',
     flexDirection: 'column',
-    gap: '14px'
+    gap: '12px'
   },
   liveSplit: {
     display: 'grid',
@@ -47,7 +54,7 @@ const useStyles = makeStyles({
   monitorsRow: {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-    gap: '14px',
+    gap: '12px',
     '@media (max-width: 959px)': {
       gridTemplateColumns: 'minmax(0, 1fr)'
     }
@@ -87,6 +94,10 @@ export function App() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DashboardTab>('live');
   const [onlyDrift, setOnlyDrift] = useState(false);
+  const [requestedDoc, setRequestedDoc] = useState<{
+    scope: ConfigDocsScope;
+    path: string;
+  } | null>(null);
   const [themePreference, setThemePreference] = useState<ThemePreference>(readInitialThemePreference);
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() =>
     resolveTheme(readInitialThemePreference())
@@ -164,9 +175,42 @@ export function App() {
     setActiveTab('matrix');
   };
 
+  const handleJumpToWarning = (target: WarningTarget) => {
+    if (target === 'rules') {
+      handleOpenMatrixSync(true);
+      return;
+    }
+
+    setActiveTab('live');
+    if (target === 'monitors') {
+      window.scrollTo?.({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      const id = target === 'worktrees' ? 'section-worktrees' : 'section-sessions';
+      document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  const handleOpenDoc = (scope: ConfigDocsScope, relativePath: string) => {
+    setRequestedDoc({ scope, path: relativePath });
+    setActiveTab(scope === 'mobadev' ? 'mobadev-docs' : 'mobaflow-docs');
+  };
+
   const driftBadgeCount = snapshot
     ? snapshot.governance.driftCount + snapshot.governance.missingCount
     : 0;
+
+  const warningBreakdown: WarningBreakdown = snapshot
+    ? {
+        rulesDrift: snapshot.governance.driftCount + snapshot.governance.missingCount,
+        staleWorktrees: snapshot.hygiene.staleWorktreeCount,
+        extraSessions: snapshot.hygiene.sessions.filter((s) => s.status === 'warning').length,
+        quotaPauses: snapshot.monitors.monitors.filter((m) => m.state === 'rate_limited').length
+      }
+    : { rulesDrift: 0, staleWorktrees: 0, extraSessions: 0, quotaPauses: 0 };
+
   const isDark = resolvedTheme === 'dark';
 
   return (
@@ -175,6 +219,8 @@ export function App() {
         <StatusHeader
           overallStatus={snapshot?.overallStatus}
           warningCount={snapshot?.warningCount ?? 0}
+          warningBreakdown={warningBreakdown}
+          onJumpToWarning={handleJumpToWarning}
           generatedAtUtc={snapshot?.generatedAtUtc}
           nowMs={nowMs}
           refreshing={refreshing}
@@ -193,7 +239,9 @@ export function App() {
             </MessageBar>
           )}
 
-          {loading && !snapshot && <LoadingSkeleton styles={styles} />}
+          {loading && !snapshot && (activeTab === 'live' || activeTab === 'matrix') && (
+            <LoadingSkeleton styles={styles} />
+          )}
 
           {snapshot && activeTab === 'live' && (
             <>
@@ -206,7 +254,7 @@ export function App() {
               <DecisionTriadCard
                 monitors={snapshot.monitors.monitors}
                 governance={snapshot.governance}
-                openPrCount={snapshot.pipeline.pullRequests.length}
+                pullRequests={snapshot.pipeline.pullRequests}
                 isDark={isDark}
                 onOpenMatrix={() => handleOpenMatrixSync(false)}
               />
@@ -228,6 +276,27 @@ export function App() {
               onlyDrift={onlyDrift}
               onOnlyDriftChange={setOnlyDrift}
               isDark={isDark}
+              onOpenDoc={handleOpenDoc}
+            />
+          )}
+
+          {activeTab === 'mobadev-docs' && (
+            <ConfigDocsView
+              key="mobadev"
+              scope="mobadev"
+              isDark={isDark}
+              requestedPath={requestedDoc?.scope === 'mobadev' ? requestedDoc.path : null}
+              onConsumeRequestedPath={() => setRequestedDoc(null)}
+            />
+          )}
+
+          {activeTab === 'mobaflow-docs' && (
+            <ConfigDocsView
+              key="mobaflow"
+              scope="mobaflow"
+              isDark={isDark}
+              requestedPath={requestedDoc?.scope === 'mobaflow' ? requestedDoc.path : null}
+              onConsumeRequestedPath={() => setRequestedDoc(null)}
             />
           )}
         </main>
@@ -238,13 +307,13 @@ export function App() {
 
 function LoadingSkeleton({ styles }: { styles: ReturnType<typeof useStyles> }) {
   return (
-    <Skeleton aria-label="Loading dashboard" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <Skeleton aria-label="Loading dashboard" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div className={styles.monitorsRow}>
-        <SkeletonItem style={{ height: 156, borderRadius: tokens.borderRadiusMedium }} />
-        <SkeletonItem style={{ height: 156, borderRadius: tokens.borderRadiusMedium }} />
-        <SkeletonItem style={{ height: 156, borderRadius: tokens.borderRadiusMedium }} />
+        <SkeletonItem style={{ height: 112, borderRadius: tokens.borderRadiusMedium }} />
+        <SkeletonItem style={{ height: 112, borderRadius: tokens.borderRadiusMedium }} />
+        <SkeletonItem style={{ height: 112, borderRadius: tokens.borderRadiusMedium }} />
       </div>
-      <SkeletonItem style={{ height: 74, borderRadius: tokens.borderRadiusMedium }} />
+      <SkeletonItem style={{ height: 68, borderRadius: tokens.borderRadiusMedium }} />
       <div className={styles.liveSplit}>
         <SkeletonItem style={{ height: 280, borderRadius: tokens.borderRadiusMedium }} />
         <SkeletonItem style={{ height: 280, borderRadius: tokens.borderRadiusMedium }} />

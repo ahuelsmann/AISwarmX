@@ -17,7 +17,14 @@ public sealed class ApiEndpointsIntegrationTests
     public async Task AllGetEndpointsReturnOkAndPostIsRejectedAsReadOnly()
     {
         using var fx = new TempDashboardFixture();
-        await File.WriteAllTextAsync(Path.Combine(fx.MobaDevPath, "manifest.md"), "# MOBAdev\n");
+        await File.WriteAllTextAsync(Path.Combine(fx.MobaDevPath, "manifest.md"), "# MOBAdev\nLine 1\n");
+
+        var repoAgyDir = Path.Combine(fx.MobaDevPath, "agents", "antigravity", "agents");
+        var localAgyDir = Path.Combine(fx.GeminiConfigPath, "agents");
+        Directory.CreateDirectory(repoAgyDir);
+        Directory.CreateDirectory(localAgyDir);
+        await File.WriteAllTextAsync(Path.Combine(repoAgyDir, "head-of-ai-strategy.md"), "Line A\n");
+        await File.WriteAllTextAsync(Path.Combine(localAgyDir, "head-of-ai-strategy.md"), "Line A\nLine B\n");
 
         var runner = new PipelineAndWorktreeProviderTests.FakeCommandRunner((fileName, args) =>
         {
@@ -87,6 +94,30 @@ public sealed class ApiEndpointsIntegrationTests
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/governance")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/pipeline")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/hygiene")).StatusCode);
+
+        var diffRes = await client.GetAsync("/api/governance/diff?tool=Antigravity&kind=agent&fileName=head-of-ai-strategy.md");
+        Assert.Equal(HttpStatusCode.OK, diffRes.StatusCode);
+        var diffPayload = await diffRes.Content.ReadFromJsonAsync<RuleDiffResponse>();
+        Assert.NotNull(diffPayload);
+        Assert.Equal(1, diffPayload.AddedLines);
+
+        var badDiffRes = await client.GetAsync("/api/governance/diff?tool=Antigravity&kind=agent&fileName=../secret.md");
+        Assert.Equal(HttpStatusCode.BadRequest, badDiffRes.StatusCode);
+
+        var docsRes = await client.GetAsync("/api/docs?scope=mobadev");
+        Assert.Equal(HttpStatusCode.OK, docsRes.StatusCode);
+        var catalog = await docsRes.Content.ReadFromJsonAsync<ConfigDocsCatalogResponse>();
+        Assert.NotNull(catalog);
+        Assert.Contains(catalog.Files, f => f.RelativePath == "manifest.md");
+
+        var docContentRes = await client.GetAsync("/api/docs/content?scope=mobadev&path=manifest.md");
+        Assert.Equal(HttpStatusCode.OK, docContentRes.StatusCode);
+        var docContent = await docContentRes.Content.ReadFromJsonAsync<ConfigDocContentResponse>();
+        Assert.NotNull(docContent);
+        Assert.Contains("# MOBAdev", docContent.Content);
+
+        var badDocRes = await client.GetAsync("/api/docs/content?scope=mobadev&path=../secret.md");
+        Assert.Equal(HttpStatusCode.BadRequest, badDocRes.StatusCode);
 
         // Strictly read-only: POST must be rejected
         using var postRes = await client.PostAsJsonAsync("/api/snapshot", new { });
