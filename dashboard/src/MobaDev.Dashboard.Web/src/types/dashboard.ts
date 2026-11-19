@@ -79,27 +79,41 @@ export interface GovernanceResponse {
   source: SourceHealth;
 }
 
+export interface TaskParticipantInfo {
+  agent: string;
+  tool: string;
+  role: string;
+  profile: string;
+  model: string;
+  status: string;
+  evidenceSource: string;
+}
+
 export interface PullRequestInfo {
   number: number;
   title: string;
   url: string;
   branch: string;
-  stateLabel: 'Draft' | 'Ready' | 'Auto-Merge' | string;
+  state: 'OPEN' | 'MERGED' | string;
+  stateLabel: 'Draft' | 'Ready' | 'Auto-Merge' | 'Gemergt' | string;
   isDraft: boolean;
   autoMergeEnabled: boolean;
-  mergeState: 'CLEAN' | 'BEHIND' | 'DIRTY' | 'BLOCKED' | string;
+  mergeState: 'CLEAN' | 'BEHIND' | 'DIRTY' | 'BLOCKED' | 'MERGED' | string;
   ciStatus: 'pass' | 'pending' | 'fail' | 'none' | string;
   sonarStatus: 'pass' | 'pending' | 'fail' | 'none' | string;
   riskClass: 'H' | 'M' | 'L' | '?' | string;
   lockedAreas: string[];
   updatedAtUtc: string;
+  mergedAtUtc?: string | null;
   projectStatus?: string | null;
+  participants: TaskParticipantInfo[];
 }
 
 export interface PipelineResponse {
   generatedAtUtc: string;
   repository: string;
   pullRequests: PullRequestInfo[];
+  recentlyMerged: PullRequestInfo[];
   projectBoardAvailable: boolean;
   projectBoardNotice?: string | null;
   source: SourceHealth;

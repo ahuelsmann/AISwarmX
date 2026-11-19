@@ -83,11 +83,21 @@ public sealed record GovernanceResponse(
     int MissingCount,
     SourceHealth Source);
 
+public sealed record TaskParticipantInfo(
+    string Agent,
+    string Tool,
+    string Role,
+    string Profile,
+    string Model,
+    string Status,
+    string EvidenceSource);
+
 public sealed record PullRequestInfo(
     int Number,
     string Title,
     string Url,
     string Branch,
+    string State,
     string StateLabel,
     bool IsDraft,
     bool AutoMergeEnabled,
@@ -97,12 +107,15 @@ public sealed record PullRequestInfo(
     string RiskClass,
     IReadOnlyList<string> LockedAreas,
     DateTimeOffset UpdatedAtUtc,
-    string? ProjectStatus);
+    DateTimeOffset? MergedAtUtc,
+    string? ProjectStatus,
+    IReadOnlyList<TaskParticipantInfo> Participants);
 
 public sealed record PipelineResponse(
     DateTimeOffset GeneratedAtUtc,
     string Repository,
     IReadOnlyList<PullRequestInfo> PullRequests,
+    IReadOnlyList<PullRequestInfo> RecentlyMerged,
     bool ProjectBoardAvailable,
     string? ProjectBoardNotice,
     SourceHealth Source);

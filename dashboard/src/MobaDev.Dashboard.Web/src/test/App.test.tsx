@@ -136,6 +136,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           title: 'docs(agents): track slices on MOBAflow Kanban',
           url: 'https://github.com/ahuelsmann/MOBAflow/pull/492',
           branch: 'codex/strategy-mobaflow-kanban-board',
+          state: 'OPEN',
           stateLabel: 'Draft',
           isDraft: true,
           autoMergeEnabled: false,
@@ -145,7 +146,59 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           riskClass: 'L',
           lockedAreas: ['AGENTS.md'],
           updatedAtUtc: nowIso,
-          projectStatus: null
+          mergedAtUtc: null,
+          projectStatus: null,
+          participants: [
+            {
+              agent: 'Codex Writer',
+              tool: 'ChatGPT Codex',
+              role: 'Writer',
+              profile: 'P2',
+              model: 'GPT-6 Astra',
+              status: 'Umgesetzt',
+              evidenceSource: 'Branch'
+            }
+          ]
+        }
+      ],
+      recentlyMerged: [
+        {
+          number: 495,
+          title: 'build(deps): apply minor updates',
+          url: 'https://github.com/ahuelsmann/MOBAflow/pull/495',
+          branch: 'claude/deps-494',
+          state: 'MERGED',
+          stateLabel: 'Gemergt',
+          isDraft: false,
+          autoMergeEnabled: false,
+          mergeState: 'MERGED',
+          ciStatus: 'pass',
+          sonarStatus: 'pass',
+          riskClass: 'L',
+          lockedAreas: [],
+          updatedAtUtc: nowIso,
+          mergedAtUtc: nowIso,
+          projectStatus: null,
+          participants: [
+            {
+              agent: 'Fresh Claude Reviewer',
+              tool: 'Claude Code',
+              role: 'Final Reviewer',
+              profile: 'P1',
+              model: 'Claude Opus 5.5',
+              status: 'PASS',
+              evidenceSource: 'P1-Final-Review'
+            },
+            {
+              agent: 'Antigravity Verifier',
+              tool: 'Antigravity',
+              role: 'Cross-Family Verifier',
+              profile: 'P3',
+              model: 'Gemini 4 Argon',
+              status: 'PASS',
+              evidenceSource: 'Cross-Family-Check'
+            }
+          ]
         }
       ]
     },
@@ -200,7 +253,8 @@ describe('MOBAdev Agent Network Dashboard', () => {
     window.localStorage.clear();
   });
 
-  it('renders live monitor states, PR pipeline with missing scope notice, and hygiene warnings', async () => {
+  it('renders live monitor states, PR pipeline with participants, missing scope notice, and recently merged toggle', async () => {
+    const user = userEvent.setup();
     const fixture = createSnapshotFixture();
     vi.stubGlobal(
       'fetch',
@@ -220,14 +274,22 @@ describe('MOBAdev Agent Network Dashboard', () => {
     expect(screen.getByText('Standby')).toBeInTheDocument();
     expect(screen.getByText('Aktiv / Busy')).toBeInTheDocument();
 
-    // Pipeline keeps rendering PR #492 despite read:project notice
+    // Pipeline keeps rendering PR #492 despite read:project notice and displays participant chips
     expect(screen.getByText('Repository: ahuelsmann/MOBAflow')).toBeInTheDocument();
     expect(screen.getByText('#492')).toBeInTheDocument();
+    expect(screen.getByText(/ChatGPT Codex · GPT-6 Astra/)).toBeInTheDocument();
     expect(screen.getByText(/Scope read:project fehlt/i)).toBeInTheDocument();
 
     // Hygiene & stale worktree warnings
     expect(screen.getByText('2 / 1 Warnung')).toBeInTheDocument();
     expect(screen.getByText('Veraltet / Gemergt')).toBeInTheDocument();
+
+    // Switch to Recently Merged tasks and verify multi-model participation
+    await user.click(screen.getByRole('button', { name: /Zuletzt abgeschlossen \(1\)/i }));
+    expect(screen.getByText('#495')).toBeInTheDocument();
+    expect(screen.getByText('Final Reviewer')).toBeInTheDocument();
+    expect(screen.getByText(/Claude Code · Claude Opus 5.5/)).toBeInTheDocument();
+    expect(screen.getByText(/Antigravity · Gemini 4 Argon/)).toBeInTheDocument();
   });
 
   it('navigates from drift summary to Matrix & Sync pre-filtered to deviations and switches themes', async () => {

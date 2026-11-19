@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import {
   AlertTriangle,
   ArrowUp,
+  Bot,
   Check,
   Clock,
   ExternalLink,
+  GitMerge,
   GitPullRequest,
   Info,
   Lock,
@@ -11,7 +14,7 @@ import {
   X
 } from 'lucide-react';
 import { formatAbsoluteDe, formatRelativeTimeDe } from '../api/dashboardClient';
-import type { PipelineResponse, PullRequestInfo } from '../types/dashboard';
+import type { PipelineResponse, PullRequestInfo, TaskParticipantInfo } from '../types/dashboard';
 import { GlossaryTooltip } from './GlossaryTooltip';
 
 interface PipelineCardProps {
@@ -19,7 +22,12 @@ interface PipelineCardProps {
   nowMs: number;
 }
 
+type PipelineViewMode = 'open' | 'merged';
+
 export function PipelineCard({ pipeline, nowMs }: PipelineCardProps) {
+  const [viewMode, setViewMode] = useState<PipelineViewMode>('open');
+  const activeList = viewMode === 'open' ? pipeline.pullRequests : pipeline.recentlyMerged;
+
   return (
     <section className="card card--mobaflow" aria-label="Aufgaben- und PR-Pipeline MOBAflow">
       <div className="card-header">
@@ -28,7 +36,25 @@ export function PipelineCard({ pipeline, nowMs }: PipelineCardProps) {
           <h2 className="card-title">Aufgaben- &amp; PR-Pipeline</h2>
           <span className="badge badge--blue mono">Repository: {pipeline.repository}</span>
         </div>
-        <span className="badge tabular">{pipeline.pullRequests.length} offen</span>
+
+        <div className="segmented-control" role="group" aria-label="PR-Status filtern">
+          <button
+            type="button"
+            className="segmented-btn tabular"
+            aria-pressed={viewMode === 'open'}
+            onClick={() => setViewMode('open')}
+          >
+            Offen ({pipeline.pullRequests.length})
+          </button>
+          <button
+            type="button"
+            className="segmented-btn tabular"
+            aria-pressed={viewMode === 'merged'}
+            onClick={() => setViewMode('merged')}
+          >
+            Zuletzt abgeschlossen ({pipeline.recentlyMerged.length})
+          </button>
+        </div>
       </div>
 
       {pipeline.source.status === 'degraded' && (
@@ -56,18 +82,26 @@ export function PipelineCard({ pipeline, nowMs }: PipelineCardProps) {
         </div>
       )}
 
-      {pipeline.source.status !== 'unavailable' && pipeline.pullRequests.length === 0 && (
+      {pipeline.source.status !== 'unavailable' && activeList.length === 0 && (
         <div className="empty-state">
           <Check size={20} aria-hidden="true" />
-          <strong>Keine offenen PRs in MOBAflow</strong>
-          <span>Alle Änderungen sind aktuell auf main integriert.</span>
+          <strong>
+            {viewMode === 'open'
+              ? 'Keine offenen PRs in MOBAflow'
+              : 'Keine kürzlich abgeschlossenen PRs gefunden'}
+          </strong>
+          <span>
+            {viewMode === 'open'
+              ? 'Alle Änderungen sind aktuell auf main integriert.'
+              : 'Sobald Aufgaben gemergt sind, erscheinen sie hier mit ihren Beteiligten.'}
+          </span>
         </div>
       )}
 
-      {pipeline.pullRequests.length > 0 && (
+      {activeList.length > 0 && (
         <div className="pr-list">
-          {pipeline.pullRequests.map((pr) => (
-            <PullRequestRow key={pr.number} pr={pr} nowMs={nowMs} />
+          {activeList.map((pr) => (
+            <PullRequestRow key={`${pr.state}-${pr.number}`} pr={pr} nowMs={nowMs} />
           ))}
         </div>
       )}
@@ -76,6 +110,9 @@ export function PipelineCard({ pipeline, nowMs }: PipelineCardProps) {
 }
 
 function PullRequestRow({ pr, nowMs }: { pr: PullRequestInfo; nowMs: number }) {
+  const isMerged = pr.state === 'MERGED';
+  const timeStamp = isMerged ? (pr.mergedAtUtc ?? pr.updatedAtUtc) : pr.updatedAtUtc;
+
   return (
     <div className="pr-item">
       <div className="pr-top">
@@ -93,8 +130,8 @@ function PullRequestRow({ pr, nowMs }: { pr: PullRequestInfo; nowMs: number }) {
         </div>
 
         <div className="pr-meta-row">
-          <PrStateBadge stateLabel={pr.stateLabel} />
-          <MergeStateBadge mergeState={pr.mergeState} />
+          <PrStateBadge stateLabel={pr.stateLabel} isMerged={isMerged} />
+          {!isMerged && <MergeStateBadge mergeState={pr.mergeState} />}
           <RiskClassBadge riskClass={pr.riskClass} />
         </div>
       </div>
@@ -104,16 +141,17 @@ function PullRequestRow({ pr, nowMs }: { pr: PullRequestInfo; nowMs: number }) {
           {pr.branch}
         </span>
 
-        <CheckBadge label="CI" status={pr.ciStatus} />
-        <CheckBadge label="Sonar" status={pr.sonarStatus} />
+        {!isMerged && (
+          <>
+            <CheckBadge label="CI" status={pr.ciStatus} />
+            <CheckBadge label="Sonar" status={pr.sonarStatus} />
+          </>
+        )}
 
         {pr.projectStatus && <span className="badge badge--blue">Kanban: {pr.projectStatus}</span>}
 
-        <span
-          className="slot-label tabular"
-          title={formatAbsoluteDe(pr.updatedAtUtc)}
-        >
-          Update {formatRelativeTimeDe(pr.updatedAtUtc, nowMs)}
+        <span className="slot-label tabular" title={formatAbsoluteDe(timeStamp)}>
+          {isMerged ? 'Gemergt' : 'Update'} {formatRelativeTimeDe(timeStamp, nowMs)}
         </span>
       </div>
 
@@ -131,11 +169,81 @@ function PullRequestRow({ pr, nowMs }: { pr: PullRequestInfo; nowMs: number }) {
           ))}
         </div>
       )}
+
+      <div className="participants-section">
+        <div className="participants-header">
+          <Bot size={13} aria-hidden="true" />
+          <span>Beteiligte Agenten, Rollen &amp; Modelle</span>
+        </div>
+
+        {pr.participants.length === 0 ? (
+          <span className="slot-label">Noch keine Agenten-Nachweise im PR vermerkt.</span>
+        ) : (
+          <div className="participants-grid">
+            {pr.participants.map((participant) => (
+              <ParticipantChip
+                key={`${participant.role}-${participant.tool}-${participant.profile}`}
+                participant={participant}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-function PrStateBadge({ stateLabel }: { stateLabel: string }) {
+function ParticipantChip({ participant }: { participant: TaskParticipantInfo }) {
+  const profileBadgeClass =
+    participant.profile === 'P1'
+      ? 'badge--blue'
+      : participant.profile === 'P2'
+        ? 'badge--violet'
+        : participant.profile === 'P3'
+          ? 'badge--green'
+          : '';
+
+  const statusBadgeClass =
+    participant.status === 'PASS' ||
+    participant.status === 'Freigegeben' ||
+    participant.status === 'Konsultiert / PASS'
+      ? 'badge--green'
+      : participant.status === 'Findings' || participant.status === 'Kontingent-Limit'
+        ? 'badge--amber'
+        : participant.status === 'Blockiert'
+          ? 'badge--red'
+          : participant.status === 'Umgesetzt' || participant.status === 'Aktiv'
+            ? 'badge--blue'
+            : '';
+
+  return (
+    <div
+      className="participant-chip"
+      title={`${participant.agent} · Beleg: ${participant.evidenceSource}`}
+    >
+      <div className="participant-top">
+        <GlossaryTooltip term={participant.profile}>
+          <span className={`badge ${profileBadgeClass}`}>{participant.profile}</span>
+        </GlossaryTooltip>
+        <span className="participant-role">{participant.role}</span>
+        <span className={`badge ${statusBadgeClass}`}>{participant.status}</span>
+      </div>
+      <div className="participant-meta mono">
+        {participant.tool} · {participant.model}
+      </div>
+    </div>
+  );
+}
+
+function PrStateBadge({ stateLabel, isMerged }: { stateLabel: string; isMerged: boolean }) {
+  if (isMerged || stateLabel === 'Gemergt') {
+    return (
+      <span className="badge badge--violet">
+        <GitMerge size={12} aria-hidden="true" />
+        Gemergt
+      </span>
+    );
+  }
   if (stateLabel === 'Auto-Merge') {
     return (
       <GlossaryTooltip term="Auto-Merge">

@@ -6,8 +6,8 @@ using MobaDev.Dashboard.Api.Contracts;
 namespace MobaDev.Dashboard.Api.Providers;
 
 /// <summary>
-/// Queries open MOBAflow PRs (and optional GitHub Project Kanban items) strictly read-only via gh CLI,
-/// retaining a last-known cache fallback if GitHub is temporarily unreachable.
+/// Queries open and recently merged MOBAflow PRs (and optional GitHub Project Kanban items) strictly read-only
+/// via gh CLI, retaining a last-known cache fallback if GitHub is temporarily unreachable.
 /// </summary>
 public sealed partial class PipelineProvider
 {
@@ -24,34 +24,56 @@ public sealed partial class PipelineProvider
     {
         var now = DateTimeOffset.UtcNow;
 
-        var prResult = await _commandRunner.RunAsync(
+        var openPrTask = _commandRunner.RunAsync(
             "gh",
             [
                 "pr", "list",
                 "--repo", options.GitHubRepository,
                 "--state", "open",
-                "--json", "number,title,url,headRefName,isDraft,mergeStateStatus,autoMergeRequest,updatedAt,body,statusCheckRollup"
+                "--json", "number,title,url,headRefName,isDraft,mergeStateStatus,autoMergeRequest,updatedAt,body,statusCheckRollup,comments"
             ],
             workingDirectory: null,
-            timeout: TimeSpan.FromSeconds(10),
-            cancellationToken).ConfigureAwait(false);
+            timeout: TimeSpan.FromSeconds(12),
+            cancellationToken);
 
-        if (!prResult.Succeeded)
+        var mergedPrTask = _commandRunner.RunAsync(
+            "gh",
+            [
+                "pr", "list",
+                "--repo", options.GitHubRepository,
+                "--state", "merged",
+                "--limit", "5",
+                "--json", "number,title,url,headRefName,mergedAt,updatedAt,body,comments"
+            ],
+            workingDirectory: null,
+            timeout: TimeSpan.FromSeconds(12),
+            cancellationToken);
+
+        var projectTask = TryLoadProjectStatusesAsync(options, cancellationToken);
+
+        await Task.WhenAll(openPrTask, mergedPrTask, projectTask).ConfigureAwait(false);
+
+        var openResult = openPrTask.Result;
+        if (!openResult.Succeeded)
         {
-            return BuildUnavailableOrCached(options.GitHubRepository, now, prResult);
+            return BuildUnavailableOrCached(options.GitHubRepository, now, openResult);
         }
 
-        var (projectAvailable, projectNotice, projectStatuses) = await TryLoadProjectStatusesAsync(
-            options,
-            cancellationToken).ConfigureAwait(false);
+        var (projectAvailable, projectNotice, projectStatuses) = projectTask.Result;
 
         try
         {
-            var pullRequests = ParsePullRequests(prResult.StdOut, projectStatuses);
+            var openPullRequests = ParsePullRequests(openResult.StdOut, isMergedList: false, projectStatuses);
+            var mergedResult = mergedPrTask.Result;
+            var recentlyMerged = mergedResult.Succeeded
+                ? ParseMergedSafe(mergedResult.StdOut)
+                : [];
+
             var response = new PipelineResponse(
                 GeneratedAtUtc: now,
                 Repository: options.GitHubRepository,
-                PullRequests: pullRequests,
+                PullRequests: openPullRequests,
+                RecentlyMerged: recentlyMerged,
                 ProjectBoardAvailable: projectAvailable,
                 ProjectBoardNotice: projectNotice,
                 Source: new SourceHealth("ok", now));
@@ -106,6 +128,7 @@ public sealed partial class PipelineProvider
             GeneratedAtUtc: now,
             Repository: repository,
             PullRequests: [],
+            RecentlyMerged: [],
             ProjectBoardAvailable: false,
             ProjectBoardNotice: null,
             Source: new SourceHealth("unavailable", now, reason));
@@ -176,8 +199,24 @@ public sealed partial class PipelineProvider
         }
     }
 
+    private static List<PullRequestInfo> ParseMergedSafe(string json)
+    {
+        try
+        {
+            var merged = ParsePullRequests(json, isMergedList: true, projectStatuses: new Dictionary<int, string>());
+            return merged
+                .OrderByDescending(p => p.MergedAtUtc ?? p.UpdatedAtUtc)
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
     private static List<PullRequestInfo> ParsePullRequests(
         string json,
+        bool isMergedList,
         IReadOnlyDictionary<int, string> projectStatuses)
     {
         using var doc = JsonDocument.Parse(json);
@@ -193,33 +232,40 @@ public sealed partial class PipelineProvider
             var title = GetString(el, "title") ?? string.Empty;
             var url = GetString(el, "url") ?? string.Empty;
             var branch = GetString(el, "headRefName") ?? string.Empty;
-            var isDraft = el.TryGetProperty("isDraft", out var d) && d.ValueKind == JsonValueKind.True;
-            var autoMergeEnabled = el.TryGetProperty("autoMergeRequest", out var am) && am.ValueKind == JsonValueKind.Object;
-            var mergeState = GetString(el, "mergeStateStatus") ?? "UNKNOWN";
+            var isDraft = !isMergedList && el.TryGetProperty("isDraft", out var d) && d.ValueKind == JsonValueKind.True;
+            var autoMergeEnabled = !isMergedList &&
+                                   el.TryGetProperty("autoMergeRequest", out var am) &&
+                                   am.ValueKind == JsonValueKind.Object;
+            var mergeState = isMergedList
+                ? "MERGED"
+                : GetString(el, "mergeStateStatus") ?? "UNKNOWN";
             var body = GetString(el, "body") ?? string.Empty;
 
-            var updatedAt = el.TryGetProperty("updatedAt", out var u) &&
-                            u.ValueKind == JsonValueKind.String &&
-                            DateTimeOffset.TryParse(u.GetString(), out var dt)
-                ? dt
-                : DateTimeOffset.UtcNow;
+            var updatedAt = ParseDateTimeOffset(el, "updatedAt") ?? DateTimeOffset.UtcNow;
+            var mergedAt = isMergedList ? ParseDateTimeOffset(el, "mergedAt") : null;
 
-            var stateLabel = autoMergeEnabled
-                ? "Auto-Merge"
-                : isDraft
-                    ? "Draft"
-                    : "Ready";
+            var stateLabel = isMergedList
+                ? "Gemergt"
+                : autoMergeEnabled
+                    ? "Auto-Merge"
+                    : isDraft
+                        ? "Draft"
+                        : "Ready";
 
-            var (ciStatus, sonarStatus) = ClassifyChecks(el);
+            var (ciStatus, sonarStatus) = isMergedList ? ("pass", "pass") : ClassifyChecks(el);
             var riskClass = ExtractRiskClass(body, title);
             var lockedAreas = ExtractLockedAreas(body);
             projectStatuses.TryGetValue(number, out var projectStatus);
+
+            var comments = ParseComments(el);
+            var participants = PrParticipantExtractor.Extract(branch, body, comments);
 
             list.Add(new PullRequestInfo(
                 Number: number,
                 Title: title,
                 Url: url,
                 Branch: branch,
+                State: isMergedList ? "MERGED" : "OPEN",
                 StateLabel: stateLabel,
                 IsDraft: isDraft,
                 AutoMergeEnabled: autoMergeEnabled,
@@ -229,12 +275,55 @@ public sealed partial class PipelineProvider
                 RiskClass: riskClass,
                 LockedAreas: lockedAreas,
                 UpdatedAtUtc: updatedAt,
-                ProjectStatus: projectStatus));
+                MergedAtUtc: mergedAt,
+                ProjectStatus: projectStatus,
+                Participants: participants));
         }
 
         return list
             .OrderByDescending(p => p.Number)
             .ToList();
+    }
+
+    private static List<PrCommentInput> ParseComments(JsonElement prElement)
+    {
+        if (!prElement.TryGetProperty("comments", out var comments) ||
+            comments.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var result = new List<PrCommentInput>();
+        foreach (var comment in comments.EnumerateArray())
+        {
+            if (comment.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var author = string.Empty;
+            if (comment.TryGetProperty("author", out var authorEl) && authorEl.ValueKind == JsonValueKind.Object)
+            {
+                author = GetString(authorEl, "login") ?? string.Empty;
+            }
+
+            var commentBody = GetString(comment, "body") ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(commentBody))
+            {
+                result.Add(new PrCommentInput(author, commentBody));
+            }
+        }
+
+        return result;
+    }
+
+    private static DateTimeOffset? ParseDateTimeOffset(JsonElement obj, string propertyName)
+    {
+        return obj.TryGetProperty(propertyName, out var prop) &&
+               prop.ValueKind == JsonValueKind.String &&
+               DateTimeOffset.TryParse(prop.GetString(), out var dt)
+            ? dt
+            : null;
     }
 
     private static (string CiStatus, string SonarStatus) ClassifyChecks(JsonElement prElement)
