@@ -30,7 +30,9 @@ const GLOSSARY_ENTRIES: Record<string, string> = {
   Triad:
     'Decision & Steering Triad: Cross-model council (P1 COO, P2 CPM/TD, P3 AI Strategy & UI/UX) that cuts tasks into slices, assigns risk classes (H/M/L), selects participating agents and AI models, and grants Design Go.',
   WIP:
-    'MOBAflow WIP limit: at most 3 open code slices (Class H/M) at once. Documentation slices (Class L) do not count toward the code WIP limit.'
+    'MOBAflow WIP limit: at most 3 open code slices (Class H/M) at once. Documentation slices (Class L) do not count toward the code WIP limit.',
+  'Board Drift':
+    'Issue is still listed in an active Kanban column (In progress / In review) even though it is already closed on GitHub or has no active PR, writer, or recent activity.'
 };
 
 interface GlossaryTooltipProps {

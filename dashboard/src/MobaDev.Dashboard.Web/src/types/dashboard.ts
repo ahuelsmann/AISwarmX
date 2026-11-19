@@ -149,6 +149,32 @@ export interface LinkedIssueInfo {
   state?: string | null;
 }
 
+export interface LinkedPullRequestRef {
+  number: number;
+  title: string;
+  url: string;
+  stateLabel: string;
+  isMerged: boolean;
+}
+
+export interface ActiveIssueInfo {
+  number: number;
+  title: string;
+  url: string;
+  gitHubState: 'OPEN' | 'CLOSED' | string;
+  kanbanStatus: string;
+  priority?: string | null;
+  area?: string | null;
+  issueType?: string | null;
+  riskClass?: string | null;
+  writer?: string | null;
+  lockedAreas: string[];
+  updatedAtUtc: string;
+  linkedPullRequests: LinkedPullRequestRef[];
+  participants: TaskParticipantInfo[];
+  boardDriftReason?: string | null;
+}
+
 export interface PullRequestInfo {
   number: number;
   title: string;
@@ -176,6 +202,7 @@ export interface PipelineResponse {
   repository: string;
   pullRequests: PullRequestInfo[];
   recentlyMerged: PullRequestInfo[];
+  activeIssues?: ActiveIssueInfo[];
   projectBoardAvailable: boolean;
   projectBoardNotice?: string | null;
   source: SourceHealth;

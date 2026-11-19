@@ -33,7 +33,7 @@ public sealed class ApiEndpointsIntegrationTests
                 return new CommandResult(0, "[]", string.Empty);
             }
 
-            if (fileName == "gh" && args.Contains("project"))
+            if (fileName == "gh" && (args.Contains("project") || args.Contains("graphql")))
             {
                 return new CommandResult(1, string.Empty, "missing scope");
             }

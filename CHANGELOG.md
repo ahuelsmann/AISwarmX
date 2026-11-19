@@ -5,7 +5,14 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAdev generations (`Gen#1 = 1.x`, `Gen#2 = 2.x`, `Gen#3 = 3.0.0+`).
 
-## [3.0.3] - 2026-11-19
+## [3.1.0] - 2026-11-19
+
+### Added
+- **Active Issues Kanban View (`PipelineProvider.cs`, `DashboardContracts.cs`, `PipelineCard.tsx`):** Queries active GitHub Project Kanban columns (`In progress`, `In review`, `Ready`) via a single filtered GraphQL call (`TryLoadActiveKanbanBoardAsync`), enriches issues with PR links/writers/locks/participants, surfaces issues that do not have an open PR yet (`No PR yet`), and isolates `Closed on GitHub` / `Stale / No Writer` board entries into a collapsible **Board Drift** section.
+
+---
+
+## [3.0.3] - 2026-11-19 (PR #15)
 
 ### Added
 - **Explicit PR `BLOCKED` / `DIRTY` Reasons (`PipelineProvider.cs`, `PipelineCard.tsx`):** Extracts concrete blocking causes (`Draft PR`, merge conflicts, behind `main`, `REVIEW_REQUIRED` / `CHANGES_REQUESTED`, `BLOCKED` review gates, plus failing/running check names from `statusCheckRollup`) and renders them directly inline under blocked PR rows and in badge tooltips.

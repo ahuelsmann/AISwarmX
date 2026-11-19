@@ -49,7 +49,7 @@ public sealed partial class PipelineProvider
             timeout: TimeSpan.FromSeconds(12),
             cancellationToken);
 
-        var projectTask = TryLoadProjectStatusesAsync(options, cancellationToken);
+        var projectTask = TryLoadActiveKanbanBoardAsync(options, cancellationToken);
         var issuesTask = TryLoadIssuesAsync(options, cancellationToken);
 
         await Task.WhenAll(openPrTask, mergedPrTask, projectTask, issuesTask).ConfigureAwait(false);
@@ -60,7 +60,7 @@ public sealed partial class PipelineProvider
             return BuildUnavailableOrCached(options.GitHubRepository, now, openResult);
         }
 
-        var (projectAvailable, projectNotice, projectStatuses) = projectTask.Result;
+        var (projectAvailable, projectNotice, projectStatuses, kanbanIssues) = projectTask.Result;
         var issuesByNumber = issuesTask.Result;
 
         try
@@ -81,11 +81,14 @@ public sealed partial class PipelineProvider
                 ? ParseMergedSafe(mergedResult.StdOut, options.GitHubRepository, issuesByNumber, knownPrNumbers)
                 : [];
 
+            var activeIssues = BuildActiveIssues(kanbanIssues, openPullRequests, recentlyMerged, now);
+
             var response = new PipelineResponse(
                 GeneratedAtUtc: now,
                 Repository: options.GitHubRepository,
                 PullRequests: openPullRequests,
                 RecentlyMerged: recentlyMerged,
+                ActiveIssues: activeIssues,
                 ProjectBoardAvailable: projectAvailable,
                 ProjectBoardNotice: projectNotice,
                 Source: new SourceHealth("ok", now));
@@ -141,74 +144,470 @@ public sealed partial class PipelineProvider
             Repository: repository,
             PullRequests: [],
             RecentlyMerged: [],
+            ActiveIssues: [],
             ProjectBoardAvailable: false,
             ProjectBoardNotice: null,
             Source: new SourceHealth("unavailable", now, reason));
     }
 
-    private async Task<(bool Available, string? Notice, Dictionary<int, string> Statuses)> TryLoadProjectStatusesAsync(
+    private const string ActiveKanbanGraphQlQuery =
+        "query($owner:String!,$num:Int!){user(login:$owner){projectV2(number:$num){items(first:100,query:\"status:\\\"In progress\\\",\\\"In review\\\",Ready\"){nodes{fieldValues(first:12){nodes{... on ProjectV2ItemFieldSingleSelectValue{name field{... on ProjectV2SingleSelectField{name}}}... on ProjectV2ItemFieldTextValue{text field{... on ProjectV2Field{name}}}}}content{__typename ... on Issue{number title url state updatedAt}... on PullRequest{number title url state isDraft updatedAt}}}}}}}";
+
+    private sealed record RawKanbanIssue(
+        int Number,
+        string Title,
+        string Url,
+        string GitHubState,
+        string KanbanStatus,
+        string? Priority,
+        string? Area,
+        string? IssueType,
+        string? RiskClass,
+        string? Writer,
+        IReadOnlyList<string> LockedAreas,
+        DateTimeOffset UpdatedAtUtc);
+
+    private async Task<(
+        bool Available,
+        string? Notice,
+        Dictionary<int, string> PrStatuses,
+        List<RawKanbanIssue> RawIssues)> TryLoadActiveKanbanBoardAsync(
         DashboardOptions options,
         CancellationToken cancellationToken)
     {
-        var statuses = new Dictionary<int, string>();
+        var prStatuses = new Dictionary<int, string>();
+        var rawIssues = new List<RawKanbanIssue>();
+
         if (options.GitHubProjectNumber <= 0 || string.IsNullOrWhiteSpace(options.GitHubProjectOwner))
         {
-            return (false, "No GitHub project configured.", statuses);
+            return (false, "No GitHub project configured.", prStatuses, rawIssues);
         }
 
         var projectResult = await _commandRunner.RunAsync(
             "gh",
             [
-                "project", "item-list",
-                options.GitHubProjectNumber.ToString(),
-                "--owner", options.GitHubProjectOwner,
-                "--limit", "40",
-                "--format", "json"
+                "api", "graphql",
+                "-f", $"owner={options.GitHubProjectOwner}",
+                "-F", $"num={options.GitHubProjectNumber}",
+                "-f", $"query={ActiveKanbanGraphQlQuery}"
             ],
             workingDirectory: null,
-            timeout: TimeSpan.FromSeconds(8),
+            timeout: TimeSpan.FromSeconds(12),
             cancellationToken).ConfigureAwait(false);
 
-        if (!projectResult.Succeeded)
+        if (!projectResult.Succeeded || string.IsNullOrWhiteSpace(projectResult.StdOut))
         {
             return (
                 false,
                 "Project board data hidden: missing read:project scope or Kanban CLI unreachable.",
-                statuses);
+                prStatuses,
+                rawIssues);
         }
 
         try
         {
             using var doc = JsonDocument.Parse(projectResult.StdOut);
-            if (doc.RootElement.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
+            var root = doc.RootElement;
+            if (root.TryGetProperty("errors", out var errorsEl) &&
+                errorsEl.ValueKind == JsonValueKind.Array &&
+                errorsEl.GetArrayLength() > 0)
             {
-                foreach (var item in items.EnumerateArray())
-                {
-                    if (!item.TryGetProperty("content", out var content) ||
-                        content.ValueKind != JsonValueKind.Object ||
-                        !content.TryGetProperty("number", out var numberProp) ||
-                        !numberProp.TryGetInt32(out var prNumber))
-                    {
-                        continue;
-                    }
-
-                    if (item.TryGetProperty("status", out var statusProp) && statusProp.ValueKind == JsonValueKind.String)
-                    {
-                        var status = statusProp.GetString();
-                        if (!string.IsNullOrWhiteSpace(status))
-                        {
-                            statuses[prNumber] = status;
-                        }
-                    }
-                }
+                return (
+                    false,
+                    "Project board data hidden: missing read:project scope or Kanban CLI unreachable.",
+                    prStatuses,
+                    rawIssues);
             }
 
-            return (true, null, statuses);
+            if (!root.TryGetProperty("data", out var dataEl) ||
+                dataEl.ValueKind != JsonValueKind.Object ||
+                !dataEl.TryGetProperty("user", out var userEl) ||
+                userEl.ValueKind != JsonValueKind.Object ||
+                !userEl.TryGetProperty("projectV2", out var projectEl) ||
+                projectEl.ValueKind != JsonValueKind.Object ||
+                !projectEl.TryGetProperty("items", out var itemsEl) ||
+                itemsEl.ValueKind != JsonValueKind.Object ||
+                !itemsEl.TryGetProperty("nodes", out var nodesEl) ||
+                nodesEl.ValueKind != JsonValueKind.Array)
+            {
+                return (
+                    false,
+                    "Unable to parse GitHub project data.",
+                    prStatuses,
+                    rawIssues);
+            }
+
+            foreach (var node in nodesEl.EnumerateArray())
+            {
+                if (node.ValueKind != JsonValueKind.Object ||
+                    !node.TryGetProperty("content", out var contentEl) ||
+                    contentEl.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                if (!contentEl.TryGetProperty("number", out var numProp) ||
+                    !numProp.TryGetInt32(out var number))
+                {
+                    continue;
+                }
+
+                var fields = ReadKanbanFields(node);
+                var status = fields.GetValueOrDefault("Status");
+                var typeName = GetString(contentEl, "__typename");
+
+                if (string.Equals(typeName, "PullRequest", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!string.IsNullOrWhiteSpace(status))
+                    {
+                        prStatuses[number] = status;
+                    }
+
+                    continue;
+                }
+
+                if (!string.Equals(typeName, "Issue", StringComparison.OrdinalIgnoreCase) ||
+                    string.IsNullOrWhiteSpace(status))
+                {
+                    continue;
+                }
+
+                if (!IsActiveKanbanColumn(status))
+                {
+                    continue;
+                }
+
+                var title = GetString(contentEl, "title")?.Trim() ?? $"Issue #{number}";
+                var url = GetString(contentEl, "url") ??
+                          $"https://github.com/{options.GitHubRepository}/issues/{number}";
+                var gitHubState = (GetString(contentEl, "state") ?? "OPEN").Trim().ToUpperInvariant();
+                var updatedAt = ParseDateTimeOffset(contentEl, "updatedAt") ?? DateTimeOffset.UtcNow;
+
+                var riskRaw = fields.GetValueOrDefault("Risk class");
+                var riskClass = NormalizeKanbanRiskClass(riskRaw);
+
+                var lockedRaw = fields.GetValueOrDefault("Locked areas");
+                var lockedAreas = string.IsNullOrWhiteSpace(lockedRaw)
+                    ? (IReadOnlyList<string>)[]
+                    : lockedRaw
+                        .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Select(s => s.Trim('`', '*', ' '))
+                        .Where(s => !string.IsNullOrWhiteSpace(s))
+                        .ToList();
+
+                rawIssues.Add(new RawKanbanIssue(
+                    Number: number,
+                    Title: title,
+                    Url: url,
+                    GitHubState: gitHubState,
+                    KanbanStatus: status,
+                    Priority: fields.GetValueOrDefault("Priority"),
+                    Area: fields.GetValueOrDefault("Area"),
+                    IssueType: fields.GetValueOrDefault("Type"),
+                    RiskClass: riskClass,
+                    Writer: fields.GetValueOrDefault("Writer"),
+                    LockedAreas: lockedAreas,
+                    UpdatedAtUtc: updatedAt));
+            }
+
+            return (true, null, prStatuses, rawIssues);
         }
         catch (JsonException)
         {
-            return (false, "Unable to parse GitHub project data.", statuses);
+            return (false, "Unable to parse GitHub project data.", prStatuses, rawIssues);
         }
+    }
+
+    private static Dictionary<string, string> ReadKanbanFields(JsonElement itemNode)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!itemNode.TryGetProperty("fieldValues", out var fieldValuesEl) ||
+            fieldValuesEl.ValueKind != JsonValueKind.Object ||
+            !fieldValuesEl.TryGetProperty("nodes", out var nodesEl) ||
+            nodesEl.ValueKind != JsonValueKind.Array)
+        {
+            return map;
+        }
+
+        foreach (var fv in nodesEl.EnumerateArray())
+        {
+            if (fv.ValueKind != JsonValueKind.Object ||
+                !fv.TryGetProperty("field", out var fieldEl) ||
+                fieldEl.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var fieldName = GetString(fieldEl, "name");
+            var value = GetString(fv, "name") ?? GetString(fv, "text");
+            if (!string.IsNullOrWhiteSpace(fieldName) && !string.IsNullOrWhiteSpace(value))
+            {
+                map[fieldName.Trim()] = value.Trim();
+            }
+        }
+
+        return map;
+    }
+
+    private static bool IsActiveKanbanColumn(string status) =>
+        string.Equals(status, "In progress", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "In review", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase);
+
+    private static string? NormalizeKanbanRiskClass(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var trimmed = raw.Trim().ToUpperInvariant();
+        if (trimmed is "H" or "M" or "L")
+        {
+            return trimmed;
+        }
+
+        if (trimmed.StartsWith("HIGH", StringComparison.Ordinal))
+        {
+            return "H";
+        }
+
+        if (trimmed.StartsWith("MEDIUM", StringComparison.Ordinal))
+        {
+            return "M";
+        }
+
+        if (trimmed.StartsWith("LOW", StringComparison.Ordinal))
+        {
+            return "L";
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<ActiveIssueInfo> BuildActiveIssues(
+        IReadOnlyList<RawKanbanIssue> kanbanIssues,
+        IReadOnlyList<PullRequestInfo> openPullRequests,
+        IReadOnlyList<PullRequestInfo> recentlyMerged,
+        DateTimeOffset now)
+    {
+        var results = new List<(bool HasOpenPr, ActiveIssueInfo Info)>();
+        var seenNumbers = new HashSet<int>();
+
+        foreach (var issue in kanbanIssues)
+        {
+            if (!seenNumbers.Add(issue.Number))
+            {
+                continue;
+            }
+
+            var linkedOpenPrs = openPullRequests
+                .Where(p => p.LinkedIssues.Any(li => li.Number == issue.Number))
+                .OrderByDescending(p => p.Number)
+                .ToList();
+
+            var linkedMergedPrs = recentlyMerged
+                .Where(p => p.LinkedIssues.Any(li => li.Number == issue.Number))
+                .OrderByDescending(p => p.Number)
+                .ToList();
+
+            var linkedPullRequests = BuildLinkedPrRefs(linkedOpenPrs, linkedMergedPrs);
+            var participants = MergeParticipants(linkedOpenPrs.Count > 0 ? linkedOpenPrs : linkedMergedPrs);
+
+            var riskClass = issue.RiskClass ??
+                            linkedOpenPrs
+                                .Select(p => p.RiskClass)
+                                .FirstOrDefault(r => r is "H" or "M" or "L");
+
+            var writer = !string.IsNullOrWhiteSpace(issue.Writer)
+                ? issue.Writer
+                : linkedOpenPrs
+                    .SelectMany(p => p.Participants)
+                    .FirstOrDefault(pt => string.Equals(pt.Role, "Writer", StringComparison.OrdinalIgnoreCase))
+                    ?.Agent;
+
+            var lockedAreas = issue.LockedAreas.Count > 0
+                ? issue.LockedAreas
+                : linkedOpenPrs
+                    .SelectMany(p => p.LockedAreas)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+            var driftReason = ComputeBoardDriftReason(
+                issue.GitHubState,
+                issue.KanbanStatus,
+                hasOpenPr: linkedOpenPrs.Count > 0,
+                effectiveWriter: writer,
+                effectiveRiskClass: riskClass,
+                updatedAtUtc: issue.UpdatedAtUtc,
+                now: now);
+
+            results.Add((linkedOpenPrs.Count > 0, new ActiveIssueInfo(
+                Number: issue.Number,
+                Title: issue.Title,
+                Url: issue.Url,
+                GitHubState: issue.GitHubState,
+                KanbanStatus: issue.KanbanStatus,
+                Priority: issue.Priority,
+                Area: issue.Area,
+                IssueType: issue.IssueType,
+                RiskClass: riskClass,
+                Writer: writer,
+                LockedAreas: lockedAreas,
+                UpdatedAtUtc: issue.UpdatedAtUtc,
+                LinkedPullRequests: linkedPullRequests,
+                Participants: participants,
+                BoardDriftReason: driftReason)));
+        }
+
+        // Supplement any OPEN issue referenced on an open PR that wasn't returned from Kanban
+        // (e.g., when read:project scope is missing or issue is still in Planned on Kanban).
+        var prReferencedIssues = openPullRequests
+            .SelectMany(p => p.LinkedIssues)
+            .Where(li => li.Number > 0 && !string.Equals(li.State, "CLOSED", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(li => li.Number)
+            .Select(g => g.First());
+
+        foreach (var li in prReferencedIssues)
+        {
+            if (!seenNumbers.Add(li.Number))
+            {
+                continue;
+            }
+
+            var linkedOpenPrs = openPullRequests
+                .Where(p => p.LinkedIssues.Any(x => x.Number == li.Number))
+                .OrderByDescending(p => p.Number)
+                .ToList();
+
+            var linkedMergedPrs = recentlyMerged
+                .Where(p => p.LinkedIssues.Any(x => x.Number == li.Number))
+                .OrderByDescending(p => p.Number)
+                .ToList();
+
+            var riskClass = linkedOpenPrs
+                .Select(p => p.RiskClass)
+                .FirstOrDefault(r => r is "H" or "M" or "L");
+
+            var writer = linkedOpenPrs
+                .SelectMany(p => p.Participants)
+                .FirstOrDefault(pt => string.Equals(pt.Role, "Writer", StringComparison.OrdinalIgnoreCase))
+                ?.Agent;
+
+            var lockedAreas = linkedOpenPrs
+                .SelectMany(p => p.LockedAreas)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            results.Add((true, new ActiveIssueInfo(
+                Number: li.Number,
+                Title: !string.IsNullOrWhiteSpace(li.Title) ? li.Title! : $"Issue #{li.Number}",
+                Url: li.Url,
+                GitHubState: li.State ?? "OPEN",
+                KanbanStatus: "Via Open PR",
+                Priority: null,
+                Area: null,
+                IssueType: null,
+                RiskClass: riskClass,
+                Writer: writer,
+                LockedAreas: lockedAreas,
+                UpdatedAtUtc: linkedOpenPrs.Max(p => p.UpdatedAtUtc),
+                LinkedPullRequests: BuildLinkedPrRefs(linkedOpenPrs, linkedMergedPrs),
+                Participants: MergeParticipants(linkedOpenPrs),
+                BoardDriftReason: null)));
+        }
+
+        return results
+            .OrderBy(item => item.Info.BoardDriftReason is null ? 0 : 1)
+            .ThenBy(item => item.Info.BoardDriftReason is null
+                ? (item.HasOpenPr ? 0 : 1)
+                : (string.Equals(item.Info.GitHubState, "CLOSED", StringComparison.OrdinalIgnoreCase) ? 1 : 0))
+            .ThenBy(item => KanbanStatusRank(item.Info.KanbanStatus))
+            .ThenByDescending(item => item.Info.UpdatedAtUtc)
+            .Select(item => item.Info)
+            .ToList();
+    }
+
+    private static List<LinkedPullRequestRef> BuildLinkedPrRefs(
+        List<PullRequestInfo> openPrs,
+        List<PullRequestInfo> mergedPrs)
+    {
+        var refs = new List<LinkedPullRequestRef>();
+        var seen = new HashSet<int>();
+
+        foreach (var pr in openPrs)
+        {
+            if (seen.Add(pr.Number))
+            {
+                refs.Add(new LinkedPullRequestRef(pr.Number, pr.Title, pr.Url, pr.StateLabel, IsMerged: false));
+            }
+        }
+
+        foreach (var pr in mergedPrs)
+        {
+            if (seen.Add(pr.Number))
+            {
+                refs.Add(new LinkedPullRequestRef(pr.Number, pr.Title, pr.Url, pr.StateLabel, IsMerged: true));
+            }
+        }
+
+        return refs;
+    }
+
+    private static List<TaskParticipantInfo> MergeParticipants(IReadOnlyList<PullRequestInfo> prs)
+    {
+        return prs
+            .SelectMany(p => p.Participants)
+            .GroupBy(pt => (pt.Role, pt.Tool, pt.Profile))
+            .Select(g => g.First())
+            .ToList();
+    }
+
+    private static string? ComputeBoardDriftReason(
+        string gitHubState,
+        string kanbanStatus,
+        bool hasOpenPr,
+        string? effectiveWriter,
+        string? effectiveRiskClass,
+        DateTimeOffset updatedAtUtc,
+        DateTimeOffset now)
+    {
+        if (string.Equals(gitHubState, "CLOSED", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Closed on GitHub — move to Done on Kanban";
+        }
+
+        if ((string.Equals(kanbanStatus, "In progress", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(kanbanStatus, "In review", StringComparison.OrdinalIgnoreCase)) &&
+            !hasOpenPr &&
+            string.IsNullOrWhiteSpace(effectiveWriter) &&
+            string.IsNullOrWhiteSpace(effectiveRiskClass) &&
+            (now - updatedAtUtc) >= TimeSpan.FromHours(48))
+        {
+            return "No active PR or Writer (stale on board)";
+        }
+
+        return null;
+    }
+
+    private static int KanbanStatusRank(string status)
+    {
+        if (string.Equals(status, "In review", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        if (string.Equals(status, "In progress", StringComparison.OrdinalIgnoreCase))
+        {
+            return 1;
+        }
+
+        if (string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase))
+        {
+            return 2;
+        }
+
+        return 3;
     }
 
     private async Task<Dictionary<int, LinkedIssueInfo>> TryLoadIssuesAsync(
