@@ -170,6 +170,21 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
     maxWidth: '100%'
   },
+  monoPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '5px',
+    padding: '2px 8px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: '17px',
+    color: tokens.colorNeutralForeground1,
+    maxWidth: '100%',
+    whiteSpace: 'normal',
+    wordBreak: 'break-word'
+  },
   emptyState: {
     display: 'flex',
     flexDirection: 'column',
@@ -346,16 +361,10 @@ function PullRequestRow({
       )}
 
       <div className={styles.prMetaRow}>
-        <Badge
-          appearance="outline"
-          color="subtle"
-          shape="rounded"
-          className="mono"
-          icon={<BranchFork16Regular />}
-          title={pr.branch}
-        >
-          {pr.branch}
-        </Badge>
+        <span className={`${styles.monoPill} mono`} title={pr.branch}>
+          <BranchFork16Regular style={{ flexShrink: 0 }} aria-hidden="true" />
+          <span>{pr.branch}</span>
+        </span>
 
         {!isMerged && (
           <>
@@ -392,15 +401,20 @@ function PullRequestRow({
             Locked Areas:
           </Text>
           {pr.lockedAreas.map((area) => (
-            <Badge
+            <span
               key={area}
-              appearance="tint"
-              color={pr.riskClass === 'H' ? 'danger' : 'subtle'}
-              shape="rounded"
-              className="mono"
+              className={`${styles.monoPill} mono`}
+              style={
+                pr.riskClass === 'H'
+                  ? {
+                      borderColor: tokens.colorPaletteRedBorderActive,
+                      color: tokens.colorPaletteRedForeground1
+                    }
+                  : undefined
+              }
             >
               {area}
-            </Badge>
+            </span>
           ))}
         </div>
       )}

@@ -97,77 +97,32 @@ public sealed class ConfigDocsProvider
             return "mobadev";
         }
 
-        if (string.Equals(scope, "mobaflow", StringComparison.OrdinalIgnoreCase))
-        {
-            return "mobaflow";
-        }
-
-        throw new ArgumentException("Unsupported config docs scope. Expected 'mobadev' or 'mobaflow'.", nameof(scope));
+        throw new ArgumentException("Unsupported config docs scope. Expected 'mobadev'.", nameof(scope));
     }
 
     private static (string Repository, string RepoRoot, List<CatalogEntry> Entries) DiscoverAllowListedFiles(
         ResolvedDashboardPaths paths,
         string scope)
     {
-        if (scope == "mobadev")
+        var repo = "ahuelsmann/MOBAdev";
+        var root = paths.MobaDevRepoPath;
+        var entries = new List<CatalogEntry>();
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
         {
-            var repo = "ahuelsmann/MOBAdev";
-            var root = paths.MobaDevRepoPath;
-            var entries = new List<CatalogEntry>();
-            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
-            {
-                return (repo, root, entries);
-            }
-
-            AddSingleIfAllowed(entries, scope, repo, root, "manifest.md", "Core");
-            AddSingleIfAllowed(entries, scope, repo, root, "README.md", "Core");
-            AddSingleIfAllowed(entries, scope, repo, root, "CHANGELOG.md", "Core");
-            AddDirectoryMarkdown(entries, scope, repo, root, Path.Combine("agents", "antigravity", "agents"), "Antigravity Agents");
-            AddDirectoryMarkdown(entries, scope, repo, root, Path.Combine("agents", "antigravity", "rules"), "Antigravity Rules");
-            AddDirectoryMarkdown(entries, scope, repo, root, Path.Combine("agents", "claude", "agents"), "Claude Agents");
-            AddSkillsMarkdown(entries, scope, repo, root);
-            AddDirectoryMarkdown(entries, scope, repo, root, "docs", "Docs");
-            AddSingleIfAllowed(entries, scope, repo, root, "dashboard/DESIGN.md", "Dashboard");
-
             return (repo, root, entries);
         }
-        else
-        {
-            var repo = "ahuelsmann/MOBAflow";
-            var root = paths.MobaFlowRepoPath;
-            var entries = new List<CatalogEntry>();
-            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
-            {
-                return (repo, root, entries);
-            }
 
-            AddSingleIfAllowed(entries, scope, repo, root, "AGENTS.md", "Core Entry Points");
-            AddSingleIfAllowed(entries, scope, repo, root, "CLAUDE.md", "Core Entry Points");
-            AddSingleIfAllowed(entries, scope, repo, root, "docs/AI-DEVELOPMENT.md", "Core Entry Points");
+        AddSingleIfAllowed(entries, scope, repo, root, "manifest.md", "Core");
+        AddSingleIfAllowed(entries, scope, repo, root, "README.md", "Core");
+        AddSingleIfAllowed(entries, scope, repo, root, "CHANGELOG.md", "Core");
+        AddDirectoryMarkdown(entries, scope, repo, root, Path.Combine("agents", "antigravity", "agents"), "Antigravity Agents");
+        AddDirectoryMarkdown(entries, scope, repo, root, Path.Combine("agents", "antigravity", "rules"), "Antigravity Rules");
+        AddDirectoryMarkdown(entries, scope, repo, root, Path.Combine("agents", "claude", "agents"), "Claude Agents");
+        AddSkillsMarkdown(entries, scope, repo, root);
+        AddDirectoryMarkdown(entries, scope, repo, root, "docs", "Docs");
+        AddSingleIfAllowed(entries, scope, repo, root, "dashboard/DESIGN.md", "Dashboard");
 
-            var instructionsDir = Path.Combine(root, ".github", "instructions");
-            if (Directory.Exists(instructionsDir))
-            {
-                var files = Directory
-                    .EnumerateFiles(instructionsDir, "*.md", SearchOption.TopDirectoryOnly)
-                    .OrderByDescending(f => Path.GetFileName(f).Equals("master-coordination.instructions.md", StringComparison.OrdinalIgnoreCase))
-                    .ThenByDescending(f => Path.GetFileName(f).Equals("instructions-index.md", StringComparison.OrdinalIgnoreCase))
-                    .ThenBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase);
-
-                foreach (var file in files)
-                {
-                    var name = Path.GetFileName(file);
-                    if (name.StartsWith('.'))
-                    {
-                        continue;
-                    }
-
-                    TryAddResolvedFile(entries, scope, repo, $".github/instructions/{name}", file, "Repository Instructions");
-                }
-            }
-
-            return (repo, root, entries);
-        }
+        return (repo, root, entries);
     }
 
     private static void AddSingleIfAllowed(

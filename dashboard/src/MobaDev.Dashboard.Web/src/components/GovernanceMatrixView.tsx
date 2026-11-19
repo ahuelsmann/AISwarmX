@@ -165,6 +165,30 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground2,
     border: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  tableCell: {
+    paddingTop: '10px',
+    paddingBottom: '10px',
+    verticalAlign: 'top'
+  },
+  wrapPill: {
+    display: 'inline-block',
+    padding: '3px 8px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: '17px',
+    color: tokens.colorNeutralForeground1,
+    whiteSpace: 'normal',
+    wordBreak: 'break-word',
+    maxWidth: '100%'
+  },
+  riskCellStack: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: '4px'
   }
 });
 
@@ -384,8 +408,8 @@ export function GovernanceMatrixView({
                   return (
                     <Fragment key={key}>
                       <TableRow>
-                        <TableCell>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '4px 0' }}>
+                        <TableCell className={styles.tableCell}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                             <RoleBadge
                               role={agent.kind === 'rule' ? 'rule' : agent.name}
                               label={agent.name}
@@ -402,13 +426,13 @@ export function GovernanceMatrixView({
                             )}
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className={styles.tableCell}>
                           <div>{agent.tool}</div>
                           <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
                             {agent.kind === 'rule' ? 'Rule' : 'Agent'}
                           </Text>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className={styles.tableCell}>
                           {agent.profileHint ? (
                             <GlossaryTooltip term={agent.profileHint}>
                               <ProfileBadge profile={agent.profileHint} isDark={isDark} />
@@ -417,7 +441,7 @@ export function GovernanceMatrixView({
                             '–'
                           )}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className={styles.tableCell}>
                           <div
                             style={{
                               display: 'flex',
@@ -444,7 +468,7 @@ export function GovernanceMatrixView({
                             )}
                           </div>
                         </TableCell>
-                        <TableCell className="mono">
+                        <TableCell className={`${styles.tableCell} mono`}>
                           <div>Actual: {agent.localHash ?? '–'}</div>
                           <div>Target: {agent.repoHash ?? '–'}</div>
                         </TableCell>
@@ -495,18 +519,18 @@ export function GovernanceMatrixView({
             <TableBody>
               {governance.profiles.map((p) => (
                 <TableRow key={p.profile}>
-                  <TableCell>
+                  <TableCell className={styles.tableCell}>
                     <GlossaryTooltip term={p.profile} showIcon>
                       <ProfileBadge profile={p.profile} isDark={isDark} />
                     </GlossaryTooltip>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className={styles.tableCell}>
                     <Text weight="semibold">{p.name}</Text>
                   </TableCell>
-                  <TableCell>
-                    <ModelBadge model={p.models} isDark={isDark} mono />
+                  <TableCell className={styles.tableCell}>
+                    <ModelBadge model={p.models} isDark={isDark} mono wrap />
                   </TableCell>
-                  <TableCell>{p.strengths}</TableCell>
+                  <TableCell className={styles.tableCell}>{p.strengths}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -533,15 +557,13 @@ export function GovernanceMatrixView({
               <TableBody>
                 {filteredRoles.map((role) => (
                   <TableRow key={role.role}>
-                    <TableCell>
+                    <TableCell className={styles.tableCell}>
                       <RoleBadge role={role.role} isDark={isDark} compact />
                     </TableCell>
-                    <TableCell>
-                      <Badge appearance="tint" color="subtle" shape="rounded">
-                        {role.profiles}
-                      </Badge>
+                    <TableCell className={styles.tableCell}>
+                      <span className={styles.wrapPill}>{role.profiles}</span>
                     </TableCell>
-                    <TableCell>{role.responsibility}</TableCell>
+                    <TableCell className={styles.tableCell}>{role.responsibility}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -567,25 +589,30 @@ export function GovernanceMatrixView({
                 <TableBody>
                   {filteredRiskClasses.map((rc) => (
                     <TableRow key={rc.code}>
-                      <TableCell>
-                        <GlossaryTooltip term={rc.code} showIcon>
-                          <Badge
-                            appearance="outline"
-                            color={
-                              rc.code === 'H'
-                                ? 'danger'
-                                : rc.code === 'M'
-                                  ? 'warning'
-                                  : 'success'
-                            }
-                            shape="rounded"
-                          >
-                            {rc.code} · {rc.name}
-                          </Badge>
-                        </GlossaryTooltip>
+                      <TableCell className={styles.tableCell}>
+                        <div className={styles.riskCellStack}>
+                          <GlossaryTooltip term={rc.code} showIcon>
+                            <Badge
+                              appearance="outline"
+                              color={
+                                rc.code === 'H'
+                                  ? 'danger'
+                                  : rc.code === 'M'
+                                    ? 'warning'
+                                    : 'success'
+                              }
+                              shape="rounded"
+                            >
+                              Class {rc.code}
+                            </Badge>
+                          </GlossaryTooltip>
+                          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                            {rc.name}
+                          </Text>
+                        </div>
                       </TableCell>
-                      <TableCell>{rc.areas}</TableCell>
-                      <TableCell>{rc.requiredDiversity}</TableCell>
+                      <TableCell className={styles.tableCell}>{rc.areas}</TableCell>
+                      <TableCell className={styles.tableCell}>{rc.requiredDiversity}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -609,9 +636,7 @@ export function GovernanceMatrixView({
                       {skill.description}
                     </Text>
                   </div>
-                  <Badge appearance="outline" color="subtle" shape="rounded" className="mono">
-                    {skill.relativePath}
-                  </Badge>
+                  <span className={`${styles.wrapPill} mono`}>{skill.relativePath}</span>
                 </div>
               ))}
             </div>
@@ -637,22 +662,18 @@ export function GovernanceMatrixView({
                 appearance="subtle"
                 icon={<ArrowRight16Regular />}
                 iconPosition="after"
-                onClick={() =>
-                  onOpenDoc('mobaflow', '.github/instructions/master-coordination.instructions.md')
-                }
+                onClick={() => onOpenDoc('mobadev', 'manifest.md')}
               >
-                Master Coordination
+                Manifest
               </Button>
               <Button
                 size="small"
                 appearance="subtle"
                 icon={<ArrowRight16Regular />}
                 iconPosition="after"
-                onClick={() =>
-                  onOpenDoc('mobaflow', '.github/instructions/git-worktree-isolation.instructions.md')
-                }
+                onClick={() => onOpenDoc('mobadev', 'docs/delivery-workflow.md')}
               >
-                Worktree Rules
+                Delivery Workflow
               </Button>
             </div>
           )}

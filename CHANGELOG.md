@@ -4,7 +4,16 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.2.0] - 2026-11-19
+## [1.2.1] - 2026-11-19
+
+### Changed & Removed
+- **Simplified Header & `MOBAdev`-Only Docs (`StatusHeader.tsx`, `ConfigDocsProvider.cs`, `GovernanceMatrixView.tsx`):** Removed the `MOBAflow Instructions` tab and backend `mobaflow` scope to keep the cockpit focused on `MOBAdev` configuration files; shortened the third header tab title to `Config` and repointed `Git & Delivery Strategy` quick links to `Manifest` (`manifest.md`) and `Delivery Workflow` (`docs/delivery-workflow.md`).
+
+### Fixed
+- **Cross-View Badge & Border Clipping (`base.css`, `HygieneAndSyncPanel.tsx`, `PipelineCard.tsx`, `ConfigDocsView.tsx`, `GovernanceMatrixView.tsx`, `RoleAndModelIcons.tsx`):** Added `.fui-Badge { flex-shrink: 0; white-space: nowrap; }`, flex truncation (`flex: 1 1 0; min-width: 0; overflow: hidden`) on Worktree/Session rows so `Stale / Merged` never wraps or clips, plus wrapping container pills (`wrapPill`, `monoPill`, `pathPill`, `riskCellStack`, `ModelBadge` `wrap`) and top-aligned `10px` table cell spacing across `Matrix & Rules`.
+- **Markdown Link Cleanup in Governance Tables (`GovernanceProvider.cs`):** Stripped Markdown links (`[label](target)`) down to plain readable link text when extracting role responsibilities and matrix descriptions.
+
+## [1.2.0] - 2026-11-19 (PR #12)
 
 ### Added
 - **Dashboard Title & Warning Breakdown Popover:** Rebranded the read-only cockpit to **MOBAdev Agent Swarm Gen#3** and added an interactive Fluent `Popover` on the header warnings badge breaking down rules drift, stale worktrees, extra sessions, and quota pauses with 1-click jump links.

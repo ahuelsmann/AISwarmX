@@ -729,11 +729,15 @@ public sealed partial class GovernanceProvider
 
     private static string CleanMarkdown(string value)
     {
-        return value
+        var withoutLinks = MarkdownLinkRegex().Replace(value, "$1");
+        return withoutLinks
             .Replace("**", string.Empty, StringComparison.Ordinal)
             .Replace("`", string.Empty, StringComparison.Ordinal)
             .Trim();
     }
+
+    [GeneratedRegex(@"\[([^\]]+)\]\([^)]+\)")]
+    private static partial Regex MarkdownLinkRegex();
 
     [GeneratedRegex(@"\b(P[1-4])\b", RegexOptions.IgnoreCase)]
     private static partial Regex ProfileRegex();

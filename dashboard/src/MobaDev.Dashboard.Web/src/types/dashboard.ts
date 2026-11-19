@@ -99,7 +99,7 @@ export interface RuleDiffResponse {
   lines: DiffLineInfo[];
 }
 
-export type ConfigDocsScope = 'mobadev' | 'mobaflow';
+export type ConfigDocsScope = 'mobadev';
 
 export interface ConfigDocItem {
   scope: ConfigDocsScope | string;
@@ -226,4 +226,4 @@ export interface DashboardSnapshot {
 }
 
 export type ThemePreference = 'system' | 'light' | 'dark';
-export type DashboardTab = 'live' | 'matrix' | 'mobadev-docs' | 'mobaflow-docs';
+export type DashboardTab = 'live' | 'matrix' | 'mobadev-docs';

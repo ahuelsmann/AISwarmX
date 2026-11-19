@@ -41,7 +41,7 @@ public sealed class GovernanceProviderTests
 
             | Role | Primary profile(s) | Responsibility |
             | --- | --- | --- |
-            | Chief Operating Officer (COO) | `P1` (Claude) | Overall operational lead |
+            | Chief Operating Officer (COO) | `P1` (Claude) | Overall operational lead on the [board](#board-locks-and-wip-limit) |
             | Technical Director (TD) | `P2` (Codex) | Backlog and build graph |
 
             ## Risk classes and domain matrix
@@ -108,6 +108,10 @@ public sealed class GovernanceProviderTests
         Assert.Equal(4, result.Profiles.Count);
         Assert.Equal("P1", result.Profiles[0].Profile);
         Assert.Equal(2, result.Roles.Count);
+        var cooRole = Assert.Single(result.Roles, r => r.Role.Contains("COO", StringComparison.Ordinal));
+        Assert.Contains("board", cooRole.Responsibility);
+        Assert.DoesNotContain("#board-locks-and-wip-limit", cooRole.Responsibility);
+        Assert.DoesNotContain("[board]", cooRole.Responsibility);
         Assert.Equal(3, result.RiskClasses.Count);
 
         Assert.Equal(1, result.SyncedCount);

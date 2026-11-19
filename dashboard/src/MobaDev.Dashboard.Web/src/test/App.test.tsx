@@ -328,32 +328,14 @@ function stubDashboardFetch(snapshot = createSnapshotFixture()) {
         repository: 'ahuelsmann/MOBAdev',
         sizeBytes: 120,
         lastModifiedUtc: nowIso
-      }
-    ]
-  };
-
-  const mobaFlowCatalog: ConfigDocsCatalogResponse = {
-    generatedAtUtc: nowIso,
-    scope: 'mobaflow',
-    repository: 'ahuelsmann/MOBAflow',
-    source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
-    files: [
-      {
-        scope: 'mobaflow',
-        relativePath: 'AGENTS.md',
-        fileName: 'AGENTS.md',
-        group: 'Core Entry Points',
-        repository: 'ahuelsmann/MOBAflow',
-        sizeBytes: 240,
-        lastModifiedUtc: nowIso
       },
       {
-        scope: 'mobaflow',
-        relativePath: '.github/instructions/git-worktree-isolation.instructions.md',
-        fileName: 'git-worktree-isolation.instructions.md',
-        group: 'Repository Instructions',
-        repository: 'ahuelsmann/MOBAflow',
-        sizeBytes: 310,
+        scope: 'mobadev',
+        relativePath: 'docs/delivery-workflow.md',
+        fileName: 'delivery-workflow.md',
+        group: 'Docs',
+        repository: 'ahuelsmann/MOBAdev',
+        sizeBytes: 240,
         lastModifiedUtc: nowIso
       }
     ]
@@ -372,29 +354,17 @@ function stubDashboardFetch(snapshot = createSnapshotFixture()) {
       truncated: false,
       content: '# MOBAdev Manifest\n\nCentral configuration baseline for `MOBAdev`.'
     },
-    'mobaflow::AGENTS.md': {
-      scope: 'mobaflow',
-      relativePath: 'AGENTS.md',
-      fileName: 'AGENTS.md',
-      group: 'Core Entry Points',
-      repository: 'ahuelsmann/MOBAflow',
+    'mobadev::docs/delivery-workflow.md': {
+      scope: 'mobadev',
+      relativePath: 'docs/delivery-workflow.md',
+      fileName: 'delivery-workflow.md',
+      group: 'Docs',
+      repository: 'ahuelsmann/MOBAdev',
       sizeBytes: 240,
       lineCount: 3,
       lastModifiedUtc: nowIso,
       truncated: false,
-      content: '# AGENTS\n\nMerge, never rebase.'
-    },
-    'mobaflow::.github/instructions/git-worktree-isolation.instructions.md': {
-      scope: 'mobaflow',
-      relativePath: '.github/instructions/git-worktree-isolation.instructions.md',
-      fileName: 'git-worktree-isolation.instructions.md',
-      group: 'Repository Instructions',
-      repository: 'ahuelsmann/MOBAflow',
-      sizeBytes: 310,
-      lineCount: 3,
-      lastModifiedUtc: nowIso,
-      truncated: false,
-      content: '# Worktree Isolation\n\nOne dedicated worktree per active slice.'
+      content: '# Delivery Workflow\n\nSmall batches on main with merge, never rebase.'
     }
   };
 
@@ -418,11 +388,9 @@ function stubDashboardFetch(snapshot = createSnapshotFixture()) {
       }
 
       if (url.startsWith('/api/docs')) {
-        const params = new URLSearchParams(url.split('?')[1] ?? '');
-        const scope = params.get('scope');
         return {
           ok: true,
-          json: async () => (scope === 'mobaflow' ? mobaFlowCatalog : mobaDevCatalog)
+          json: async () => mobaDevCatalog
         };
       }
 
@@ -526,14 +494,15 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(screen.getByText('Line Old')).toBeInTheDocument();
     expect(screen.getByText('Line New')).toBeInTheDocument();
 
-    // Verify Git & Delivery Strategy reference card & jump to MOBAflow Instructions tab
+    // Verify Git & Delivery Strategy reference card & jump to Config tab
+    expect(screen.queryByRole('tab', { name: /MOBAflow Instructions/i })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /Git & Delivery Strategy/i })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Worktree Rules' }));
+    await user.click(screen.getByRole('button', { name: 'Delivery Workflow' }));
 
     expect(
-      await screen.findByRole('heading', { name: 'Worktree Isolation' })
+      await screen.findByRole('heading', { name: 'Delivery Workflow' })
     ).toBeInTheDocument();
-    expect(screen.getByText('One dedicated worktree per active slice.')).toBeInTheDocument();
+    expect(screen.getByText('Small batches on main with merge, never rebase.')).toBeInTheDocument();
 
     // Theme switching
     await user.click(screen.getByRole('button', { name: 'Light' }));
@@ -546,7 +515,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
   );
 
   it(
-    'renders read-only MOBAdev Config Markdown tab with Formatted and Raw views',
+    'renders read-only Config Markdown tab with Formatted and Raw views',
     async () => {
     const user = userEvent.setup();
     stubDashboardFetch();
@@ -554,7 +523,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     render(<App />);
     await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
 
-    await user.click(screen.getByRole('tab', { name: /MOBAdev Config/i }));
+    await user.click(screen.getByRole('tab', { name: 'Config' }));
     expect(await screen.findByRole('heading', { name: 'MOBAdev Manifest' })).toBeInTheDocument();
     expect(screen.getByText(/Central configuration baseline for/)).toBeInTheDocument();
 

@@ -196,10 +196,11 @@ export function RoleBadge({ role, isDark, label, compact = false }: RoleBadgePro
       <span
         style={{
           display: 'inline-flex',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           gap: 6,
           fontSize: tokens.fontSizeBase200,
           fontWeight: tokens.fontWeightSemibold,
+          lineHeight: '20px',
           color: tokens.colorNeutralForeground1
         }}
       >
@@ -252,9 +253,16 @@ interface ModelBadgeProps {
   isDark: boolean;
   toolPrefix?: string | null;
   mono?: boolean;
+  wrap?: boolean;
 }
 
-export function ModelBadge({ model, isDark, toolPrefix, mono = true }: ModelBadgeProps) {
+export function ModelBadge({
+  model,
+  isDark,
+  toolPrefix,
+  mono = true,
+  wrap = false
+}: ModelBadgeProps) {
   const displayModel = model && model.trim().length > 0 ? model : 'not detected';
   const visual = resolveModelVisual(displayModel);
   const styles = getToneStyles(visual.tone, isDark);
@@ -264,15 +272,16 @@ export function ModelBadge({ model, isDark, toolPrefix, mono = true }: ModelBadg
       className={mono ? 'mono' : undefined}
       style={{
         display: 'inline-flex',
-        alignItems: 'center',
+        alignItems: wrap ? 'flex-start' : 'center',
         gap: 6,
-        padding: '3px 8px',
+        padding: wrap ? '4px 8px' : '3px 8px',
         borderRadius: tokens.borderRadiusMedium,
         backgroundColor: styles.bg,
         border: `1px solid ${styles.border}`,
         color: tokens.colorNeutralForeground1,
         fontSize: tokens.fontSizeBase200,
         fontWeight: tokens.fontWeightMedium,
+        lineHeight: wrap ? '18px' : undefined,
         maxWidth: '100%'
       }}
     >
@@ -283,12 +292,19 @@ export function ModelBadge({ model, isDark, toolPrefix, mono = true }: ModelBadg
           alignItems: 'center',
           color: styles.fg,
           flexShrink: 0,
-          lineHeight: 0
+          lineHeight: 0,
+          marginTop: wrap ? 1 : 0
         }}
       >
         {visual.icon}
       </span>
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <span
+        style={
+          wrap
+            ? { whiteSpace: 'normal', wordBreak: 'break-word' }
+            : { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+        }
+      >
         {toolPrefix ? `${toolPrefix} · ${displayModel}` : displayModel}
       </span>
     </span>
