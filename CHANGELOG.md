@@ -3,23 +3,23 @@
 All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Dashboard** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAdev generations (`Gen#1 = 1.x`, `Gen#2 = 2.x`, `Gen#3 = 3.0.0+`).
+Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
-## [3.1.3] - 2026-11-20
+## [3.5.3] - 2026-11-20 (PR #19)
 
 ### Added
 - **Claude Scheduled Task Template (`docs/claude-ready-intake-task.md`):** Added a ready-to-paste configuration guide and `COO: Kanban Ready Intake` prompt for Claude Desktop *Geplante Aufgaben*, linked from [`docs/ai-strategy-and-pilots.md`](docs/ai-strategy-and-pilots.md) and [`agents/README.md`](agents/README.md).
 
 ---
 
-## [3.1.2] - 2026-11-20 (PR #18)
+## [3.5.2] - 2026-11-20 (PR #18)
 
 ### Added
 - **Kanban `Planned` → `Ready` Maintainer Pull-Trigger & Local Automation Strategy (`manifest.md`, `docs/delivery-workflow.md`, `docs/ai-strategy-and-pilots.md`):** Documented `Planned` → `Ready` as the explicit maintainer pull-trigger with `Claude Monitor` (`COO`) as sole intake owner (`In progress` handoff, WIP/lock/`needs-specification` guardrails, read-only dashboard invariant), alongside local GitHub GraphQL polling options (`Zero-Token` Windows pre-check vs. Claude Scheduled Tasks / `/loop` vs. Codex/Antigravity roles).
 
 ---
 
-## [3.1.1] - 2026-11-20 (PR #17)
+## [3.5.1] - 2026-11-20 (PR #17)
 
 ### Changed
 - **1:1 GitHub Kanban Sync (`PipelineProvider.cs`, `DashboardContracts.cs`, `PipelineCard.tsx`):** Updated the third Task & PR Pipeline toggle to **`Kanban Board (N)`** mirroring GitHub Project #1 (`Ready`, `In progress`, `In review`) 1:1 with both **PRs and Issues**, live column summary counters, direct `Open GitHub Kanban` link, and zero hidden items (board-drift warnings appear inline without filtering items out).
@@ -27,14 +27,14 @@ Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAd
 
 ---
 
-## [3.1.0] - 2026-11-19 (PR #16)
+## [3.5.0] - 2026-11-19 (PR #16)
 
 ### Added
 - **Active Issues Kanban View (`PipelineProvider.cs`, `DashboardContracts.cs`, `PipelineCard.tsx`):** Queries active GitHub Project Kanban columns (`In progress`, `In review`, `Ready`) via a single filtered GraphQL call (`TryLoadActiveKanbanBoardAsync`), enriches issues with PR links/writers/locks/participants, surfaces issues that do not have an open PR yet (`No PR yet`), and isolates `Closed on GitHub` / `Stale / No Writer` board entries into a collapsible **Board Drift** section.
 
 ---
 
-## [3.0.3] - 2026-11-19 (PR #15)
+## [3.4.3] - 2026-11-19 (PR #15)
 
 ### Added
 - **Explicit PR `BLOCKED` / `DIRTY` Reasons (`PipelineProvider.cs`, `PipelineCard.tsx`):** Extracts concrete blocking causes (`Draft PR`, merge conflicts, behind `main`, `REVIEW_REQUIRED` / `CHANGES_REQUESTED`, `BLOCKED` review gates, plus failing/running check names from `statusCheckRollup`) and renders them directly inline under blocked PR rows and in badge tooltips.
@@ -42,7 +42,7 @@ Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAd
 
 ---
 
-## [3.0.2] - 2026-11-19 (PR #14)
+## [3.4.2] - 2026-11-19 (PR #14)
 
 ### Changed
 - **`Configuration` Tab Header (`StatusHeader.tsx`):** Renamed the third header tab from `Config` to `Configuration` and removed the leading document icon.
@@ -50,11 +50,11 @@ Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAd
 
 ---
 
-## [3.0.1] - 2026-11-19 (PR #13)
+## [3.4.1] - 2026-11-19 (PR #13)
 
 ### Changed & Removed
 - **AI Strategy & Monitor Model Update (`docs/ai-strategy-and-pilots.md`, `manifest.md`, `docs/delivery-workflow.md`, `agents/antigravity/agents/head-of-ai-strategy.md`, Dashboard providers/UI):** Defined **`Orchestrator (Neon)`** (`gemini-pro-orchestrator-neon`) as the standing model for `Antigravity Monitor` and updated `Codex Monitor` to **`Sol 6.2`** (`gpt-6.2-sol`).
-- **Generation-Aligned Versioning (`CHANGELOG.md`, `package.json`, `dashboard/DESIGN.md`):** Aligned Semantic Versioning with MOBAdev generations (`Gen#1 = 1.x`, `Gen#2 = 2.x`, `Gen#3 = 3.0.0+`).
+- **Generation-Aligned Versioning (`CHANGELOG.md`, `package.json`, `dashboard/DESIGN.md`):** Aligned `MOBAdev` Semantic Versioning on the Gen#3 `3.x` baseline (`3.0.0+`, with earlier MOBAflow setups predating this repo as Gen#1 and Gen#2).
 - **Simplified Header & `MOBAdev`-Only Docs (`StatusHeader.tsx`, `ConfigDocsProvider.cs`, `GovernanceMatrixView.tsx`):** Removed the `MOBAflow Instructions` tab and backend `mobaflow` scope to keep the cockpit focused on `MOBAdev` configuration files; shortened the third header tab title to `Config` and repointed `Git & Delivery Strategy` quick links to `Manifest` (`manifest.md`) and `Delivery Workflow` (`docs/delivery-workflow.md`).
 
 ### Fixed
@@ -63,7 +63,7 @@ Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAd
 
 ---
 
-## [3.0.0] - 2026-11-19 (PR #12)
+## [3.4.0] - 2026-11-19 (PR #12)
 
 ### Added
 - **Dashboard Title & Warning Breakdown Popover:** Rebranded the read-only cockpit to **MOBAdev Agent Swarm Gen#3** and added an interactive Fluent `Popover` on the header warnings badge breaking down rules drift, stale worktrees, extra sessions, and quota pauses with 1-click jump links.
@@ -82,7 +82,7 @@ Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAd
 
 ---
 
-## [2.3.0] - 2026-11-19 (PR #11)
+## [3.3.0] - 2026-11-19 (PR #11)
 
 ### Added
 - **Fluent UI 2 Adoption:** Migrated the React cockpit to `@fluentui/react-components` and `@fluentui/react-icons` aligned with `MOBAflow`'s WinUI 3 Light/Dark Fluent styling (`#0078D4`).
@@ -95,7 +95,7 @@ Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAd
 
 ---
 
-## [2.2.0] - 2026-11-19 (PR #10)
+## [3.2.1] - 2026-11-19 (PR #10)
 
 ### Added
 - **Per-Task Agent, Role & Model Attribution (`PrParticipantExtractor.cs`):** Added extraction of participating agents, profiles (`P1`–`P4`), models, and statuses per PR across both `Open` and `Recently Merged` views.
@@ -103,7 +103,7 @@ Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAd
 
 ---
 
-## [2.1.0] - 2026-11-19 (PRs #7, #8, #9)
+## [3.2.0] - 2026-11-19 (PRs #7, #8, #9)
 
 ### Added
 - **Dashboard Design Concept (`dashboard/DESIGN.md`):** Co-designed strictly read-only, zero-duplication, loopback-only (`127.0.0.1:5179`) architecture with `Head of UI/UX` (PR #7).
@@ -112,7 +112,7 @@ Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAd
 
 ---
 
-## [2.0.0] - 2026-11-18 (PRs #3, #4, #5, #6)
+## [3.1.0] - 2026-11-18 (PRs #3, #4, #5, #6)
 
 ### Changed
 - **Unified Standing Monitors & Hygiene (PRs #5, #6):** Standardized permanent monitor names (`Claude Monitor`, `Codex Monitor`, `Antigravity Monitor`) and enforced the 1-monitor-per-tool rule across agent definitions and docs.
@@ -121,7 +121,7 @@ Versioning follows [Semantic Versioning](https://semver.org/) aligned with MOBAd
 
 ---
 
-## [1.0.0] - 2026-11-16 (PR #2 & Baseline 2026-11-05)
+## [3.0.0] - 2026-11-16 (PR #2 & Baseline 2026-11-05)
 
 ### Added
 - Initial `MOBAdev` repository structure, MIT license, rebuild runbook, setup inventory, pilot skills (`skills/`), and MOBAflow small-batch delivery workflow documentation (`docs/delivery-workflow.md`).
