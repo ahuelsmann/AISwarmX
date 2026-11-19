@@ -17,6 +17,7 @@ Read the [MOBAflow agent workflow manifesto](manifest.md) for the active team pr
 
 - [Versioned agent and rule backups](agents/README.md) for Antigravity and Claude Code
 - [AI strategy and orchestration pilots](docs/ai-strategy-and-pilots.md) (`Orchestrator (Argon)` pilot & `Gemini 4 Carbon` decision record)
+- [Agent Network Dashboard design concept](dashboard/DESIGN.md) (read-only local ASP.NET Core + React cockpit)
 
 ## Status
 
