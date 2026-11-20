@@ -154,7 +154,7 @@ const useStyles = makeStyles({
   },
   strategyGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
     gap: '10px'
   },
   strategyTile: {
@@ -301,6 +301,55 @@ export function GovernanceMatrixView({
 
   return (
     <div className={styles.stack}>
+      {/* Git & Delivery Strategy Reference */}
+      <Card className={styles.card} appearance="filled" aria-label="Git and Delivery Strategy">
+        <div className={styles.cardHeader}>
+          <div className={styles.titleGroup}>
+            <BranchRequest16Regular aria-hidden="true" />
+            <h2 className={styles.title}>Git &amp; Delivery Strategy</h2>
+            <Badge appearance="tint" color="subtle" shape="rounded">
+              MOBAflow Invariants
+            </Badge>
+          </div>
+
+          {onOpenDoc && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={<ArrowRight16Regular />}
+                iconPosition="after"
+                onClick={() => onOpenDoc('mobadev', 'manifest.md')}
+              >
+                Manifest
+              </Button>
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={<ArrowRight16Regular />}
+                iconPosition="after"
+                onClick={() => onOpenDoc('mobadev', 'docs/delivery-workflow.md')}
+              >
+                Delivery Workflow
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <div className={styles.strategyGrid}>
+          {GIT_STRATEGY_INVARIANTS.map((item) => (
+            <div key={item.title} className={styles.strategyTile}>
+              <Text weight="semibold" size={200}>
+                {item.title}
+              </Text>
+              <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                {item.detail}
+              </Text>
+            </div>
+          ))}
+        </div>
+      </Card>
+
       {driftTotal === 0 ? (
         <MessageBar intent="success">
           <MessageBarBody>
@@ -644,54 +693,6 @@ export function GovernanceMatrixView({
         </div>
       </div>
 
-      {/* Git & Delivery Strategy Reference */}
-      <Card className={styles.card} appearance="filled" aria-label="Git and Delivery Strategy">
-        <div className={styles.cardHeader}>
-          <div className={styles.titleGroup}>
-            <BranchRequest16Regular aria-hidden="true" />
-            <h2 className={styles.title}>Git &amp; Delivery Strategy</h2>
-            <Badge appearance="tint" color="subtle" shape="rounded">
-              MOBAflow Invariants
-            </Badge>
-          </div>
-
-          {onOpenDoc && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              <Button
-                size="small"
-                appearance="subtle"
-                icon={<ArrowRight16Regular />}
-                iconPosition="after"
-                onClick={() => onOpenDoc('mobadev', 'manifest.md')}
-              >
-                Manifest
-              </Button>
-              <Button
-                size="small"
-                appearance="subtle"
-                icon={<ArrowRight16Regular />}
-                iconPosition="after"
-                onClick={() => onOpenDoc('mobadev', 'docs/delivery-workflow.md')}
-              >
-                Delivery Workflow
-              </Button>
-            </div>
-          )}
-        </div>
-
-        <div className={styles.strategyGrid}>
-          {GIT_STRATEGY_INVARIANTS.map((item) => (
-            <div key={item.title} className={styles.strategyTile}>
-              <Text weight="semibold" size={200}>
-                {item.title}
-              </Text>
-              <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-                {item.detail}
-              </Text>
-            </div>
-          ))}
-        </div>
-      </Card>
     </div>
   );
 }

@@ -278,19 +278,19 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
         <div className={styles.filterGroup} role="group" aria-label="Filter pipeline view">
           <ToggleButton
             size="small"
-            appearance={viewMode === 'open' ? 'primary' : 'subtle'}
-            checked={viewMode === 'open'}
-            onClick={() => setViewMode('open')}
-          >
-            <span className="tabular">Open PRs ({pipeline.pullRequests.length})</span>
-          </ToggleButton>
-          <ToggleButton
-            size="small"
             appearance={viewMode === 'issues' ? 'primary' : 'subtle'}
             checked={viewMode === 'issues'}
             onClick={() => setViewMode('issues')}
           >
             <span className="tabular">Kanban Board ({allKanbanItems.length})</span>
+          </ToggleButton>
+          <ToggleButton
+            size="small"
+            appearance={viewMode === 'open' ? 'primary' : 'subtle'}
+            checked={viewMode === 'open'}
+            onClick={() => setViewMode('open')}
+          >
+            <span className="tabular">Open PRs ({pipeline.pullRequests.length})</span>
           </ToggleButton>
           <ToggleButton
             size="small"

@@ -17,6 +17,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
     bindAddress: 'http://127.0.0.1:5179',
     overallStatus: 'warnings',
     warningCount: 7,
+    changelogVersion: '3.5.5',
     monitors: {
       generatedAtUtc: nowIso,
       source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
@@ -512,7 +513,22 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(
       await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' })
     ).toBeInTheDocument();
+    expect(screen.getByText('v3.5.5')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Version v3.5.5 — open CHANGELOG.md' })
+    ).toBeInTheDocument();
     expect(screen.getByText('Read-Only · 127.0.0.1')).toBeInTheDocument();
+
+    const pipelineToggleLabels = within(
+      screen.getByRole('group', { name: 'Filter pipeline view' })
+    )
+      .getAllByRole('button')
+      .map((btn) => btn.textContent?.trim());
+    expect(pipelineToggleLabels).toEqual([
+      'Kanban Board (4)',
+      'Open PRs (1)',
+      'Recently Merged (1)'
+    ]);
 
     // Row 1: Compact monitor cards ordered Codex -> Claude -> Antigravity with human-friendly RRULE label
     const monitorSection = screen.getByRole('region', { name: 'Live Monitor Status' });
@@ -576,6 +592,10 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     // Jump straight from popover to Matrix & Rules pre-filtered to Drift
     const popoverRegion = screen.getByRole('region', { name: 'Warning breakdown' });
     await user.click(within(popoverRegion).getByRole('button', { name: 'Review Drift' }));
+
+    const matrixHeadings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
+    expect(matrixHeadings[0]).toBe('Git & Delivery Strategy');
+    expect(matrixHeadings[1]).toMatch(/Rules State · Actual vs\. Target/i);
 
     expect(
       screen.getByRole('heading', { name: /Rules State · Actual vs\. Target/i })

@@ -221,6 +221,8 @@ export function App() {
           warningCount={snapshot?.warningCount ?? 0}
           warningBreakdown={warningBreakdown}
           onJumpToWarning={handleJumpToWarning}
+          changelogVersion={snapshot?.changelogVersion}
+          onOpenChangelog={() => handleOpenDoc('mobadev', 'CHANGELOG.md')}
           generatedAtUtc={snapshot?.generatedAtUtc}
           nowMs={nowMs}
           refreshing={refreshing}

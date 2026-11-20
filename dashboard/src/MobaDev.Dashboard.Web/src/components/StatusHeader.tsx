@@ -109,6 +109,8 @@ interface StatusHeaderProps {
   warningCount: number;
   warningBreakdown: WarningBreakdown;
   onJumpToWarning: (target: WarningTarget) => void;
+  changelogVersion?: string | null;
+  onOpenChangelog?: () => void;
   generatedAtUtc?: string;
   nowMs: number;
   refreshing: boolean;
@@ -125,6 +127,8 @@ export function StatusHeader({
   warningCount,
   warningBreakdown,
   onJumpToWarning,
+  changelogVersion,
+  onOpenChangelog,
   generatedAtUtc,
   nowMs,
   refreshing,
@@ -286,6 +290,20 @@ export function StatusHeader({
         <div className={styles.topRow}>
           <div className={styles.brandGroup}>
             <h1 className={styles.title}>MOBAdev Agent Swarm Gen#3</h1>
+            {changelogVersion && (
+              <Button
+                size="small"
+                appearance="transparent"
+                style={{ padding: 0, minWidth: 0, height: 'auto' }}
+                onClick={onOpenChangelog}
+                title="Internal version from CHANGELOG.md — open changelog"
+                aria-label={`Version v${changelogVersion} — open CHANGELOG.md`}
+              >
+                <Badge appearance="outline" color="subtle" shape="rounded" className="mono">
+                  v{changelogVersion}
+                </Badge>
+              </Button>
+            )}
             <GlossaryTooltip term="Read-Only" showIcon>
               <Badge appearance="tint" color="brand" shape="rounded" icon={<Eye16Regular />}>
                 Read-Only · 127.0.0.1
