@@ -18,6 +18,9 @@ public sealed class ApiEndpointsIntegrationTests
     {
         using var fx = new TempDashboardFixture();
         await File.WriteAllTextAsync(Path.Combine(fx.MobaDevPath, "manifest.md"), "# MOBAdev\nLine 1\n");
+        await File.WriteAllTextAsync(
+            Path.Combine(fx.MobaDevPath, "CHANGELOG.md"),
+            "# Changelog\n\n## [3.5.5] - 2026-11-20 (PR #22)\n");
 
         var repoAgyDir = Path.Combine(fx.MobaDevPath, "agents", "antigravity", "agents");
         var localAgyDir = Path.Combine(fx.GeminiConfigPath, "agents");
@@ -87,6 +90,7 @@ public sealed class ApiEndpointsIntegrationTests
         var snapshot = await snapshotRes.Content.ReadFromJsonAsync<DashboardSnapshot>();
         Assert.NotNull(snapshot);
         Assert.True(snapshot.ReadOnly);
+        Assert.Equal("3.5.5", snapshot.ChangelogVersion);
         Assert.Equal(3, snapshot.Monitors.Monitors.Count);
         Assert.Equal(
             ["codex-monitor", "claude-monitor", "antigravity-monitor"],

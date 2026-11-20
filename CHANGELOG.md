@@ -5,6 +5,17 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.5.5] - 2026-11-20 (PR #22)
+
+### Added
+- **Live Internal Version Label (`DashboardSnapshot.ChangelogVersion`, `DashboardSnapshotService.cs`, `StatusHeader.tsx`):** Streams the latest semantic version header dynamically from `CHANGELOG.md` and displays a clickable `v3.5.5` badge in the sticky dashboard header (opening `CHANGELOG.md` in `Configuration` on click) without duplicating version strings.
+
+### Changed
+- **`Git & Delivery Strategy` Top Row (`GovernanceMatrixView.tsx`):** Moved the **Git & Delivery Strategy** reference card to the first row at the top of the **Matrix & Rules** tab and tuned the invariants grid to `minmax(180px, 1fr)` so all five invariants align cleanly across one desktop row.
+- **Workflow-Ordered Pipeline Toggles (`PipelineCard.tsx`):** Reordered the `Task & PR Pipeline` view toggles left-to-right to follow the delivery workflow: **`Kanban Board (N)`** → **`Open PRs (N)`** → **`Recently Merged (N)`**.
+
+---
+
 ## [3.5.4] - 2026-11-20 (PR #21)
 
 ### Changed

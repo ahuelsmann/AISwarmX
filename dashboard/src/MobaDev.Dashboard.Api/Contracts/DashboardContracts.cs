@@ -234,4 +234,5 @@ public sealed record DashboardSnapshot(
     MonitorsResponse Monitors,
     GovernanceResponse Governance,
     PipelineResponse Pipeline,
-    HygieneResponse Hygiene);
+    HygieneResponse Hygiene,
+    string? ChangelogVersion = null);

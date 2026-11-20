@@ -254,6 +254,7 @@ export interface DashboardSnapshot {
   governance: GovernanceResponse;
   pipeline: PipelineResponse;
   hygiene: HygieneResponse;
+  changelogVersion?: string | null;
 }
 
 export type ThemePreference = 'system' | 'light' | 'dark';

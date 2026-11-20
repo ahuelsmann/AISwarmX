@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using MobaDev.Dashboard.Api.Configuration;
 using MobaDev.Dashboard.Api.Contracts;
@@ -8,8 +9,10 @@ namespace MobaDev.Dashboard.Api.Services;
 /// <summary>
 /// Aggregates all read-only dashboard providers with short TTL caching and card-isolated health metadata.
 /// </summary>
-public sealed class DashboardSnapshotService
+public sealed partial class DashboardSnapshotService
 {
+    private const int ChangelogHeaderScanLineLimit = 200;
+
     private readonly IOptionsMonitor<DashboardOptions> _optionsMonitor;
     private readonly Providers.ClaudeMonitorProvider _claudeProvider;
     private readonly Providers.CodexMonitorProvider _codexProvider;
@@ -25,6 +28,7 @@ public sealed class DashboardSnapshotService
     private MonitorsResponse? _cachedMonitors;
     private GovernanceResponse? _cachedGovernance;
     private HygieneResponse? _cachedHygiene;
+    private string? _cachedChangelogVersion;
     private DateTimeOffset _localCacheExpiresAt = DateTimeOffset.MinValue;
 
     private PipelineResponse? _cachedPipeline;
@@ -132,6 +136,7 @@ public sealed class DashboardSnapshotService
         MonitorsResponse monitors;
         GovernanceResponse governance;
         HygieneResponse hygiene;
+        string? changelogVersion;
 
         await _localLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -145,6 +150,7 @@ public sealed class DashboardSnapshotService
                 monitors = _cachedMonitors;
                 governance = _cachedGovernance;
                 hygiene = _cachedHygiene;
+                changelogVersion = _cachedChangelogVersion;
             }
             else
             {
@@ -166,10 +172,12 @@ public sealed class DashboardSnapshotService
                 var sessions = monitorList.Select(m => BuildSessionHygiene(m)).ToList();
                 var staleCount = worktrees.Count(w => w.Status == "stale");
                 hygiene = new HygieneResponse(now, sessions, worktrees, staleCount, worktreeSource);
+                changelogVersion = ReadLatestChangelogVersion(paths.MobaDevRepoPath);
 
                 _cachedMonitors = monitors;
                 _cachedGovernance = governance;
                 _cachedHygiene = hygiene;
+                _cachedChangelogVersion = changelogVersion;
 
                 var ttl = Math.Max(1, options.LocalCacheTtlSeconds);
                 _localCacheExpiresAt = now.AddSeconds(ttl);
@@ -191,7 +199,8 @@ public sealed class DashboardSnapshotService
             Monitors: monitors,
             Governance: governance,
             Pipeline: pipeline,
-            Hygiene: hygiene);
+            Hygiene: hygiene,
+            ChangelogVersion: changelogVersion);
     }
 
     private async Task<PipelineResponse> GetPipelineCachedAsync(
@@ -291,4 +300,39 @@ public sealed class DashboardSnapshotService
 
         return warnings > 0 ? ("warnings", warnings) : ("healthy", 0);
     }
+
+    private static string? ReadLatestChangelogVersion(string mobaDevRepoPath)
+    {
+        if (string.IsNullOrWhiteSpace(mobaDevRepoPath))
+        {
+            return null;
+        }
+
+        var changelogPath = Path.Combine(mobaDevRepoPath, "CHANGELOG.md");
+        if (!File.Exists(changelogPath) || !Security.PathWhitelistGuard.IsAllowedFilePath(changelogPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            foreach (var line in File.ReadLines(changelogPath).Take(ChangelogHeaderScanLineLimit))
+            {
+                var match = ChangelogVersionHeadingRegex().Match(line);
+                if (match.Success)
+                {
+                    return match.Groups["ver"].Value;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    [GeneratedRegex(@"^##\s+\[(?<ver>[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.\-]+)?)\]", RegexOptions.CultureInvariant)]
+    private static partial Regex ChangelogVersionHeadingRegex();
 }
