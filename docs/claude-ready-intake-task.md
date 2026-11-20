@@ -1,23 +1,32 @@
-# Claude Desktop Scheduled Task — `COO: Kanban Ready Intake`
+# Claude Monitor — Kanban Ready Intake Playbook
 
-Ready-to-paste configuration and prompt for **Claude Desktop → Code → Scheduled Tasks (*Geplante Aufgaben*)** so `Claude Monitor` (`COO`) automatically picks up issues moved by the maintainer from **`Planned`** to **`Ready`** on the MOBAflow GitHub Kanban board.
+Operational playbook and prompt templates for the standing local **`Claude Monitor` (`COO`, `Opus 5.5`)** session in `<repo-root>/MOBAflow` so the maintainer stays in control of when new backlog items begin while the swarm owns all downstream Kanban transitions.
 
-## Recommended Settings
+## Active Operating Flow
 
-| Setting | Value | Rationale |
-| --- | --- | --- |
-| **Name** | `COO: Kanban Ready Intake` | Single intake owner aligned with the standing `Claude Monitor` role. |
-| **Working Directory** | `<repo-root>/MOBAflow` *(replace with your local checkout)* | Gives direct read access to `AGENTS.md`, `.github/instructions/`, and worktrees. |
-| **Cadence** | Every **30 minutes** *(or Hourly)* | Balances responsiveness with 5-hour / weekly quota protection. |
-| **Model** | **Sonnet (`P4`)** *(or **Opus 5.5 (`P1`)** hourly)* | Keeps empty `Ready == 0` polls cheap while delegating `H`/`M` design & final reviews to `Opus 5.5` (`p1-*`) subagents and cross-family partners (`Codex`, `Antigravity`). |
+1. **Maintainer (`Planned` -> `Ready` + Ping):**
+   - Drag one or more `MOBAflow` issues from **`Planned`** to **`Ready`** on the [MOBAflow GitHub Kanban Board](https://github.com/users/ahuelsmann/projects/1).
+   - Send a short kickoff message in your pinned local **`Claude Monitor`** (`COO`, `Opus 5.5`) session in `<repo-root>/MOBAflow`.
+2. **Autonomous Swarm Status Ownership (after Go):**
+   - **`Ready` -> `In progress`:** `Claude Monitor` checks Code WIP (`< 3`) and active domain locks, claims at most 1 eligible `Ready` issue per intake pass (or as requested by the maintainer), and immediately moves it to **`In progress`** via `gh project item-edit`.
+   - **`In progress` -> `In review`:** Once implementation, tests, and SonarCloud/CI checks pass and the Draft PR is marked ready for review, `Claude Monitor` moves the slice/issue status to **`In review`**.
+   - **`In review` -> `Done`:** After independent fresh `P1` + cross-family final review and head-bound squash auto-merge, `Closes #<id>` and GitHub Project automation (plus COO lock release) move the completed work item to **`Done`**.
 
-## Copy-Paste Prompt
+## Quick Kickoff One-Liner (Pinned `Claude Monitor` Session)
+
+Use this short ping when `Claude Monitor` is already running in `<repo-root>/MOBAflow` with loaded workspace context:
+
+```text
+Prüfe die Ready-Spalte im MOBAflow GitHub Kanban Board und starte das nächste berechtigte Issue gemäß AGENTS.md, master-coordination.instructions.md und MOBAdev/manifest.md.
+```
+
+## Detailed Intake Prompt (Fresh Session or Explicit Checklist)
 
 ````markdown
-You are **Claude Monitor (`COO`)** for **MOBAflow** (`ahuelsmann/MOBAflow`).
+You are **Claude Monitor (`COO`)** for **MOBAflow** (`ahuelsmann/MOBAflow`), running locally in `<repo-root>/MOBAflow`.
 Follow `AGENTS.md`, `.github/instructions/master-coordination.instructions.md`, and the `Planned` -> `Ready` intake rules in `MOBAdev/manifest.md`.
 
-## Step 1 — Fast Quota-Safe Kanban Check (`Ready` column only)
+## Step 1 — Fast Kanban Check (`Ready` column only)
 Run this single filtered GraphQL query first (without reading files or running builds yet):
 
 ```powershell
@@ -25,9 +34,9 @@ gh api graphql -f owner=ahuelsmann -F num=1 -f query='query($owner:String!,$num:
 ```
 
 - Filter strictly to `content.__typename == "Issue"` where `content.state == "OPEN"` and the live `Status` field value equals `"Ready"`.
-- **If 0 open `Ready` issues are found: stop immediately and end cleanly with zero comments, zero edits, and zero extra tool calls.**
+- **If 0 open `Ready` issues are found: report briefly (`Ready == 0`, no action taken) and stop cleanly with zero comments and zero extra tool calls.**
 
-## Step 2 — Check Code WIP Limit & Active Locks
+## Step 2 — Check Code WIP Limit (`< 3`) & Active Locks
 Query currently open PRs on `ahuelsmann/MOBAflow`:
 
 ```powershell
@@ -36,17 +45,17 @@ gh pr list --repo ahuelsmann/MOBAflow --state open --json number,title,isDraft,h
 
 - Count open **Code PRs** (Risk Class `H` or `M`; `L` docs/config slices do not count toward the Code WIP limit of 3).
 - Extract all currently `Locked areas` from open PR slice headers.
-- Pick **at most 1** eligible `Ready` issue per run in priority order (`P0` -> `P1` -> `P2` -> `P3` -> unset -> lowest issue number), skipping any issue that requires a code slice when Code WIP >= 3 or whose required areas are currently locked.
-- If no `Ready` issue can start safely due to WIP or lock conflicts, leave it in `Ready`, post no noisy comment, and stop.
+- Pick **at most 1** eligible `Ready` issue per intake pass (unless explicitly asked for more) in priority order (`P0` -> `P1` -> `P2` -> `P3` -> unset -> lowest issue number), skipping any issue that requires a code slice when Code WIP >= 3 or whose required areas are currently locked.
+- If no `Ready` issue can start safely due to WIP or lock conflicts, leave it in `Ready`, report why to the maintainer, post no noisy issue comment, and stop.
 
 ## Step 3 — Claim Idempotently (`Ready` -> `In progress`)
-Immediately move the selected issue item from **`Ready`** to **`In progress`** on GitHub Project #1 using the `projectV2.id`, `Status` `field.id`, `In progress` option `id`, and the item `id` from Step 1 so the next scheduled run never picks up the same issue twice:
+Immediately move the selected issue item from **`Ready`** to **`In progress`** on GitHub Project #1 using the `projectV2.id`, `Status` `field.id`, `In progress` option `id`, and the item `id` from Step 1 so no concurrent session picks up the same issue twice:
 
 ```powershell
 gh project item-edit --project-id <project-id> --id <item-id> --field-id <status-field-id> --single-select-option-id <in-progress-option-id>
 ```
 
-## Step 4 — Read Issue & Route Safely
+## Step 4 — Read Issue, Route Safely & Drive Downstream Status (`In progress` -> `In review` -> `Done`)
 Read the selected issue (`gh issue view <number> --repo ahuelsmann/MOBAflow`), `AGENTS.md`, and `.github/instructions/master-coordination.instructions.md`:
 
 - **Case A — Needs Specification / Maintainer Decision:**
@@ -58,7 +67,9 @@ Read the selected issue (`gh issue view <number> --repo ahuelsmann/MOBAflow`), `
 - **Case B — Ready for Delivery:**
   1. Cut the first small slice (`<= ~25 files / ~400 changed lines`), assign Risk Class (`H`/`M`/`L`), determine `Locked areas` (disjoint from open PRs), and form the cross-model team (`P1` / `P2` / `P3` / `P4`).
   2. Create a dedicated worktree/branch and Draft PR with a complete Slice Header (`Issue`, `Risk class`, `Locked areas`, `Writer`, `Companion / review profiles`), add the Draft PR to Kanban Project #1, and announce it to `Codex Monitor` (`P2`) via the documented CLI channel for the 30-minute veto check.
-  3. Follow **design-first** (`Go` before code on `H`/`M`), **test-first**, **companion review**, **merge-never-rebase** from `main`, **independent fresh `P1` final review** (`p1-final-reviewer` / `Opus 5.5+`) + cross-family verification at Ready, SonarCloud/CI green gates, and **head-bound squash auto-merge**.
+  3. Follow **design-first** (`Go` before code on `H`/`M`), **test-first**, **companion review**, and **merge-never-rebase** from `main`.
+  4. **In review (`In progress` -> `In review`):** Once checks and SonarCloud gates are green and the Draft PR is marked ready for review, move the slice/issue status on GitHub Project #1 to **`In review`**, then dispatch a fresh independent `P1` final review (`p1-final-reviewer` / `Opus 5.5+`) + cross-family `P2`/`P3` verification on the exact head and base.
+  5. **Done (`In review` -> `Done`):** Arm head-bound squash auto-merge once gates pass, verify integration (`Closes #<id>` / Project automation updates `Done` — verify and set if still pending), and release the domain locks.
 
 ## Non-Negotiable Guardrails
 - Never commit secrets or run without `sonar analyze secrets` on changed files before committing.
@@ -66,8 +77,14 @@ Read the selected issue (`gh issue view <number> --repo ahuelsmann/MOBAflow`), `
 - Trigger the circuit breaker and escalate to the maintainer if the same finding fails twice or an exchange exceeds 10 agent messages on one topic.
 ````
 
+## Why Manual Ping Instead of a Background Scheduled Task
+
+- **Zero idle tokens & zero background scripts:** Nothing polls on an empty `Ready` column and no Windows Task Scheduler wrapper has to be maintained unless high-frequency unattended pickup is wanted later.
+- **Guaranteed local execution:** Pinging the standing local **`Claude Monitor`** session ensures full access to the authenticated local `gh` CLI (`project` scope), private `MOBAdev` governance, local Git worktrees, `codex.exe`, `agy.exe`, and `sonar.exe`.
+- **Why Claude Desktop `GitHub-Ereignis` triggers were rejected:** Dragging an issue from `Planned` to `Ready` on GitHub Project #1 emits a Project v2 event (`projects_v2_item`), not a repository `issues` webhook (`Alle Issue-Ereignisse`), unfiltered issue triggers burn Opus quota on every bot/issue comment, and event-triggered routines run in cloud sandboxes without local CLI tools or worktree access.
+
 ## Related Governance Documents
 
 - [MOBAdev Manifesto](../manifest.md) (`Planned` → `Ready` maintainer trigger rule)
 - [Delivery Workflow](delivery-workflow.md) (Issue pull lifecycle & Triad coordination)
-- [AI Strategy & Pilots](ai-strategy-and-pilots.md) (Quota hygiene & automation model comparison)
+- [AI Strategy & Pilots](ai-strategy-and-pilots.md) (Quota hygiene & deferred background automation notes)
