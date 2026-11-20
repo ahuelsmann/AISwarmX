@@ -12,7 +12,7 @@ This folder stores sanitized, versioned backups of custom agents and rules acros
 
 When copying `agents/antigravity/agents/head-of-ai-strategy.md` or `agents/antigravity/rules/mobaflow-agent-network.md` to a local machine, replace `<repo-root>/MOBAflow` with your local `MOBAflow` checkout path if desired.
 
-For **Claude Desktop Scheduled Tasks (*Geplante Aufgaben*)**, see the copy-paste `COO: Kanban Ready Intake` prompt template in [`docs/claude-ready-intake-task.md`](../docs/claude-ready-intake-task.md).
+For **`Claude Monitor` (`COO`) Kanban `Ready` intake** (maintainer `Planned` → `Ready` + manual ping in the standing local `Claude Monitor` session), see the kickoff playbook and prompt template in [`docs/claude-ready-intake-task.md`](../docs/claude-ready-intake-task.md).
 
 ## Antigravity frontmatter rule
 

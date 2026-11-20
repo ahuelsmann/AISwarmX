@@ -1,6 +1,6 @@
 # MOBAdev Agent Swarm Gen#3 Dashboard — Architektur- & UI/UX-Konzept
 
-**Status:** Umgesetzt (v3.5.3 / Gen#3 — Slices 1–6 komplett inkl. 1:1 `Kanban Board`-Ansicht, PR `BLOCKED`-Begründung, Compact Monitors, Warning Popover, Merge Gates, Rules Diff, Git Strategy & Read-Only `Configuration`-Tab)  
+**Status:** Umgesetzt (v3.5.4 / Gen#3 — Slices 1–6 komplett inkl. 1:1 `Kanban Board`-Ansicht, PR `BLOCKED`-Begründung, Compact Monitors, Warning Popover, Merge Gates, Rules Diff, Git Strategy & Read-Only `Configuration`-Tab)  
 **Verantwortlich:** `Antigravity Monitor` (`Head of AI Strategy`, `P3`) gemeinsam mit `Head of UI/UX` (`P3`)  
 **Ziel-Repository:** `ahuelsmann/MOBAdev` (`PRIVATE`, unter `dashboard/`)  
 **Stack:** ASP.NET Core Minimal API (`.NET 10`) + React (`TypeScript` + `Vite`)

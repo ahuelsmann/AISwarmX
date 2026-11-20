@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.5.4] - 2026-11-20 (PR #21)
+
+### Changed
+- **Manual-Ping `Claude Monitor` Intake & Autonomous Swarm Status Ownership (`docs/claude-ready-intake-task.md`, `docs/ai-strategy-and-pilots.md`, `agents/README.md`):** Shifted `Planned` → `Ready` intake from Claude Desktop Scheduled Tasks to a zero-idle-token **maintainer `Ready` move + manual ping** in the standing local `Claude Monitor` (`COO`) session, while `Claude Monitor` and the swarm autonomously advance Kanban status through `In progress` → `In review` → `Done` (documenting why `GitHub-Ereignis` cloud triggers do not fit Project v2 drag-and-drop and keeping the local `Task Scheduler` pre-check as an optional future upgrade).
+
+---
+
 ## [3.5.3] - 2026-11-20 (PR #19)
 
 ### Added
