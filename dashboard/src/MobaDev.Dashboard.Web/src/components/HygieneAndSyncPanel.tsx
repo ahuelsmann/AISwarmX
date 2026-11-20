@@ -122,6 +122,17 @@ interface HygieneAndSyncPanelProps {
 }
 
 const MAX_COLLAPSED_STALE_WORKTREES = 3;
+const TOOL_DISPLAY_ORDER = ['ChatGPT Codex', 'Claude Code', 'Antigravity'];
+
+function sortSessions<T extends { tool: string }>(sessions: readonly T[]): T[] {
+  return [...sessions].sort((a, b) => {
+    const idxA = TOOL_DISPLAY_ORDER.indexOf(a.tool);
+    const idxB = TOOL_DISPLAY_ORDER.indexOf(b.tool);
+    const rankA = idxA === -1 ? Number.MAX_SAFE_INTEGER : idxA;
+    const rankB = idxB === -1 ? Number.MAX_SAFE_INTEGER : idxB;
+    return rankA - rankB;
+  });
+}
 
 export function HygieneAndSyncPanel({
   governance,
@@ -216,7 +227,7 @@ export function HygieneAndSyncPanel({
         </div>
 
         <div className={styles.list}>
-          {hygiene.sessions.map((session) => (
+          {sortSessions(hygiene.sessions).map((session) => (
             <div key={session.tool} className={styles.row}>
               <div className={styles.rowMain}>
                 <Text weight="semibold" size={200} className={styles.rowTitle}>

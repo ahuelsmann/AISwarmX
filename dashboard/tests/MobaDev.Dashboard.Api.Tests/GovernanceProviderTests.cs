@@ -129,6 +129,7 @@ public sealed class GovernanceProviderTests
         var missingClaude = Assert.Single(result.Agents, a => a.FileName == "p1-final-reviewer.md");
         Assert.Equal("missing_local", missingClaude.SyncStatus);
         Assert.Equal("P1", missingClaude.ProfileHint);
+        Assert.Equal("Claude Code", result.Agents[0].Tool);
     }
 
     [Fact]

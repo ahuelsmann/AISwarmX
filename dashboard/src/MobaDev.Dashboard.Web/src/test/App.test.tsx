@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
+import { resolveModelVisual, resolveProfileTone, resolveRoleVisual } from '../components/RoleAndModelIcons';
 import type {
   ConfigDocContentResponse,
   ConfigDocsCatalogResponse,
@@ -542,11 +543,25 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(screen.getByText('Standby')).toBeInTheDocument();
     expect(screen.getByText('Active / Busy')).toBeInTheDocument();
 
-    // Row 2: Compact Triad bar with Code WIP (Class L docs excluded from code WIP limit)
+    // Row 2: Compact Triad bar in traditional order (Codex -> Claude -> Antigravity) with Code WIP
+    const triadRegion = screen.getByLabelText('Decision and Steering Triad selection panel');
     expect(screen.getByRole('heading', { name: 'Decision & Steering Triad' })).toBeInTheDocument();
     expect(screen.getByText('Quorum 2 / 3 · 1 Quota Pause')).toBeInTheDocument();
     expect(screen.getByText('Code WIP: 0 / 3 (+1 Docs)')).toBeInTheDocument();
     expect(screen.getByText('Escalation: Human')).toBeInTheDocument();
+    const triadText = triadRegion.textContent ?? '';
+    const idxCpm = triadText.indexOf('CPM & TD');
+    const idxCoo = triadText.indexOf('COO');
+    const idxStrategy = triadText.indexOf('AI Strategy');
+    expect(idxCpm).toBeGreaterThan(-1);
+    expect(idxCoo).toBeGreaterThan(idxCpm);
+    expect(idxStrategy).toBeGreaterThan(idxCoo);
+    expect(resolveModelVisual('Orchestrator (Neon)').tone).toBe('blue');
+    expect(resolveModelVisual('Gemini 4 Argon').tone).toBe('blue');
+    expect(resolveRoleVisual('Head of AI Strategy').tone).toBe('blue');
+    expect(resolveModelVisual('gpt-6.2-sol').tone).toBe('teal');
+    expect(resolveRoleVisual('Technical Director & CPM').tone).toBe('teal');
+    expect(resolveProfileTone('P2')).toBe('teal');
 
     // Row 3: PR #492 with Checks Pending (UNSTABLE), Merge Gates, linked issue & single-line participant pill
     expect(screen.getByText('Repository: ahuelsmann/MOBAflow')).toBeInTheDocument();

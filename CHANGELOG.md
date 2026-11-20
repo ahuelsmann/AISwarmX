@@ -5,6 +5,14 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.5.6] - 2026-11-20 (PR #23)
+
+### Changed
+- **Traditional Tool & Model Order (`ChatGPT/GPT → Claude/Opus → Antigravity/Gemini`):** Aligned `Decision & Steering Triad` (`DecisionTriadCard.tsx`: `CPM & TD` → `COO` → `AI Strategy`), `Session Hygiene` (`HygieneAndSyncPanel.tsx`), `Rules State` (`GovernanceProvider.cs`: `Claude Code` ahead of `Antigravity`), and `Configuration` agent groups (`ConfigDocsProvider.cs`) with the top monitor row order and recorded the convention in [`dashboard/DESIGN.md`](dashboard/DESIGN.md).
+- **Light-Blue Antigravity / Gemini & Emerald-Teal GPT Accents (`mobaFluentTheme.ts`, `RoleAndModelIcons.tsx`):** Aligned `Orchestrator (Neon)`, `Antigravity`, and `Head of AI Strategy` to light-blue `blue` (matching `P3`) and shifted `ChatGPT / Codex / GPT / Sol / CPM` (`P2`) to emerald-teal (`teal`: `#2DD4A8` dark / `#0D7D63` light), creating clear 3-family color harmony (`P2` emerald-teal · `P1` orange · `P3` light blue).
+
+---
+
 ## [3.5.5] - 2026-11-20 (PR #22)
 
 ### Added

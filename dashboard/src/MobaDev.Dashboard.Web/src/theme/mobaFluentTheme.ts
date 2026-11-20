@@ -52,6 +52,7 @@ export type AccentTone =
   | 'orange'
   | 'gold'
   | 'green'
+  | 'teal'
   | 'blue'
   | 'purple'
   | 'pink';
@@ -87,6 +88,11 @@ const DARK_TONES: Record<AccentTone, ToneStylePair> = {
     fg: '#3FD67E',
     bg: 'rgba(63, 214, 126, 0.14)',
     border: 'rgba(63, 214, 126, 0.34)'
+  },
+  teal: {
+    fg: '#2DD4A8',
+    bg: 'rgba(45, 212, 168, 0.14)',
+    border: 'rgba(45, 212, 168, 0.36)'
   },
   blue: {
     fg: '#4DA3FF',
@@ -130,6 +136,11 @@ const LIGHT_TONES: Record<AccentTone, ToneStylePair> = {
     fg: '#107C41',
     bg: 'rgba(16, 124, 65, 0.09)',
     border: 'rgba(16, 124, 65, 0.26)'
+  },
+  teal: {
+    fg: '#0D7D63',
+    bg: 'rgba(13, 125, 99, 0.09)',
+    border: 'rgba(13, 125, 99, 0.28)'
   },
   blue: {
     fg: '#0067B8',

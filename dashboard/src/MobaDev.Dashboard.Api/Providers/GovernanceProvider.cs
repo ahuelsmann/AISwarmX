@@ -129,6 +129,12 @@ public sealed partial class GovernanceProvider
         ResolvedDashboardPaths paths) =>
     [
         (
+            "Claude Code",
+            "agent",
+            Path.Combine(paths.MobaDevRepoPath, "agents", "claude", "agents"),
+            Path.Combine(paths.ClaudeHomePath, "agents")
+        ),
+        (
             "Antigravity",
             "agent",
             Path.Combine(paths.MobaDevRepoPath, "agents", "antigravity", "agents"),
@@ -139,12 +145,6 @@ public sealed partial class GovernanceProvider
             "rule",
             Path.Combine(paths.MobaDevRepoPath, "agents", "antigravity", "rules"),
             Path.Combine(paths.GeminiConfigPath, "rules")
-        ),
-        (
-            "Claude Code",
-            "agent",
-            Path.Combine(paths.MobaDevRepoPath, "agents", "claude", "agents"),
-            Path.Combine(paths.ClaudeHomePath, "agents")
         )
     ];
 

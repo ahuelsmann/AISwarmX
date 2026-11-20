@@ -32,7 +32,7 @@ export function resolveModelVisual(model: string | null | undefined): ResolvedVi
   const normalized = (model ?? '').trim().toLowerCase();
 
   if (normalized.includes('orchestrator') || normalized.includes('neon')) {
-    return { icon: <Beaker16Regular aria-hidden="true" />, tone: 'purple' };
+    return { icon: <Beaker16Regular aria-hidden="true" />, tone: 'blue' };
   }
   if (normalized.includes('opus')) {
     return {
@@ -53,9 +53,13 @@ export function resolveModelVisual(model: string | null | undefined): ResolvedVi
     normalized.includes('codex') ||
     normalized.includes('sol')
   ) {
-    return { icon: <Braces16Regular aria-hidden="true" />, tone: 'green' };
+    return { icon: <Braces16Regular aria-hidden="true" />, tone: 'teal' };
   }
-  if (normalized.includes('argon') || normalized.includes('gemini')) {
+  if (
+    normalized.includes('argon') ||
+    normalized.includes('gemini') ||
+    normalized.includes('antigravity')
+  ) {
     return { icon: <Sparkle16Regular aria-hidden="true" />, tone: 'blue' };
   }
 
@@ -77,10 +81,10 @@ export function resolveRoleVisual(role: string | null | undefined): ResolvedVisu
     normalized.includes('td/cpm') ||
     normalized.includes('project manager')
   ) {
-    return { icon: <Wrench16Regular aria-hidden="true" />, tone: 'green' };
+    return { icon: <Wrench16Regular aria-hidden="true" />, tone: 'teal' };
   }
   if (normalized.includes('ai strategy')) {
-    return { icon: <Beaker16Regular aria-hidden="true" />, tone: 'purple' };
+    return { icon: <Beaker16Regular aria-hidden="true" />, tone: 'blue' };
   }
   if (
     normalized.includes('ui/ux') ||
@@ -104,7 +108,7 @@ export function resolveRoleVisual(role: string | null | undefined): ResolvedVisu
     return { icon: <ShieldCheckmark16Regular aria-hidden="true" />, tone: 'purple' };
   }
   if (normalized.includes('companion') || normalized.includes('auto-review')) {
-    return { icon: <Edit16Regular aria-hidden="true" />, tone: 'green' };
+    return { icon: <Edit16Regular aria-hidden="true" />, tone: 'teal' };
   }
   if (normalized.includes('writer') || normalized.includes('senior developer')) {
     return {
@@ -136,7 +140,7 @@ export function resolveProfileTone(profile: string | null | undefined): AccentTo
     case 'P1':
       return 'orange';
     case 'P2':
-      return 'green';
+      return 'teal';
     case 'P3':
       return 'blue';
     case 'P4':
