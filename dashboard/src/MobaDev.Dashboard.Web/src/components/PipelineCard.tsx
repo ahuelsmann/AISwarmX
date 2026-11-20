@@ -14,7 +14,6 @@ import {
 } from '@fluentui/react-components';
 import {
   ArrowUp16Regular,
-  Bot16Regular,
   BranchFork16Regular,
   BranchRequest20Regular,
   Checkmark16Regular,
@@ -32,6 +31,7 @@ import {
   WifiOff20Regular
 } from '@fluentui/react-icons';
 import { formatAbsoluteEn, formatRelativeTimeEn } from '../api/dashboardClient';
+import type { AccentTone } from '../theme/mobaFluentTheme';
 import type {
   ActiveIssueInfo,
   LinkedIssueInfo,
@@ -40,6 +40,7 @@ import type {
   PullRequestInfo,
   TaskParticipantInfo
 } from '../types/dashboard';
+import { AgentRoundTable } from './AgentRoundTable';
 import { GlossaryTooltip } from './GlossaryTooltip';
 import { ModelBadge, ProfileBadge, RoleBadge } from './RoleAndModelIcons';
 
@@ -575,17 +576,29 @@ function PullRequestRow({
         </div>
       )}
 
-      <div className={styles.participantsBlock}>
-        <div className={styles.participantsHeader}>
-          <Bot16Regular aria-hidden="true" />
-          <span>Participating Agents, Roles &amp; Models</span>
-        </div>
-
-        {pr.participants.length === 0 ? (
-          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-            No agent evidence recorded on this PR yet.
-          </Text>
-        ) : (
+      <AgentRoundTable
+        centerLabel={`#${pr.number}`}
+        centerSub={`${pr.linkedIssues?.[0] ? `Issue #${pr.linkedIssues[0].number} · ` : ''}Class ${pr.riskClass}`}
+        centerStatus={
+          isMerged
+            ? 'Merged'
+            : pr.autoMergeEnabled
+              ? 'Auto-Merge'
+              : normalizedMergeState === 'CLEAN'
+                ? 'CLEAN'
+                : pr.stateLabel
+        }
+        centerTone={
+          isMerged || normalizedMergeState === 'CLEAN'
+            ? ('green' as AccentTone)
+            : normalizedMergeState === 'DIRTY' || normalizedMergeState === 'BLOCKED'
+              ? ('red' as AccentTone)
+              : ('blue' as AccentTone)
+        }
+        participants={pr.participants}
+        isDark={isDark}
+        defaultView={isMerged ? 'pills' : 'table'}
+        renderPills={() => (
           <div className={styles.participantsRow}>
             {pr.participants.map((participant) => (
               <ParticipantPill
@@ -597,7 +610,7 @@ function PullRequestRow({
             ))}
           </div>
         )}
-      </div>
+      />
     </div>
   );
 }
@@ -1125,22 +1138,33 @@ function KanbanItemRow({
       )}
 
       {issue.participants.length > 0 && (
-        <div className={styles.participantsBlock}>
-          <div className={styles.participantsHeader}>
-            <Bot16Regular aria-hidden="true" />
-            <span>Participating Agents, Roles &amp; Models</span>
-          </div>
-          <div className={styles.participantsRow}>
-            {issue.participants.map((participant) => (
-              <ParticipantPill
-                key={`${participant.role}-${participant.tool}-${participant.profile}`}
-                participant={participant}
-                isDark={isDark}
-                styles={styles}
-              />
-            ))}
-          </div>
-        </div>
+        <AgentRoundTable
+          centerLabel={`${isPr ? 'PR' : 'Issue'} #${issue.number}`}
+          centerSub={`${issue.kanbanStatus}${issue.riskClass ? ` · Class ${issue.riskClass}` : ''}`}
+          centerStatus={issue.priority ?? issue.kanbanStatus}
+          centerTone={
+            issue.kanbanStatus.toLowerCase() === 'in review'
+              ? ('blue' as AccentTone)
+              : issue.kanbanStatus.toLowerCase() === 'ready'
+                ? ('green' as AccentTone)
+                : ('gold' as AccentTone)
+          }
+          participants={issue.participants}
+          isDark={isDark}
+          defaultView="pills"
+          renderPills={() => (
+            <div className={styles.participantsRow}>
+              {issue.participants.map((participant) => (
+                <ParticipantPill
+                  key={`${participant.role}-${participant.tool}-${participant.profile}`}
+                  participant={participant}
+                  isDark={isDark}
+                  styles={styles}
+                />
+              ))}
+            </div>
+          )}
+        />
       )}
     </div>
   );

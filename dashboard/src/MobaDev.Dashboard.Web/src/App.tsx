@@ -188,7 +188,12 @@ export function App() {
     }
 
     window.requestAnimationFrame(() => {
-      const id = target === 'worktrees' ? 'section-worktrees' : 'section-sessions';
+      const id =
+        target === 'worktrees'
+          ? 'section-worktrees'
+          : target === 'branches'
+            ? 'section-branches'
+            : 'section-sessions';
       document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     });
   };
@@ -206,10 +211,13 @@ export function App() {
     ? {
         rulesDrift: snapshot.governance.driftCount + snapshot.governance.missingCount,
         staleWorktrees: snapshot.hygiene.staleWorktreeCount,
+        staleBranches:
+          (snapshot.hygiene.staleLocalBranchCount ?? 0) +
+          (snapshot.hygiene.staleRemoteBranchCount ?? 0),
         extraSessions: snapshot.hygiene.sessions.filter((s) => s.status === 'warning').length,
         quotaPauses: snapshot.monitors.monitors.filter((m) => m.state === 'rate_limited').length
       }
-    : { rulesDrift: 0, staleWorktrees: 0, extraSessions: 0, quotaPauses: 0 };
+    : { rulesDrift: 0, staleWorktrees: 0, staleBranches: 0, extraSessions: 0, quotaPauses: 0 };
 
   const isDark = resolvedTheme === 'dark';
 

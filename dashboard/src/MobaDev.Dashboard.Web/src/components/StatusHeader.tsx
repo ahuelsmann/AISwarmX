@@ -102,7 +102,7 @@ const useStyles = makeStyles({
   }
 });
 
-export type WarningTarget = 'rules' | 'worktrees' | 'sessions' | 'monitors';
+export type WarningTarget = 'rules' | 'worktrees' | 'branches' | 'sessions' | 'monitors';
 
 interface StatusHeaderProps {
   overallStatus?: string;
@@ -165,6 +165,15 @@ export function StatusHeader({
       actionLabel: 'View Worktrees',
       count: warningBreakdown.staleWorktrees,
       target: 'worktrees'
+    },
+    {
+      label:
+        warningBreakdown.staleBranches === 1
+          ? '1 Stale Branch'
+          : `${warningBreakdown.staleBranches} Stale Branches`,
+      actionLabel: 'View Branches',
+      count: warningBreakdown.staleBranches,
+      target: 'branches'
     },
     {
       label:

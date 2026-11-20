@@ -11,6 +11,7 @@ import {
 } from '@fluentui/react-components';
 import {
   ArrowRight16Regular,
+  BranchFork16Regular,
   CheckmarkCircle16Regular,
   ChevronDown16Regular,
   ChevronUp16Regular,
@@ -122,6 +123,7 @@ interface HygieneAndSyncPanelProps {
 }
 
 const MAX_COLLAPSED_STALE_WORKTREES = 3;
+const MAX_COLLAPSED_STALE_BRANCHES = 4;
 const TOOL_DISPLAY_ORDER = ['ChatGPT Codex', 'Claude Code', 'Antigravity'];
 
 function sortSessions<T extends { tool: string }>(sessions: readonly T[]): T[] {
@@ -141,6 +143,7 @@ export function HygieneAndSyncPanel({
 }: HygieneAndSyncPanelProps) {
   const styles = useStyles();
   const [showAllStale, setShowAllStale] = useState(false);
+  const [showAllBranches, setShowAllBranches] = useState(false);
 
   const driftTotal = governance.driftCount + governance.missingCount;
 
@@ -152,6 +155,23 @@ export function HygieneAndSyncPanel({
       ? staleWorktrees.slice(0, MAX_COLLAPSED_STALE_WORKTREES)
       : staleWorktrees;
   const visibleWorktrees = [...visibleStaleWorktrees, ...otherWorktrees];
+
+  const allBranches = hygiene.branches ?? [];
+  const staleBranches = allBranches.filter((b) => b.status === 'stale');
+  const activeBranches = allBranches.filter((b) => b.status !== 'stale');
+  const staleLocalCount =
+    hygiene.staleLocalBranchCount ??
+    staleBranches.filter((b) => b.scope === 'local').length;
+  const staleRemoteCount =
+    hygiene.staleRemoteBranchCount ??
+    staleBranches.filter((b) => b.scope === 'remote').length;
+  const staleBranchTotal = staleLocalCount + staleRemoteCount;
+  const canCollapseBranches = staleBranches.length > MAX_COLLAPSED_STALE_BRANCHES;
+  const visibleStaleBranches =
+    canCollapseBranches && !showAllBranches
+      ? staleBranches.slice(0, MAX_COLLAPSED_STALE_BRANCHES)
+      : staleBranches;
+  const visibleBranches = [...visibleStaleBranches, ...activeBranches];
 
   return (
     <div className={styles.stack}>
@@ -350,6 +370,108 @@ export function HygieneAndSyncPanel({
             {showAllStale
               ? 'Show fewer stale worktrees'
               : `Show all ${staleWorktrees.length} stale worktrees`}
+          </Button>
+        )}
+      </Card>
+
+      {/* Branch Hygiene (MOBAflow & MOBAdev) */}
+      <Card
+        id="section-branches"
+        className={styles.card}
+        appearance="filled"
+        aria-label="Branch Hygiene MOBAflow and MOBAdev"
+      >
+        <div className={styles.header}>
+          <div className={styles.titleGroup}>
+            <BranchFork16Regular aria-hidden="true" />
+            <h2 className={styles.title}>Branch Hygiene (Local &amp; Remote)</h2>
+          </div>
+
+          {staleBranchTotal > 0 ? (
+            <Badge appearance="tint" color="warning" shape="rounded" icon={<Warning16Regular />}>
+              <span className="tabular">{staleBranchTotal} Stale</span>
+            </Badge>
+          ) : (
+            <Badge appearance="tint" color="success" shape="rounded">
+              Clean
+            </Badge>
+          )}
+        </div>
+
+        <div className={styles.summaryGrid}>
+          <div className={styles.statTile}>
+            <span className={`${styles.statValue} tabular`}>{staleLocalCount}</span>
+            <span className={styles.statLabel}>Local Stale</span>
+          </div>
+          <div className={styles.statTile}>
+            <span className={`${styles.statValue} tabular`}>{staleRemoteCount}</span>
+            <span className={styles.statLabel}>Remote Stale</span>
+          </div>
+          <div className={styles.statTile}>
+            <span className={`${styles.statValue} tabular`}>{activeBranches.length}</span>
+            <span className={styles.statLabel}>Active</span>
+          </div>
+        </div>
+
+        {visibleBranches.length === 0 ? (
+          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+            Only main branches present across MOBAflow and MOBAdev.
+          </Text>
+        ) : (
+          <div className={styles.list}>
+            {visibleBranches.map((branch) => (
+              <div
+                key={`${branch.repository}-${branch.scope}-${branch.name}`}
+                className={styles.row}
+              >
+                <div className={styles.rowMain}>
+                  <Text
+                    weight="semibold"
+                    size={200}
+                    className={`${styles.rowTitle} mono`}
+                    title={branch.name}
+                  >
+                    {branch.name}
+                  </Text>
+                  <span className={styles.rowSub}>
+                    {branch.repository} · {branch.scope}
+                    {branch.upstreamGone ? ' · upstream gone' : ''}
+                  </span>
+                </div>
+
+                {branch.status === 'stale' ? (
+                  <Badge
+                    appearance="tint"
+                    color="warning"
+                    shape="rounded"
+                    icon={<Warning16Regular />}
+                  >
+                    Stale
+                  </Badge>
+                ) : (
+                  <Badge appearance="tint" color="brand" shape="rounded">
+                    <span className="tabular">
+                      Active{branch.linkedPrNumber ? ` (#${branch.linkedPrNumber})` : ''}
+                    </span>
+                  </Badge>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {canCollapseBranches && (
+          <Button
+            size="small"
+            appearance="subtle"
+            icon={showAllBranches ? <ChevronUp16Regular /> : <ChevronDown16Regular />}
+            iconPosition="after"
+            onClick={() => setShowAllBranches((prev) => !prev)}
+            style={{ justifyContent: 'space-between' }}
+          >
+            {showAllBranches
+              ? 'Show fewer stale branches'
+              : `Show all ${staleBranches.length} stale branches`}
           </Button>
         )}
       </Card>

@@ -29,6 +29,7 @@ The **[master coordination instructions](https://github.com/ahuelsmann/MOBAflow/
 - Before every push that hands work on, merge the current remote `main` into the slice branch. Resolve conflicts in the writer's worktree and rerun the affected checks. Shared slice branches use merges and regular pushes, never rebase or force-push.
 - The COO moves a green Draft to Ready after checking CI and current SonarCloud findings, then dispatches a fresh independent `P1` (Opus 5.5 or higher) review alongside cross-family `P2`/`P3` verification on the exact head and base. The writer fixes findings; changes to reviewed content require another independent review at the slice's risk class.
 - The COO arms squash auto-merge for the reviewed head once required checks, SonarCloud and the applicable mutation checks meet the documented conditions and no blocking findings remain. Disarm before a new push. Close the slice and release its locks after merge, recording `docs/` and `docs/wiki/` impact in the PR.
+- **Branch & Worktree Hygiene:** Immediately after a PR merges (or worktree work is abandoned cleanly), remove the slice worktree, delete its local branch, ensure the remote feature branch is deleted (`--delete-branch`), and run `git fetch --prune`. Only `main` and active open-slice / standing monitor branches remain checked out or on remote.
 
 ## Keep coordination traceable
 

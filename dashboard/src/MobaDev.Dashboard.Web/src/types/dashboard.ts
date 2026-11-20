@@ -229,17 +229,30 @@ export interface WorktreeInfo {
   linkedPrNumber?: number | null;
 }
 
+export interface BranchHygieneInfo {
+  repository: string;
+  name: string;
+  scope: 'local' | 'remote' | string;
+  status: 'active' | 'stale' | string;
+  upstreamGone: boolean;
+  linkedPrNumber?: number | null;
+}
+
 export interface HygieneResponse {
   generatedAtUtc: string;
   sessions: ToolSessionHygiene[];
   worktrees: WorktreeInfo[];
   staleWorktreeCount: number;
   source: SourceHealth;
+  branches?: BranchHygieneInfo[];
+  staleLocalBranchCount?: number;
+  staleRemoteBranchCount?: number;
 }
 
 export interface WarningBreakdown {
   rulesDrift: number;
   staleWorktrees: number;
+  staleBranches: number;
   extraSessions: number;
   quotaPauses: number;
 }

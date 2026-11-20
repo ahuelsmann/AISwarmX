@@ -571,6 +571,95 @@ public sealed class PipelineAndWorktreeProviderTests
         Assert.True(worktrees[2].IsMain);
     }
 
+    [Fact]
+    public async Task WorktreeProvider_GetBranchHygieneAsync_ClassifiesActiveAndStaleLocalAndRemoteBranches()
+    {
+        using var fx = new TempDashboardFixture();
+        var flowLocalHeads = """
+            main|
+            claude/review-from-start|
+            codex/strategy-mobaflow-kanban-board|
+            antigravity/merged-old|[gone]
+            """;
+        var flowRemoteHeads = """
+            origin/HEAD
+            origin/main
+            origin/codex/strategy-mobaflow-kanban-board
+            origin/codex/stale-remote
+            """;
+        var devLocalHeads = """
+            main|
+            ui/old-dev-branch|[gone]
+            """;
+
+        var runner = new FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName != "git" || !args.Contains("for-each-ref"))
+            {
+                return new CommandResult(1, string.Empty, "unexpected");
+            }
+
+            var repoArg = args.Count > 1 ? args[1] : string.Empty;
+            var isRemote = args.Any(a => a.Contains("refs/remotes/origin", StringComparison.Ordinal));
+            if (string.Equals(repoArg, fx.MobaFlowPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return isRemote
+                    ? new CommandResult(0, flowRemoteHeads, string.Empty)
+                    : new CommandResult(0, flowLocalHeads, string.Empty);
+            }
+
+            if (string.Equals(repoArg, fx.MobaDevPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return isRemote
+                    ? new CommandResult(0, string.Empty, string.Empty)
+                    : new CommandResult(0, devLocalHeads, string.Empty);
+            }
+
+            return new CommandResult(1, string.Empty, "unknown repo");
+        });
+
+        var provider = new WorktreeProvider(runner);
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
+            fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
+
+        var openPrs = new[]
+        {
+            new Contracts.PullRequestInfo(
+                492, "docs", "https://github.com/ahuelsmann/MOBAflow/pull/492",
+                "codex/strategy-mobaflow-kanban-board", "OPEN", "Draft", true, false,
+                "BEHIND", "pass", "pass", "L", [], DateTimeOffset.UtcNow, null, null, [], [], [])
+        };
+
+        var (branches, staleLocalCount, staleRemoteCount) =
+            await provider.GetBranchHygieneAsync(paths, openPrs, CancellationToken.None);
+
+        Assert.Equal(2, staleLocalCount);
+        Assert.Equal(1, staleRemoteCount);
+        Assert.DoesNotContain(branches, b => b.Name == "main");
+
+        var goneLocal = Assert.Single(branches, b => b.Repository == "MOBAflow" && b.Name == "antigravity/merged-old");
+        Assert.Equal("stale", goneLocal.Status);
+        Assert.True(goneLocal.UpstreamGone);
+
+        var devStale = Assert.Single(branches, b => b.Repository == "MOBAdev" && b.Name == "ui/old-dev-branch");
+        Assert.Equal("stale", devStale.Status);
+        Assert.True(devStale.UpstreamGone);
+
+        var remoteStale = Assert.Single(branches, b => b.Repository == "MOBAflow" && b.Scope == "remote" && b.Name == "codex/stale-remote");
+        Assert.Equal("stale", remoteStale.Status);
+
+        var standing = Assert.Single(branches, b => b.Repository == "MOBAflow" && b.Name == "claude/review-from-start");
+        Assert.Equal("active", standing.Status);
+
+        var activePrLocal = Assert.Single(branches, b => b.Repository == "MOBAflow" && b.Scope == "local" && b.Name == "codex/strategy-mobaflow-kanban-board");
+        Assert.Equal("active", activePrLocal.Status);
+        Assert.Equal(492, activePrLocal.LinkedPrNumber);
+
+        // Stale branches appear first in sorted list
+        Assert.Equal("stale", branches[0].Status);
+    }
+
     internal sealed class FakeCommandRunner : ICommandRunner
     {
         private readonly Func<string, IReadOnlyList<string>, CommandResult> _handler;

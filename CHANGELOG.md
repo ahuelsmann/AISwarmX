@@ -5,6 +5,15 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.6.0] - 2026-11-20 (PR #24)
+
+### Added
+- **Interactive Round Table Agents View (`AgentRoundTable.tsx`, `PipelineCard.tsx`):** Replaced wrapped participant pills on active PRs with a Fluent 2 **Round Table** SVG visualization (`PR`/`Issue` + Risk Class in center, `P1`/`P2`/`P3`/`P4` profile seats around the table, clockwise sequential workflow arrows, dashed steering spokes for `COO` & `Head of UI/UX`, hover/click inspector strip, explicit `N Agents` + overlapping avatar strip, and 1-click **`Round Table` / `Pills`** & **`Arrows: On / Off`** toggles).
+- **Branch Hygiene Monitoring (`WorktreeProvider.cs`, `DashboardSnapshotService.cs`, `HygieneAndSyncPanel.tsx`, `StatusHeader.tsx`):** Scans local branches across `MOBAflow` and `MOBAdev` plus `MOBAflow` remote-tracking `origin/*` refs strictly read-only, surfaces `Local Stale`, `Remote Stale`, and `Active` counts in a new **Branch Hygiene** card, and includes stale branch counts in header warnings & breakdown popover (`View Branches`).
+- **Branch & Worktree Hygiene Rule (`manifest.md`, `docs/delivery-workflow.md`, `agents/antigravity/rules/mobaflow-agent-network.md`):** Codified mandatory post-merge cleanup (remove worktree, delete local and remote feature branches, and run `git fetch --prune`).
+
+---
+
 ## [3.5.6] - 2026-11-20 (PR #23)
 
 ### Changed
