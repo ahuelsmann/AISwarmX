@@ -115,9 +115,9 @@ public sealed class ConfigDocsProvider
         AddSingleIfAllowed(entries, scope, repo, root, "manifest.md", "Core");
         AddSingleIfAllowed(entries, scope, repo, root, "README.md", "Core");
         AddSingleIfAllowed(entries, scope, repo, root, "CHANGELOG.md", "Core");
+        AddDirectoryMarkdown(entries, scope, repo, root, Path.Combine("agents", "claude", "agents"), "Claude Agents");
         AddDirectoryMarkdown(entries, scope, repo, root, Path.Combine("agents", "antigravity", "agents"), "Antigravity Agents");
         AddDirectoryMarkdown(entries, scope, repo, root, Path.Combine("agents", "antigravity", "rules"), "Antigravity Rules");
-        AddDirectoryMarkdown(entries, scope, repo, root, Path.Combine("agents", "claude", "agents"), "Claude Agents");
         AddSkillsMarkdown(entries, scope, repo, root);
         AddDirectoryMarkdown(entries, scope, repo, root, "docs", "Docs");
         AddSingleIfAllowed(entries, scope, repo, root, "dashboard/DESIGN.md", "Dashboard");

@@ -1,6 +1,6 @@
 # MOBAdev Agent Swarm Gen#3 Dashboard — Architektur- & UI/UX-Konzept
 
-**Status:** Umgesetzt (v3.5.5 / Gen#3 — Slices 1–6 komplett inkl. 1:1 `Kanban Board`-Ansicht, PR `BLOCKED`-Begründung, Compact Monitors, Warning Popover, Merge Gates, Rules Diff, Git Strategy Top-Row & Read-Only `Configuration`-Tab)  
+**Status:** Umgesetzt (v3.5.6 / Gen#3 — Slices 1–6 komplett inkl. einheitlicher Tool-Reihenfolge `ChatGPT/GPT → Claude/Opus → Antigravity/Gemini`, 1:1 `Kanban Board`-Ansicht, Live-CHANGELOG-Badge, Merge Gates, Rules Diff, Git Strategy Top-Row & `Configuration`-Tab)  
 **Verantwortlich:** `Antigravity Monitor` (`Head of AI Strategy`, `P3`) gemeinsam mit `Head of UI/UX` (`P3`)  
 **Ziel-Repository:** `ahuelsmann/MOBAdev` (`PRIVATE`, unter `dashboard/`)  
 **Stack:** ASP.NET Core Minimal API (`.NET 10`) + React (`TypeScript` + `Vite`)
@@ -168,11 +168,12 @@ Die Umsetzung läuft parallel zum `MOBAflow`-Refactoring in 3 kleinen, unabhäng
 
 ---
 
-## 9. Gen#3 Evolution (v3.4.0 – v3.5.3) — Polish, Merge Gates, Rules Diff, Kanban & Configuration Tab (Slice 6+)
+## 9. Gen#3 Evolution (v3.4.0 – v3.5.6) — Polish, Merge Gates, Rules Diff, Kanban & Configuration Tab (Slice 6+)
 - **Titel-Update (`MOBAdev Agent Swarm Gen#3`) & Header-Warning-Breakdown:** Interaktives Fluent-`Popover` auf dem `Warnings`-Badge schlüsselt Regel-Drift, veraltete Worktrees, Extra-Sessions und Kontingent-Pausen nach Quelle auf und bietet 1-Klick-Sprunglinks.
 - **Kompaktere Monitor-Karten & strikt einzeilige Triad-Leiste:** Einheitliche Baseline über alle 3 Monitor-Karten (`Active · Hourly` aus RRULEs im Inline-Chip); `Escalation: Human` in der Triad-Kopfzeile und präzises `Code WIP: N / 3 (+Docs)` passend zur MOBAflow-WIP-Regel (`Class L` ausgeschlossen).
 - **Korrigierte Writer-Erkennung (`PrParticipantExtractor`):** Explizite `- Writer:`-Slice-Header überschreiben Template-Texte (`P1-P4`), sodass z. B. `P4 slice builder (Claude)` korrekt als `P4` / `Claude Fable 5.2` erscheint.
 - **PR Merge-Gate-Fortschritt & Plain-English `UNSTABLE`:** Jede PR zeigt `Gates X/Y` (`Writer`, optional `Companion`, `CI & Sonar`, `P1 Final`, `Cross-Family`, `Auto-Merge`) sowie verständliche `Checks Pending` / `Checks Failing`-Badges.
 - **Einklappbare Stale-Worktrees & Read-Only Rules-Diff (`GET /api/governance/diff`):** Stale-Worktrees > 3 werden standardmäßig gekürzt; in `Matrix & Rules` zeigt `Show Diff` einen pfadgeschützten Unified Diff (`Target` vs. `Actual`) direkt im Cockpit.
-- **Read-Only `Configuration`-Tab (`MOBAdev`) & `Git & Delivery Strategy`:** Strikte Allow-List-Endpunkte (`GET /api/docs`, `GET /api/docs/content`) liefern versionierte `MOBAdev`-Markdown-Konfigurationen sicher an eine Master-Detail-Ansicht (`Formatted` / `Raw`) aus; `Matrix & Rules` fasst zusätzlich die 5 MOBAflow-Git-Invarianten mit Direktlinks zu `manifest.md` und `docs/delivery-workflow.md` zusammen.
+- **Read-Only `Configuration`-Tab (`MOBAdev`) & `Git & Delivery Strategy`:** Strikte Allow-List-Endpunkte (`GET /api/docs`, `GET /api/docs/content`) liefern versionierte `MOBAdev`-Markdown-Konfigurationen sicher an eine Master-Detail-Ansicht (`Formatted` / `Raw`) aus; `Matrix & Rules` fasst zusätzlich die 5 MOBAflow-Git-Invarianten mit Direktlinks zu `manifest.md` und `docs/delivery-workflow.md` zusammen (`Git & Delivery Strategy` als erste Zeile oben; `v3.5.5` ergänzt Live-Versionslabel aus `CHANGELOG.md` im Header sowie Workflow-Toggles `Kanban Board` → `Open PRs` → `Recently Merged`).
 - **`Kanban Board`-Sicht (1:1-Spiegel) & explizite PR `BLOCKED`-Gründe (`PipelineProvider`, `PipelineCard`):** Gefilterte GitHub-ProjectV2-GraphQL-Abfrage lädt alle aktiven Kanban-Elemente (`In review`, `In progress`, `Ready` — PRs & Issues gemeinsam ohne ausgeblendete Elemente) mit Spaltenzählern und Direktlink zum GitHub-Kanban; offene PRs zeigen konkrete Merge-Blocker (`Draft PR`, Konflikt, Review-Status, fehlgeschlagene/laufende Checks) direkt unter der PR-Zeile an.
+- **Einheitliche Tool-Reihenfolge & Profil-Farbharmonie (`v3.5.6`):** Monitore, Decision & Steering Triad, Session-Hygiene, Rules-Sync und Configuration-Gruppen folgen durchgängig der festen Reihenfolge **`ChatGPT/GPT (Codex) → Claude/Opus (Claude) → Antigravity/Gemini (Antigravity)`**; die drei Monitor-Familien entsprechen farblich direkt ihren Profilen (**`P2` Smaragd-Türkis `#2DD4A8`/`#0D7D63` · `P1` Orange · `P3` Hellblau `#4DA3FF`/`#0067B8`** inkl. `Orchestrator (Neon)` & `Head of AI Strategy`).

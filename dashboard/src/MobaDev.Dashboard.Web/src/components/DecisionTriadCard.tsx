@@ -74,15 +74,6 @@ interface SeatDefinition {
 
 const COUNCIL_SEATS: SeatDefinition[] = [
   {
-    monitorId: 'claude-monitor',
-    profile: 'P1',
-    shortTag: 'COO',
-    roleMatch: 'Chief Operating Officer (COO)',
-    tool: 'Claude Code',
-    fallbackModel: 'Claude Opus 5.5',
-    mandate: 'Cuts slices, assigns teams, grants Design Go & arms Auto-Merge'
-  },
-  {
     monitorId: 'codex-monitor',
     profile: 'P2',
     shortTag: 'CPM & TD',
@@ -90,6 +81,15 @@ const COUNCIL_SEATS: SeatDefinition[] = [
     tool: 'ChatGPT Codex',
     fallbackModel: 'Sol 6.2',
     mandate: 'Prioritizes backlog, validates build graph & holds scope/lock veto'
+  },
+  {
+    monitorId: 'claude-monitor',
+    profile: 'P1',
+    shortTag: 'COO',
+    roleMatch: 'Chief Operating Officer (COO)',
+    tool: 'Claude Code',
+    fallbackModel: 'Claude Opus 5.5',
+    mandate: 'Cuts slices, assigns teams, grants Design Go & arms Auto-Merge'
   },
   {
     monitorId: 'antigravity-monitor',
