@@ -242,11 +242,11 @@ interface PipelineCardProps {
 
 type PipelineViewMode = 'open' | 'issues' | 'merged';
 
-const KANBAN_GROUPS = ['In review', 'In progress', 'Ready', 'Via Open PR'] as const;
+const KANBAN_GROUPS = ['Ready', 'In progress', 'In review', 'Via Open PR'] as const;
 
 export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
   const styles = useStyles();
-  const [viewMode, setViewMode] = useState<PipelineViewMode>('open');
+  const [viewMode, setViewMode] = useState<PipelineViewMode>('issues');
 
   const allKanbanItems = pipeline.activeIssues ?? [];
   const inReviewItems = allKanbanItems.filter((i) => i.kanbanStatus.toLowerCase() === 'in review');
@@ -257,9 +257,9 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
   );
 
   const columnGroups: { label: string; items: ActiveIssueInfo[] }[] = [
-    { label: 'In review', items: inReviewItems },
-    { label: 'In progress', items: inProgressItems },
     { label: 'Ready', items: readyItems },
+    { label: 'In progress', items: inProgressItems },
+    { label: 'In review', items: inReviewItems },
     ...(fallbackItems.length > 0 ? [{ label: 'Via Open PR', items: fallbackItems }] : [])
   ].filter((g) => g.items.length > 0);
 
@@ -283,7 +283,7 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
             checked={viewMode === 'issues'}
             onClick={() => setViewMode('issues')}
           >
-            <span className="tabular">Kanban Board ({allKanbanItems.length})</span>
+            <span className="tabular">Open Issues ({allKanbanItems.length})</span>
           </ToggleButton>
           <ToggleButton
             size="small"
@@ -299,7 +299,7 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
             checked={viewMode === 'merged'}
             onClick={() => setViewMode('merged')}
           >
-            <span className="tabular">Recently Merged ({pipeline.recentlyMerged.length})</span>
+            <span className="tabular">Closed PRs ({pipeline.recentlyMerged.length})</span>
           </ToggleButton>
         </div>
       </div>
@@ -331,12 +331,12 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
         <div className={styles.emptyState}>
           <CheckmarkCircle16Regular style={{ width: 22, height: 22 }} aria-hidden="true" />
           <Text weight="semibold">
-            {viewMode === 'open' ? 'No open PRs in MOBAflow' : 'No recently merged PRs found'}
+            {viewMode === 'open' ? 'No open PRs in MOBAflow' : 'No closed PRs found'}
           </Text>
           <Text size={200}>
             {viewMode === 'open'
               ? 'All changes are currently integrated on main.'
-              : 'Merged tasks will appear here with their participating agents.'}
+              : 'Closed and merged PRs will appear here with their participating agents.'}
           </Text>
         </div>
       )}
@@ -359,14 +359,14 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
         <>
           <div className={styles.kanbanSummaryStrip}>
             <div className={styles.kanbanCountsGroup}>
-              <Badge appearance="tint" color="brand" shape="rounded" className="tabular">
-                In review: {inReviewItems.length}
+              <Badge appearance="tint" color="success" shape="rounded" className="tabular">
+                Ready: {readyItems.length}
               </Badge>
               <Badge appearance="tint" color="warning" shape="rounded" className="tabular">
                 In progress: {inProgressItems.length}
               </Badge>
-              <Badge appearance="tint" color="success" shape="rounded" className="tabular">
-                Ready: {readyItems.length}
+              <Badge appearance="tint" color="brand" shape="rounded" className="tabular">
+                In review: {inReviewItems.length}
               </Badge>
             </div>
 
@@ -392,7 +392,7 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
           {allKanbanItems.length === 0 ? (
             <div className={styles.emptyState}>
               <CheckmarkCircle16Regular style={{ width: 22, height: 22 }} aria-hidden="true" />
-              <Text weight="semibold">No active items on Kanban ({KANBAN_GROUPS.slice(0, 3).join(' / ')})</Text>
+              <Text weight="semibold">No open issues on Kanban ({KANBAN_GROUPS.slice(0, 3).join(' / ')})</Text>
               <Text size={200}>
                 Issues and PRs in Ready, In progress, or In review appear here 1:1 with GitHub Kanban.
               </Text>
@@ -597,7 +597,7 @@ function PullRequestRow({
         }
         participants={pr.participants}
         isDark={isDark}
-        defaultView={isMerged ? 'pills' : 'table'}
+        defaultView="table"
         renderPills={() => (
           <div className={styles.participantsRow}>
             {pr.participants.map((participant) => (
@@ -1137,35 +1137,37 @@ function KanbanItemRow({
         </div>
       )}
 
-      {issue.participants.length > 0 && (
-        <AgentRoundTable
-          centerLabel={`${isPr ? 'PR' : 'Issue'} #${issue.number}`}
-          centerSub={`${issue.kanbanStatus}${issue.riskClass ? ` · Class ${issue.riskClass}` : ''}`}
-          centerStatus={issue.priority ?? issue.kanbanStatus}
-          centerTone={
-            issue.kanbanStatus.toLowerCase() === 'in review'
-              ? ('blue' as AccentTone)
-              : issue.kanbanStatus.toLowerCase() === 'ready'
-                ? ('green' as AccentTone)
-                : ('gold' as AccentTone)
-          }
-          participants={issue.participants}
-          isDark={isDark}
-          defaultView="pills"
-          renderPills={() => (
-            <div className={styles.participantsRow}>
-              {issue.participants.map((participant) => (
-                <ParticipantPill
-                  key={`${participant.role}-${participant.tool}-${participant.profile}`}
-                  participant={participant}
-                  isDark={isDark}
-                  styles={styles}
-                />
-              ))}
-            </div>
-          )}
-        />
-      )}
+      <AgentRoundTable
+        centerLabel={`${isPr ? 'PR' : 'Issue'} #${issue.number}`}
+        centerSub={
+          issue.riskClass
+            ? `Class ${issue.riskClass}`
+            : (issue.area ?? (isPr ? 'Pull Request' : 'GitHub Issue'))
+        }
+        centerStatus={issue.kanbanStatus}
+        centerTone={
+          issue.kanbanStatus.toLowerCase() === 'in review'
+            ? ('blue' as AccentTone)
+            : issue.kanbanStatus.toLowerCase() === 'ready'
+              ? ('green' as AccentTone)
+              : ('gold' as AccentTone)
+        }
+        participants={issue.participants}
+        isDark={isDark}
+        defaultView="table"
+        renderPills={() => (
+          <div className={styles.participantsRow}>
+            {issue.participants.map((participant) => (
+              <ParticipantPill
+                key={`${participant.role}-${participant.tool}-${participant.profile}`}
+                participant={participant}
+                isDark={isDark}
+                styles={styles}
+              />
+            ))}
+          </div>
+        )}
+      />
     </div>
   );
 }

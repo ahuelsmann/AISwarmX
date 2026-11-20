@@ -5,6 +5,14 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.6.1] - 2026-11-20
+
+### Changed
+- **Pipeline Renaming & Workflow Order (`PipelineCard.tsx`, `PipelineProvider.cs`):** Renamed the `Task & PR Pipeline` toggles to **`Open Issues (N)` → `Open PRs (N)` → `Closed PRs (N)`** (`Open Issues` active by default) and aligned Kanban workflow ordering to **`Ready` → `In progress` → `In review`** across summary counters, column groups, and backend ranking (`KanbanStatusRank`).
+- **Universal Round Table & Framed Agent Visitenkarten (`AgentRoundTable.tsx`, `PipelineCard.tsx`, `PrParticipantExtractor.cs`):** Made the graphical **Round Table** default across all three pipeline views (`Open Issues`, `Open PRs`, `Closed PRs`), including `0`-agent items and Kanban `Writer` participant synthesis (`TryParseKanbanWriter`), and redesigned agent labels into framed Visitenkarten (profile accent bar, role, tool, monospace model, status pill) positioned strictly outside the orbit with vertical collision relaxation so workflow arrows never cross text.
+
+---
+
 ## [3.6.0] - 2026-11-20 (PR #24)
 
 ### Added

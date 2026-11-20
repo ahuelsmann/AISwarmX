@@ -45,6 +45,92 @@ public static partial class PrParticipantExtractor
         return grouped;
     }
 
+    public static TaskParticipantInfo? TryParseKanbanWriter(string? writerField)
+    {
+        if (string.IsNullOrWhiteSpace(writerField))
+        {
+            return null;
+        }
+
+        var trimmed = writerField.Trim();
+        if (trimmed.Equals("none", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("-", StringComparison.Ordinal) ||
+            trimmed.Equals("—", StringComparison.Ordinal) ||
+            trimmed.Equals("n/a", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("tbd", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return BuildWriterParticipant(
+            trimmed,
+            branch: string.Empty,
+            status: "Active",
+            evidenceSource: "Kanban Writer");
+    }
+
+    private static TaskParticipantInfo BuildWriterParticipant(
+        string writerText,
+        string branch,
+        string status,
+        string evidenceSource)
+    {
+        var profileMatch = ProfileCodeRegex().Match(writerText);
+
+        string tool;
+        string agent;
+        if (writerText.Contains("Codex", StringComparison.OrdinalIgnoreCase) ||
+            writerText.Contains("GPT", StringComparison.OrdinalIgnoreCase) ||
+            writerText.Contains("Sol", StringComparison.OrdinalIgnoreCase) ||
+            branch.StartsWith("codex/", StringComparison.OrdinalIgnoreCase))
+        {
+            tool = "ChatGPT Codex";
+            agent = "Codex Writer";
+        }
+        else if (writerText.Contains("Antigravity", StringComparison.OrdinalIgnoreCase) ||
+                 writerText.Contains("Gemini", StringComparison.OrdinalIgnoreCase) ||
+                 writerText.Contains("Hydrogen", StringComparison.OrdinalIgnoreCase) ||
+                 writerText.Contains("Argon", StringComparison.OrdinalIgnoreCase) ||
+                 writerText.Contains("Neon", StringComparison.OrdinalIgnoreCase) ||
+                 branch.StartsWith("antigravity/", StringComparison.OrdinalIgnoreCase))
+        {
+            tool = "Antigravity";
+            agent = "Antigravity Writer";
+        }
+        else
+        {
+            tool = "Claude Code";
+            agent = "Claude Writer";
+        }
+
+        var profile = profileMatch.Success
+            ? profileMatch.Groups[1].Value.ToUpperInvariant()
+            : tool switch
+            {
+                "ChatGPT Codex" => "P2",
+                "Antigravity" => "P3",
+                _ => "P1"
+            };
+
+        var model = (tool, profile) switch
+        {
+            ("Claude Code", "P4") => "Claude Fable 5.2",
+            ("Claude Code", _) => "Claude Opus 5.5",
+            ("ChatGPT Codex", _) => "GPT-6 Astra",
+            ("Antigravity", "P4") => "Gemini 4 Hydrogen",
+            _ => "Gemini 4 Argon"
+        };
+
+        return new TaskParticipantInfo(
+            Agent: agent,
+            Tool: tool,
+            Role: "Writer",
+            Profile: profile,
+            Model: model,
+            Status: status,
+            EvidenceSource: evidenceSource);
+    }
+
     private static void AddWriterFromEvidence(
         string branch,
         string body,
@@ -54,57 +140,11 @@ public static partial class PrParticipantExtractor
         var writerHeader = WriterHeaderLineRegex().Match(body);
         if (writerHeader.Success)
         {
-            var writerLine = writerHeader.Groups[1].Value.Trim();
-            var profileMatch = ProfileCodeRegex().Match(writerLine);
-
-            string tool;
-            string agent;
-            if (writerLine.Contains("Codex", StringComparison.OrdinalIgnoreCase) ||
-                writerLine.Contains("GPT", StringComparison.OrdinalIgnoreCase) ||
-                branch.StartsWith("codex/", StringComparison.OrdinalIgnoreCase))
-            {
-                tool = "ChatGPT Codex";
-                agent = "Codex Writer";
-            }
-            else if (writerLine.Contains("Antigravity", StringComparison.OrdinalIgnoreCase) ||
-                     writerLine.Contains("Gemini", StringComparison.OrdinalIgnoreCase) ||
-                     branch.StartsWith("antigravity/", StringComparison.OrdinalIgnoreCase))
-            {
-                tool = "Antigravity";
-                agent = "Antigravity Writer";
-            }
-            else
-            {
-                tool = "Claude Code";
-                agent = "Claude Writer";
-            }
-
-            var profile = profileMatch.Success
-                ? profileMatch.Groups[1].Value.ToUpperInvariant()
-                : tool switch
-                {
-                    "ChatGPT Codex" => "P2",
-                    "Antigravity" => "P3",
-                    _ => "P1"
-                };
-
-            var model = (tool, profile) switch
-            {
-                ("Claude Code", "P4") => "Claude Fable 5.2",
-                ("Claude Code", _) => "Claude Opus 5.5",
-                ("ChatGPT Codex", _) => "GPT-6 Astra",
-                ("Antigravity", "P4") => "Gemini 4 Hydrogen",
-                _ => "Gemini 4 Argon"
-            };
-
-            candidates.Add((0, new TaskParticipantInfo(
-                Agent: agent,
-                Tool: tool,
-                Role: "Writer",
-                Profile: profile,
-                Model: model,
-                Status: "Implemented",
-                EvidenceSource: "Slice Header")));
+            candidates.Add((0, BuildWriterParticipant(
+                writerHeader.Groups[1].Value.Trim(),
+                branch,
+                status: "Implemented",
+                evidenceSource: "Slice Header")));
             return;
         }
 

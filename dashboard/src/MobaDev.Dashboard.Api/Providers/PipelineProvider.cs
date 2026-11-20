@@ -430,7 +430,12 @@ public sealed partial class PipelineProvider
                         ? item.LockedAreas
                         : matchedPr?.LockedAreas ?? [];
 
-                    var participants = matchedPr?.Participants ?? [];
+                    IReadOnlyList<TaskParticipantInfo> participants = matchedPr?.Participants ?? [];
+                    if (participants.Count == 0 &&
+                        PrParticipantExtractor.TryParseKanbanWriter(writer) is { } kanbanPrWriter)
+                    {
+                        participants = [kanbanPrWriter];
+                    }
                     var linkedIssues = matchedPr?.LinkedIssues ?? [];
                     var driftReason = item.GitHubState is "MERGED" or "CLOSED"
                         ? "Merged/Closed on GitHub — move to Done on Kanban"
@@ -468,7 +473,8 @@ public sealed partial class PipelineProvider
                     .ToList();
 
                 var linkedPullRequests = BuildLinkedPrRefs(linkedOpenPrs, linkedMergedPrs);
-                var issueParticipants = MergeParticipants(linkedOpenPrs.Count > 0 ? linkedOpenPrs : linkedMergedPrs);
+                IReadOnlyList<TaskParticipantInfo> issueParticipants =
+                    MergeParticipants(linkedOpenPrs.Count > 0 ? linkedOpenPrs : linkedMergedPrs);
 
                 var issueRiskClass = item.RiskClass ??
                                      linkedOpenPrs
@@ -481,6 +487,12 @@ public sealed partial class PipelineProvider
                         .SelectMany(p => p.Participants)
                         .FirstOrDefault(pt => string.Equals(pt.Role, "Writer", StringComparison.OrdinalIgnoreCase))
                         ?.Agent;
+
+                if (issueParticipants.Count == 0 &&
+                    PrParticipantExtractor.TryParseKanbanWriter(issueWriter) is { } kanbanIssueWriter)
+                {
+                    issueParticipants = [kanbanIssueWriter];
+                }
 
                 var issueLockedAreas = item.LockedAreas.Count > 0
                     ? item.LockedAreas
@@ -653,7 +665,7 @@ public sealed partial class PipelineProvider
 
     private static int KanbanStatusRank(string status)
     {
-        if (string.Equals(status, "In review", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase))
         {
             return 0;
         }
@@ -663,7 +675,7 @@ public sealed partial class PipelineProvider
             return 1;
         }
 
-        if (string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(status, "In review", StringComparison.OrdinalIgnoreCase))
         {
             return 2;
         }
