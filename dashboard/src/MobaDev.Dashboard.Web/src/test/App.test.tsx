@@ -18,7 +18,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
     bindAddress: 'http://127.0.0.1:5179',
     overallStatus: 'warnings',
     warningCount: 10,
-    changelogVersion: '3.6.0',
+    changelogVersion: '3.6.1',
     monitors: {
       generatedAtUtc: nowIso,
       source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
@@ -550,9 +550,9 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(
       await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' })
     ).toBeInTheDocument();
-    expect(screen.getByText('v3.6.0')).toBeInTheDocument();
+    expect(screen.getByText('v3.6.1')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Version v3.6.0 — open CHANGELOG.md' })
+      screen.getByRole('button', { name: 'Version v3.6.1 — open CHANGELOG.md' })
     ).toBeInTheDocument();
     expect(screen.getByText('Read-Only · 127.0.0.1')).toBeInTheDocument();
 
@@ -562,9 +562,9 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
       .getAllByRole('button')
       .map((btn) => btn.textContent?.trim());
     expect(pipelineToggleLabels).toEqual([
-      'Kanban Board (4)',
+      'Open Issues (4)',
       'Open PRs (1)',
-      'Recently Merged (1)'
+      'Closed PRs (1)'
     ]);
 
     // Row 1: Compact monitor cards ordered Codex -> Claude -> Antigravity with human-friendly RRULE label
@@ -599,7 +599,8 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(resolveRoleVisual('Technical Director & CPM').tone).toBe('teal');
     expect(resolveProfileTone('P2')).toBe('teal');
 
-    // Row 3: PR #492 with Checks Pending (UNSTABLE), Merge Gates, linked issue & Round Table default view
+    // Row 3: Switch to Open PRs (#492 with Checks Pending, Merge Gates, linked issue & Round Table Visitenkarte)
+    await user.click(screen.getByRole('button', { name: /Open PRs \(1\)/i }));
     expect(screen.getByText('Repository: ahuelsmann/MOBAflow')).toBeInTheDocument();
     expect(screen.getAllByText('#492').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Checks Pending')).toBeInTheDocument();
@@ -607,8 +608,13 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(screen.getByText('Issue #366')).toBeInTheDocument();
     expect(screen.getByText('1 Agent')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Round table of 1 Agent for #492' })).toBeInTheDocument();
-    expect(screen.getByText('GPT-6 Astra · Implemented')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Pills' }));
+    expect(screen.getByText('GPT-6 Astra')).toBeInTheDocument();
+    expect(screen.getByText('Implemented')).toBeInTheDocument();
+    const pipelineSection = screen.getByLabelText('Task and PR Pipeline MOBAflow');
+    await user.click(within(pipelineSection).getByRole('button', { name: 'Pills' }));
+    expect(
+      screen.queryByRole('img', { name: 'Round table of 1 Agent for #492' })
+    ).not.toBeInTheDocument();
     expect(screen.getByText('GPT-6 Astra')).toBeInTheDocument();
     expect(screen.getByText(/missing read:project scope/i)).toBeInTheDocument();
 
@@ -626,18 +632,19 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     await user.click(screen.getByRole('button', { name: /Show all 4 stale worktrees/i }));
     expect(screen.getByText('codex/old-4')).toBeInTheDocument();
 
-    // Switch to Recently Merged tasks and test Pills + Round Table + Arrows toggle
-    await user.click(screen.getByRole('button', { name: /Recently Merged \(1\)/i }));
-    expect(screen.getByText('#495')).toBeInTheDocument();
+    // Switch to Closed PRs: Round Table renders by default + Arrows toggle + Pills view switch
+    await user.click(screen.getByRole('button', { name: /Closed PRs \(1\)/i }));
+    expect(screen.getAllByText('#495').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('2 Agents')).toBeInTheDocument();
-    expect(screen.getByText('Final Reviewer')).toBeInTheDocument();
-    expect(screen.getByText('Claude Opus 5.5')).toBeInTheDocument();
-    expect(screen.getByText('Gemini 4 Argon')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Round Table' }));
     expect(screen.getByRole('img', { name: 'Round table of 2 Agents for #495' })).toBeInTheDocument();
     const arrowsBtn = screen.getByRole('button', { name: 'Arrows: On' });
     await user.click(arrowsBtn);
     expect(screen.getByRole('button', { name: 'Arrows: Off' })).toBeInTheDocument();
+    await user.click(within(pipelineSection).getByRole('button', { name: 'Pills' }));
+    expect(screen.getByText('Final Reviewer')).toBeInTheDocument();
+    expect(screen.getByText('Cross-Family Verifier')).toBeInTheDocument();
+    expect(screen.getByText('Claude Opus 5.5')).toBeInTheDocument();
+    expect(screen.getByText('Gemini 4 Argon')).toBeInTheDocument();
     },
     10_000
   );
@@ -727,6 +734,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
   it(
     'displays explicit BLOCKED reason banner directly under blocked PRs',
     async () => {
+      const user = userEvent.setup();
       const blockedSnapshot = createSnapshotFixture();
       blockedSnapshot.pipeline.pullRequests = [
         {
@@ -746,6 +754,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
       stubDashboardFetch(blockedSnapshot);
 
       render(<App />);
+      await user.click(await screen.findByRole('button', { name: /Open PRs \(1\)/i }));
       expect(await screen.findByText('BLOCKED')).toBeInTheDocument();
       expect(screen.getByText('Kanban: In review')).toBeInTheDocument();
       const blockedLabel = screen.getByText('Blocked reason:');
@@ -758,19 +767,25 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
   );
 
   it(
-    'displays 1:1 Kanban Board view with In review PRs, In progress Issues, No PR yet, and inline drift without hiding items',
+    'displays Open Issues by default in workflow order (Ready -> In progress -> In review) with Round Table everywhere',
     async () => {
-      const user = userEvent.setup();
       stubDashboardFetch();
 
       render(<App />);
       await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
 
-      await user.click(screen.getByRole('button', { name: /Kanban Board \(4\)/i }));
+      const pipelineSection = screen.getByLabelText('Task and PR Pipeline MOBAflow');
+      expect(within(pipelineSection).getByText('Ready: 0')).toBeInTheDocument();
+      expect(within(pipelineSection).getByText('In progress: 3')).toBeInTheDocument();
+      expect(within(pipelineSection).getByText('In review: 1')).toBeInTheDocument();
 
-      expect(await screen.findByText('In review: 1')).toBeInTheDocument();
-      expect(screen.getByText('In progress: 3')).toBeInTheDocument();
-      expect(screen.getByText('Ready: 0')).toBeInTheDocument();
+      const pipelineText = pipelineSection.textContent ?? '';
+      expect(pipelineText.indexOf('Ready: 0')).toBeLessThan(pipelineText.indexOf('In progress: 3'));
+      expect(pipelineText.indexOf('In progress: 3')).toBeLessThan(pipelineText.indexOf('In review: 1'));
+      expect(pipelineText.indexOf('In progress (3)')).toBeLessThan(
+        pipelineText.indexOf('In review (1)')
+      );
+
       expect(screen.getByRole('link', { name: /Open GitHub Kanban/i })).toHaveAttribute(
         'href',
         'https://github.com/users/ahuelsmann/projects/1'
@@ -780,11 +795,15 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
         screen.getByText('ci(quality): enforce C# whitespace gate (RF-10 slice 3)')
       ).toBeInTheDocument();
       expect(screen.getByText('RF-10: Formatting baseline and gate')).toBeInTheDocument();
-      expect(screen.getByText('PR #501')).toBeInTheDocument();
+      expect(screen.getAllByText('PR #501').length).toBeGreaterThanOrEqual(2);
       expect(
         screen.getByText('Quality and refactoring programme: RF-01 through RF-18')
       ).toBeInTheDocument();
       expect(screen.getByText('No PR yet')).toBeInTheDocument();
+
+      // Round Table renders graphically by default even on 0-agent open issues
+      expect(screen.getByRole('img', { name: 'Round table of 0 Agents for Issue #47' })).toBeInTheDocument();
+      expect(screen.getAllByText('Awaiting Agent Assignment').length).toBeGreaterThanOrEqual(1);
 
       // Drift item is shown inline immediately (zero hidden items)
       expect(

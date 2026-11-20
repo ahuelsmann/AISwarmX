@@ -492,17 +492,9 @@ public sealed class PipelineAndWorktreeProviderTests
         Assert.Equal("https://github.com/users/ahuelsmann/projects/1", result.ProjectBoardUrl);
         Assert.Equal("In review", Assert.Single(result.PullRequests, p => p.Number == 501).ProjectStatus);
 
-        Assert.Equal([501, 451, 47, 136, 266], result.ActiveIssues.Select(i => i.Number).ToArray());
+        Assert.Equal([451, 47, 136, 266, 501], result.ActiveIssues.Select(i => i.Number).ToArray());
 
-        var pr501Item = result.ActiveIssues[0];
-        Assert.Equal("PullRequest", pr501Item.ItemKind);
-        Assert.Equal("In review", pr501Item.KanbanStatus);
-        Assert.Equal("L", pr501Item.RiskClass);
-        Assert.Equal(["quality.yml", "CONTRIBUTING.md"], pr501Item.LockedAreas);
-        Assert.Single(pr501Item.LinkedIssues, li => li.Number == 451);
-        Assert.Null(pr501Item.BoardDriftReason);
-
-        var issue451 = result.ActiveIssues[1];
+        var issue451 = result.ActiveIssues[0];
         Assert.Equal("Issue", issue451.ItemKind);
         Assert.Equal("In progress", issue451.KanbanStatus);
         Assert.Equal("L", issue451.RiskClass);
@@ -510,18 +502,135 @@ public sealed class PipelineAndWorktreeProviderTests
         Assert.Single(issue451.LinkedPullRequests, p => p.Number == 501);
         Assert.Null(issue451.BoardDriftReason);
 
-        var issue47 = result.ActiveIssues[2];
+        var issue47 = result.ActiveIssues[1];
         Assert.Equal("Issue", issue47.ItemKind);
         Assert.Equal("P0", issue47.Priority);
         Assert.Equal("Infrastructure", issue47.Area);
         Assert.Empty(issue47.LinkedPullRequests);
         Assert.Null(issue47.BoardDriftReason);
 
-        var issue136 = result.ActiveIssues[3];
+        var issue136 = result.ActiveIssues[2];
         Assert.Equal("No active PR or Writer (stale on board)", issue136.BoardDriftReason);
 
-        var issue266 = result.ActiveIssues[4];
+        var issue266 = result.ActiveIssues[3];
         Assert.Equal("Closed on GitHub — move to Done on Kanban", issue266.BoardDriftReason);
+
+        var pr501Item = result.ActiveIssues[4];
+        Assert.Equal("PullRequest", pr501Item.ItemKind);
+        Assert.Equal("In review", pr501Item.KanbanStatus);
+        Assert.Equal("L", pr501Item.RiskClass);
+        Assert.Equal(["quality.yml", "CONTRIBUTING.md"], pr501Item.LockedAreas);
+        Assert.Single(pr501Item.LinkedIssues, li => li.Number == 451);
+        Assert.Null(pr501Item.BoardDriftReason);
+    }
+
+    [Fact]
+    public async Task PipelineProvider_OrdersKanbanWorkflowReadyInProgressInReviewAndSynthesizesKanbanWriter()
+    {
+        var nowIso = DateTimeOffset.UtcNow.ToString("O");
+        var graphQlJson = $$"""
+            {
+              "data": {
+                "user": {
+                  "projectV2": {
+                    "items": {
+                      "nodes": [
+                        {
+                          "fieldValues": {
+                            "nodes": [
+                              { "name": "In review", "field": { "name": "Status" } }
+                            ]
+                          },
+                          "content": {
+                            "__typename": "PullRequest",
+                            "number": 510,
+                            "title": "docs: review item",
+                            "url": "https://github.com/ahuelsmann/MOBAflow/pull/510",
+                            "state": "OPEN",
+                            "isDraft": false,
+                            "updatedAt": "{{nowIso}}"
+                          }
+                        },
+                        {
+                          "fieldValues": {
+                            "nodes": [
+                              { "name": "In progress", "field": { "name": "Status" } },
+                              { "name": "Antigravity (P4 Hydrogen)", "field": { "name": "Writer" } }
+                            ]
+                          },
+                          "content": {
+                            "__typename": "Issue",
+                            "number": 430,
+                            "title": "MOBAflow Web Demo",
+                            "url": "https://github.com/ahuelsmann/MOBAflow/issues/430",
+                            "state": "OPEN",
+                            "updatedAt": "{{nowIso}}"
+                          }
+                        },
+                        {
+                          "fieldValues": {
+                            "nodes": [
+                              { "name": "Ready", "field": { "name": "Status" } }
+                            ]
+                          },
+                          "content": {
+                            "__typename": "Issue",
+                            "number": 431,
+                            "title": "Ready issue without writer",
+                            "url": "https://github.com/ahuelsmann/MOBAflow/issues/431",
+                            "state": "OPEN",
+                            "updatedAt": "{{nowIso}}"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        var runner = new FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("open"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("merged"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("issue"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("graphql"))
+            {
+                return new CommandResult(0, graphQlJson, string.Empty);
+            }
+
+            return new CommandResult(1, string.Empty, "unexpected");
+        });
+
+        var provider = new PipelineProvider(runner);
+        var result = await provider.GetPipelineAsync(new DashboardOptions(), CancellationToken.None);
+
+        Assert.Equal([431, 430, 510], result.ActiveIssues.Select(i => i.Number).ToArray());
+
+        var issue430 = result.ActiveIssues[1];
+        var writer = Assert.Single(issue430.Participants);
+        Assert.Equal("Writer", writer.Role);
+        Assert.Equal("P4", writer.Profile);
+        Assert.Equal("Antigravity", writer.Tool);
+        Assert.Equal("Gemini 4 Hydrogen", writer.Model);
+        Assert.Equal("Active", writer.Status);
+        Assert.Equal("Kanban Writer", writer.EvidenceSource);
+
+        var issue431 = result.ActiveIssues[0];
+        Assert.Empty(issue431.Participants);
     }
 
     [Fact]
