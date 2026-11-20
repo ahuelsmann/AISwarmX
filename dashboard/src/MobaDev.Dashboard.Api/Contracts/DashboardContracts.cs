@@ -218,12 +218,23 @@ public sealed record WorktreeInfo(
     string Status,
     int? LinkedPrNumber);
 
+public sealed record BranchHygieneInfo(
+    string Repository,
+    string Name,
+    string Scope,
+    string Status,
+    bool UpstreamGone,
+    int? LinkedPrNumber);
+
 public sealed record HygieneResponse(
     DateTimeOffset GeneratedAtUtc,
     IReadOnlyList<ToolSessionHygiene> Sessions,
     IReadOnlyList<WorktreeInfo> Worktrees,
     int StaleWorktreeCount,
-    SourceHealth Source);
+    SourceHealth Source,
+    IReadOnlyList<BranchHygieneInfo>? Branches = null,
+    int StaleLocalBranchCount = 0,
+    int StaleRemoteBranchCount = 0);
 
 public sealed record DashboardSnapshot(
     DateTimeOffset GeneratedAtUtc,

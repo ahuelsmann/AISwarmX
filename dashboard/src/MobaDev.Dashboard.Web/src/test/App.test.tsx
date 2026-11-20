@@ -17,8 +17,8 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
     readOnly: true,
     bindAddress: 'http://127.0.0.1:5179',
     overallStatus: 'warnings',
-    warningCount: 7,
-    changelogVersion: '3.5.5',
+    warningCount: 10,
+    changelogVersion: '3.6.0',
     monitors: {
       generatedAtUtc: nowIso,
       source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
@@ -384,6 +384,42 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           status: 'main',
           linkedPrNumber: null
         }
+      ],
+      staleLocalBranchCount: 2,
+      staleRemoteBranchCount: 1,
+      branches: [
+        {
+          repository: 'MOBAflow',
+          name: 'claude/old-merged-branch',
+          scope: 'local',
+          status: 'stale',
+          upstreamGone: true,
+          linkedPrNumber: null
+        },
+        {
+          repository: 'MOBAdev',
+          name: 'ui/old-dev',
+          scope: 'local',
+          status: 'stale',
+          upstreamGone: true,
+          linkedPrNumber: null
+        },
+        {
+          repository: 'MOBAflow',
+          name: 'codex/stale-remote',
+          scope: 'remote',
+          status: 'stale',
+          upstreamGone: false,
+          linkedPrNumber: null
+        },
+        {
+          repository: 'MOBAflow',
+          name: 'codex/strategy-mobaflow-kanban-board',
+          scope: 'local',
+          status: 'active',
+          upstreamGone: false,
+          linkedPrNumber: 492
+        }
       ]
     },
     ...overrides
@@ -514,9 +550,9 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(
       await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' })
     ).toBeInTheDocument();
-    expect(screen.getByText('v3.5.5')).toBeInTheDocument();
+    expect(screen.getByText('v3.6.0')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Version v3.5.5 — open CHANGELOG.md' })
+      screen.getByRole('button', { name: 'Version v3.6.0 — open CHANGELOG.md' })
     ).toBeInTheDocument();
     expect(screen.getByText('Read-Only · 127.0.0.1')).toBeInTheDocument();
 
@@ -563,14 +599,26 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(resolveRoleVisual('Technical Director & CPM').tone).toBe('teal');
     expect(resolveProfileTone('P2')).toBe('teal');
 
-    // Row 3: PR #492 with Checks Pending (UNSTABLE), Merge Gates, linked issue & single-line participant pill
+    // Row 3: PR #492 with Checks Pending (UNSTABLE), Merge Gates, linked issue & Round Table default view
     expect(screen.getByText('Repository: ahuelsmann/MOBAflow')).toBeInTheDocument();
-    expect(screen.getByText('#492')).toBeInTheDocument();
+    expect(screen.getAllByText('#492').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Checks Pending')).toBeInTheDocument();
     expect(screen.getByText('Gates 1/5:')).toBeInTheDocument();
     expect(screen.getByText('Issue #366')).toBeInTheDocument();
+    expect(screen.getByText('1 Agent')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Round table of 1 Agent for #492' })).toBeInTheDocument();
+    expect(screen.getByText('GPT-6 Astra · Implemented')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Pills' }));
     expect(screen.getByText('GPT-6 Astra')).toBeInTheDocument();
     expect(screen.getByText(/missing read:project scope/i)).toBeInTheDocument();
+
+    // Branch Hygiene card shows local/remote stale counts and active branches
+    const branchCard = screen.getByLabelText('Branch Hygiene MOBAflow and MOBAdev');
+    expect(within(branchCard).getByText('3 Stale')).toBeInTheDocument();
+    expect(within(branchCard).getByText('claude/old-merged-branch')).toBeInTheDocument();
+    expect(within(branchCard).getByText('ui/old-dev')).toBeInTheDocument();
+    expect(within(branchCard).getByText('codex/stale-remote')).toBeInTheDocument();
+    expect(within(branchCard).getByText('Active (#492)')).toBeInTheDocument();
 
     // Stale worktrees collapsed when > 3 stale
     expect(screen.getByText('codex/old-1')).toBeInTheDocument();
@@ -578,12 +626,18 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     await user.click(screen.getByRole('button', { name: /Show all 4 stale worktrees/i }));
     expect(screen.getByText('codex/old-4')).toBeInTheDocument();
 
-    // Switch to Recently Merged tasks and verify multi-model participation
+    // Switch to Recently Merged tasks and test Pills + Round Table + Arrows toggle
     await user.click(screen.getByRole('button', { name: /Recently Merged \(1\)/i }));
     expect(screen.getByText('#495')).toBeInTheDocument();
+    expect(screen.getByText('2 Agents')).toBeInTheDocument();
     expect(screen.getByText('Final Reviewer')).toBeInTheDocument();
     expect(screen.getByText('Claude Opus 5.5')).toBeInTheDocument();
     expect(screen.getByText('Gemini 4 Argon')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Round Table' }));
+    expect(screen.getByRole('img', { name: 'Round table of 2 Agents for #495' })).toBeInTheDocument();
+    const arrowsBtn = screen.getByRole('button', { name: 'Arrows: On' });
+    await user.click(arrowsBtn);
+    expect(screen.getByRole('button', { name: 'Arrows: Off' })).toBeInTheDocument();
     },
     10_000
   );
@@ -595,12 +649,13 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     stubDashboardFetch();
 
     render(<App />);
-    const warnBtn = await screen.findByRole('button', { name: /7 Warnings — show breakdown/i });
+    const warnBtn = await screen.findByRole('button', { name: /10 Warnings — show breakdown/i });
     await user.click(warnBtn);
 
     expect(screen.getByText('Warning Breakdown')).toBeInTheDocument();
     expect(screen.getByText('1 Rule Drift / Missing')).toBeInTheDocument();
     expect(screen.getByText('4 Stale Worktrees')).toBeInTheDocument();
+    expect(screen.getByText('3 Stale Branches')).toBeInTheDocument();
     expect(screen.getByText('1 Extra Session')).toBeInTheDocument();
     expect(screen.getByText('1 Quota Pause')).toBeInTheDocument();
 

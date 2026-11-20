@@ -58,6 +58,170 @@ public sealed class WorktreeProvider
         return (sorted, new SourceHealth("ok", now));
     }
 
+    public async Task<(IReadOnlyList<BranchHygieneInfo> Branches, int StaleLocalCount, int StaleRemoteCount)> GetBranchHygieneAsync(
+        ResolvedDashboardPaths paths,
+        IReadOnlyList<PullRequestInfo> openPullRequests,
+        CancellationToken cancellationToken)
+    {
+        var openPrByBranch = openPullRequests
+            .Where(p => !string.IsNullOrWhiteSpace(p.Branch))
+            .GroupBy(p => p.Branch, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Number, StringComparer.OrdinalIgnoreCase);
+
+        var flowLocalTask = ReadLocalBranchesAsync(paths.MobaFlowRepoPath, "MOBAflow", openPrByBranch, cancellationToken);
+        var flowRemoteTask = ReadRemoteOriginBranchesAsync(paths.MobaFlowRepoPath, "MOBAflow", openPrByBranch, cancellationToken);
+        var devLocalTask = ReadLocalBranchesAsync(paths.MobaDevRepoPath, "MOBAdev", openPrByBranch: null, cancellationToken);
+
+        await Task.WhenAll(flowLocalTask, flowRemoteTask, devLocalTask).ConfigureAwait(false);
+
+        var all = new List<BranchHygieneInfo>();
+        all.AddRange(flowLocalTask.Result);
+        all.AddRange(flowRemoteTask.Result);
+        all.AddRange(devLocalTask.Result);
+
+        var sorted = all
+            .OrderBy(b => b.Status == "stale" ? 0 : 1)
+            .ThenBy(b => b.Scope == "local" ? 0 : 1)
+            .ThenBy(b => b.Repository, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var staleLocalCount = sorted.Count(b => b.Status == "stale" && b.Scope == "local");
+        var staleRemoteCount = sorted.Count(b => b.Status == "stale" && b.Scope == "remote");
+        return (sorted, staleLocalCount, staleRemoteCount);
+    }
+
+    private async Task<List<BranchHygieneInfo>> ReadLocalBranchesAsync(
+        string repoPath,
+        string repositoryLabel,
+        IReadOnlyDictionary<string, int>? openPrByBranch,
+        CancellationToken cancellationToken)
+    {
+        var list = new List<BranchHygieneInfo>();
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+        {
+            return list;
+        }
+
+        var result = await _commandRunner.RunAsync(
+            "git",
+            ["-C", repoPath, "for-each-ref", "--format=%(refname:short)|%(upstream:track)", "refs/heads"],
+            workingDirectory: null,
+            timeout: TimeSpan.FromSeconds(8),
+            cancellationToken).ConfigureAwait(false);
+
+        if (!result.Succeeded)
+        {
+            return list;
+        }
+
+        var normalized = result.StdOut.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        foreach (var rawLine in normalized.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = rawLine.Split('|', 2);
+            var name = parts[0].Trim();
+            if (string.IsNullOrWhiteSpace(name) || string.Equals(name, "main", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var track = parts.Length > 1 ? parts[1].Trim() : string.Empty;
+            var upstreamGone = track.Contains("[gone]", StringComparison.OrdinalIgnoreCase);
+            var (status, linkedPr) = ClassifyBranchStatus(name, openPrByBranch);
+
+            list.Add(new BranchHygieneInfo(
+                Repository: repositoryLabel,
+                Name: name,
+                Scope: "local",
+                Status: status,
+                UpstreamGone: upstreamGone,
+                LinkedPrNumber: linkedPr));
+        }
+
+        return list;
+    }
+
+    private async Task<List<BranchHygieneInfo>> ReadRemoteOriginBranchesAsync(
+        string repoPath,
+        string repositoryLabel,
+        IReadOnlyDictionary<string, int> openPrByBranch,
+        CancellationToken cancellationToken)
+    {
+        var list = new List<BranchHygieneInfo>();
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+        {
+            return list;
+        }
+
+        var result = await _commandRunner.RunAsync(
+            "git",
+            ["-C", repoPath, "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin"],
+            workingDirectory: null,
+            timeout: TimeSpan.FromSeconds(8),
+            cancellationToken).ConfigureAwait(false);
+
+        if (!result.Succeeded)
+        {
+            return list;
+        }
+
+        var normalized = result.StdOut.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        foreach (var rawLine in normalized.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var rawName = rawLine.Trim();
+            if (string.IsNullOrWhiteSpace(rawName) ||
+                string.Equals(rawName, "origin", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(rawName, "origin/HEAD", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(rawName, "origin/main", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var branchName = rawName.StartsWith("origin/", StringComparison.OrdinalIgnoreCase)
+                ? rawName["origin/".Length..]
+                : rawName;
+
+            if (string.IsNullOrWhiteSpace(branchName) ||
+                string.Equals(branchName, "main", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var (status, linkedPr) = ClassifyBranchStatus(branchName, openPrByBranch);
+            list.Add(new BranchHygieneInfo(
+                Repository: repositoryLabel,
+                Name: branchName,
+                Scope: "remote",
+                Status: status,
+                UpstreamGone: false,
+                LinkedPrNumber: linkedPr));
+        }
+
+        return list;
+    }
+
+    private static (string Status, int? LinkedPr) ClassifyBranchStatus(
+        string branchName,
+        IReadOnlyDictionary<string, int>? openPrByBranch)
+    {
+        if (openPrByBranch is null)
+        {
+            return ("stale", null);
+        }
+
+        if (openPrByBranch.TryGetValue(branchName, out var prNumber))
+        {
+            return ("active", prNumber);
+        }
+
+        if (string.Equals(branchName, "claude/review-from-start", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("active", null);
+        }
+
+        return ("stale", null);
+    }
+
     private static List<WorktreeInfo> ParsePorcelain(
         string stdOut,
         string mobaFlowRepoPath,

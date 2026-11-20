@@ -159,8 +159,9 @@ public sealed partial class DashboardSnapshotService
                 var antigravityTask = _antigravityProvider.GetMonitorAsync(paths, cancellationToken);
                 var governanceTask = _governanceProvider.GetGovernanceAsync(paths, cancellationToken);
                 var worktreeTask = _worktreeProvider.GetWorktreesAsync(paths, pipeline.PullRequests, cancellationToken);
+                var branchTask = _worktreeProvider.GetBranchHygieneAsync(paths, pipeline.PullRequests, cancellationToken);
 
-                await Task.WhenAll(claudeTask, codexTask, antigravityTask, governanceTask, worktreeTask).ConfigureAwait(false);
+                await Task.WhenAll(claudeTask, codexTask, antigravityTask, governanceTask, worktreeTask, branchTask).ConfigureAwait(false);
 
                 var monitorList = new[] { codexTask.Result, claudeTask.Result, antigravityTask.Result };
                 var monitorSource = AggregateSourceHealth(monitorList.Select(m => m.Source), now);
@@ -169,9 +170,18 @@ public sealed partial class DashboardSnapshotService
                 governance = governanceTask.Result;
 
                 var (worktrees, worktreeSource) = worktreeTask.Result;
+                var (branches, staleLocalBranches, staleRemoteBranches) = branchTask.Result;
                 var sessions = monitorList.Select(m => BuildSessionHygiene(m)).ToList();
                 var staleCount = worktrees.Count(w => w.Status == "stale");
-                hygiene = new HygieneResponse(now, sessions, worktrees, staleCount, worktreeSource);
+                hygiene = new HygieneResponse(
+                    now,
+                    sessions,
+                    worktrees,
+                    staleCount,
+                    worktreeSource,
+                    Branches: branches,
+                    StaleLocalBranchCount: staleLocalBranches,
+                    StaleRemoteBranchCount: staleRemoteBranches);
                 changelogVersion = ReadLatestChangelogVersion(paths.MobaDevRepoPath);
 
                 _cachedMonitors = monitors;
@@ -284,6 +294,7 @@ public sealed partial class DashboardSnapshotService
         warnings += hygiene.Sessions.Count(s => s.Status == "warning");
         warnings += governance.DriftCount + governance.MissingCount;
         warnings += hygiene.StaleWorktreeCount;
+        warnings += hygiene.StaleLocalBranchCount + hygiene.StaleRemoteBranchCount;
 
         var anyDegraded = new[]
         {

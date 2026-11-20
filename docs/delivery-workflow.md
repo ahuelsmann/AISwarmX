@@ -26,7 +26,7 @@ Roles define domain responsibilities and survive model updates (`Role != single 
 2. Write the acceptance tests first for new behavior. While a class `H` or `M` slice grows, push small commits early so the cross-family companion reviewer records per-commit findings on the PR. Before handing on a branch, merge the configured GitHub remote's current `main` into it and rerun affected checks. Shared branches are never rebased or force-pushed.
 3. The COO marks the Draft Ready after the applicable checks and SonarCloud evidence are current. Every slice (`H`, `M` and `L`) receives a fresh independent `P1` Claude review (Opus 5.5 or higher, never the writer's or companion's session) plus independent cross-family `P2`/`P3` verification on the exact head and base. The writer fixes findings and changed code receives a fresh independent re-review at the slice's risk class.
 4. The COO enables head-bound GitHub auto-merge for the reviewed commit once review findings, SonarCloud and the applicable mutation jobs meet the gates. Disarm before pushing any new commit.
-5. Verify the integration and release the lock. Record affected developer documentation and user wiki pages or why they need no change.
+5. Verify the integration and release the lock. Enforce **Branch & Worktree Hygiene** directly after merge: remove the slice worktree, delete the local branch, verify the remote branch is deleted (`--delete-branch`), and run `git fetch --prune`. Record affected developer documentation and user wiki pages or why they need no change.
 
 ## Restore the setup
 

@@ -17,3 +17,4 @@ part of the **Multi-Model Agent Network** alongside **Claude Code** and **ChatGP
   - To Claude Opus 5.5 (`P1` architecture/review consultations):
     `claude.exe --print --model claude-opus-5-5`
   - Shared board and slice tracking: [MOBAflow GitHub Kanban Board](https://github.com/users/ahuelsmann/projects/1) and linked `MOBAflow` issues/Draft PRs (`ahuelsmann/MOBAdev` manages only versioned AI configuration).
+- **Branch & worktree hygiene:** Remove slice worktrees and delete merged local/remote feature branches immediately after merge (`--delete-branch` + `git fetch --prune`), keeping only `main` and active open-slice or standing monitor branches.
