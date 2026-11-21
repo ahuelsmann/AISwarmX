@@ -38,6 +38,7 @@ public sealed class AntigravityMonitorProvider
                 ORDER BY last_modified_time DESC
                 """;
 
+            var runningConversationIds = new List<string>();
             var namedDesktopConversations = new List<AntigravityConversationRecord>();
             using var reader = command.ExecuteReader();
             while (reader.Read())
@@ -47,6 +48,12 @@ public sealed class AntigravityMonitorProvider
                 var status = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
                 var lastModifiedRaw = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
                 var source = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
+
+                if (string.Equals(status, "CASCADE_RUN_STATUS_RUNNING", StringComparison.OrdinalIgnoreCase) &&
+                    !string.IsNullOrWhiteSpace(id))
+                {
+                    runningConversationIds.Add(id);
+                }
 
                 if (string.Equals(source, "CORTEX_TRAJECTORY_SOURCE_CLI", StringComparison.OrdinalIgnoreCase) ||
                     string.IsNullOrWhiteSpace(title))
@@ -59,7 +66,11 @@ public sealed class AntigravityMonitorProvider
 
             if (namedDesktopConversations.Count == 0)
             {
-                return Task.FromResult(Unavailable(now, "ok", "No named Antigravity desktop session found."));
+                return Task.FromResult(Unavailable(
+                    now,
+                    "ok",
+                    "No named Antigravity desktop session found.",
+                    runningConversationIds.Count));
             }
 
             var selected = namedDesktopConversations
@@ -78,6 +89,9 @@ public sealed class AntigravityMonitorProvider
                 ? "busy"
                 : "standby";
 
+            var activeSubAgentCount = runningConversationIds.Count(id =>
+                !string.Equals(id, selected.Id, StringComparison.OrdinalIgnoreCase));
+
             var notice = namedDesktopConversations.Count > 1
                 ? $"{namedDesktopConversations.Count} named Antigravity sessions found in summaries (target: 1)."
                 : null;
@@ -94,7 +108,8 @@ public sealed class AntigravityMonitorProvider
                 RateLimitResetLabel: null,
                 ActiveSessionCount: namedDesktopConversations.Count,
                 AutomationStatus: null,
-                Source: new SourceHealth("ok", now, notice)));
+                Source: new SourceHealth("ok", now, notice),
+                ActiveSubAgentCount: activeSubAgentCount));
         }
         catch (SqliteException ex) when (SqliteReadOnlyHelper.IsBusyOrLocked(ex))
         {
@@ -112,7 +127,11 @@ public sealed class AntigravityMonitorProvider
         }
     }
 
-    private static MonitorInfo Unavailable(DateTimeOffset now, string sourceStatus, string notice)
+    private static MonitorInfo Unavailable(
+        DateTimeOffset now,
+        string sourceStatus,
+        string notice,
+        int activeSubAgentCount = 0)
     {
         return new MonitorInfo(
             Id: MonitorId,
@@ -126,7 +145,8 @@ public sealed class AntigravityMonitorProvider
             RateLimitResetLabel: null,
             ActiveSessionCount: 0,
             AutomationStatus: null,
-            Source: new SourceHealth(sourceStatus, now, notice));
+            Source: new SourceHealth(sourceStatus, now, notice),
+            ActiveSubAgentCount: activeSubAgentCount);
     }
 
     private sealed record AntigravityConversationRecord(

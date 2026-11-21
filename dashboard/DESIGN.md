@@ -1,6 +1,6 @@
 # MOBAdev Agent Swarm Gen#3 Dashboard — Architektur- & UI/UX-Konzept
 
-**Status:** Umgesetzt (v3.7.0 / Gen#3 — orthogonales 2-Achsen-Farbsystem mit WCAG-AA-Kontrastprüfung, interaktives `ColorLegendPopover`, `Round Table v2` mit nummerierten Workflow-Stationen & strikter Identitäts-/Status-Trennung, gemeinsame `StatusBadge`/`ContextChip`/`SectionCard`-Primitives, Runder-Tisch-Widget überall in `Open Issues` → `Open PRs` → `Closed PRs`, Workflow-Spaltenfolge `Ready` → `In progress` → `In review`, Branch-Hygiene-Monitor, einheitliche Tool-Reihenfolge `ChatGPT/GPT → Claude/Opus → Antigravity/Gemini`, Live-CHANGELOG-Badge & plain-English Glossar)  
+**Status:** Umgesetzt (v3.8.0 / Gen#3 — interaktiver **`Architecture`**-Tab mit 3 Live-SVG-Diagrammen für Schwarm-Topologie, Task-Lifecycle & Security-Boundary, Live-KPI-Leiste für stehende Monitore + aktive Laufzeit-Sub-Agenten, orthogonales 2-Achsen-Farbsystem mit WCAG-AA-Kontrastprüfung, `ColorLegendPopover`, `Round Table v2`, Workflow-Folge `Open Issues` → `Open PRs` → `Closed PRs` & `Ready` → `In progress` → `In review`, Branch-Hygiene-Monitor, einheitliche Tool-Reihenfolge `ChatGPT/GPT → Claude/Opus → Antigravity/Gemini` & plain-English Glossar)  
 **Verantwortlich:** `Antigravity Monitor` (`Head of AI Strategy`, `P3`) gemeinsam mit `Head of UI/UX` (`P3`)  
 **Ziel-Repository:** `ahuelsmann/MOBAdev` (`PRIVATE`, unter `dashboard/`)  
 **Stack:** ASP.NET Core Minimal API (`.NET 10`) + React (`TypeScript` + `Vite`)
@@ -191,3 +191,14 @@ Die Umsetzung läuft parallel zum `MOBAflow`-Refactoring in 3 kleinen, unabhäng
 - **Gemeinsame UI-Primitives & Konsistenz (`components/shared/`):** `StatusBadge`, `ContextChip`, `SectionCard`, `statusMaps.ts` und `theme/spacing.ts` ersetzen doppelte Inline-Badges und statische `color="brand"`-Chips across Header, Monitors, Triad, Pipeline, Hygiene & Sync, Matrix und Configuration.
 - **Interaktive Legende & `Round Table v2` (`ColorLegendPopover.tsx`, `AgentRoundTable.tsx`, `MonitorCards.tsx`, `DecisionTriadCard.tsx`):** Ein kompaktes `Legend`-Popover erklärt Achse 1, Achse 2 und Runder-Tisch-Symbole ohne Dauer-Ballast. Am Runden Tisch kodieren Sitzkreis & Visitenkarten-Balken strikt die AI-Identität, während ein Top-Right-Statuspunkt, die gerahmte Status-Pill und nummerierte Workflow-Stationen (`1→2→3`) den Live-Status bzw. Handover zeigen; Monitore erhalten Profil-Top-Akzente, Triad-Chips Live-Statuspunkte und `base.css` ergänzt `prefers-reduced-motion`-Schutz.
 - **Plain-English Glossar (`GlossaryTooltip.tsx`):** Neue einsteigerfreundliche Erklärungen für `Round Table`, `Color Semantics`, `Branch Hygiene`, `Closed PRs` und `Merge Gates`, aktualisiertes `P4` (Magenta-Orchid) sowie jargonfreie `UNSTABLE`-Erklärung (`Checks Pending / Checks Failing`).
+
+---
+
+## 11. Architektur-Diagramme & Live-Agenten-/Sub-Agenten-Telemetrie (ab v3.8.0)
+
+1. **Live Active Agents & Sub-Agents Strip (`ActiveAgentsStrip.tsx`):** Zeigt über den Monitor-Karten in `Live Operations` auf einen Blick an, wie viele stehende Monitore online/beschäftigt sind und wie viele **ephemere Laufzeit-Sub-Agenten** aktuell in den Tools laufen (aufgeschlüsselt nach `Codex → Claude → Antigravity`, strikt ohne Chat-Text-Lesen über `PathWhitelistGuard` / mtime / Laufstatus ermittelt).
+2. **Interaktiver `Architecture`-Tab (`ArchitectureDiagramsView.tsx`):** Visualisiert die Gesamtzusammenhänge als WCAG-AA-konforme Light/Dark-SVG-Diagramme mit Klick-/Fokus-Details:
+   - **Swarm Topology:** Maintainer → Decision & Steering Triad → Standing Monitors → Ephemeral Sub-Agents → Repositories & GitHub Kanban (mit Live-Zählern).
+   - **Task Lifecycle & Merge Gates:** `Planned → Ready (Maintainer Trigger) → In progress → In review → Done` mit Live-Zählern und Gate-Regeln.
+   - **Color & Read-Only Boundary:** 2-Achsen-Farbgrammatik neben den vier Sicherheitsgarantien (`127.0.0.1`, `GET`-Only, `PathWhitelistGuard`, Zero-Duplication).
+

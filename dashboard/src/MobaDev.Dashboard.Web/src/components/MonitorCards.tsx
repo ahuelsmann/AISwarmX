@@ -181,7 +181,19 @@ export function MonitorCards({ monitors, nowMs, isDark }: MonitorCardsProps) {
               </div>
 
               <div className={styles.footerRow}>
-                <ModelBadge model={monitor.model} isDark={isDark} mono />
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <ModelBadge model={monitor.model} isDark={isDark} mono />
+                  <Badge
+                    appearance="outline"
+                    color={(monitor.activeSubAgentCount ?? 0) > 0 ? 'warning' : 'subtle'}
+                    shape="rounded"
+                    size="small"
+                    className="tabular"
+                    title="Active or recently updated sub-agents (Antigravity: RUNNING state; Codex: 3m window; Claude: busy sessions + 2m mtime)"
+                  >
+                    Sub-agents: {monitor.activeSubAgentCount ?? 0}
+                  </Badge>
+                </div>
 
                 <span
                   className={styles.activityWrap}

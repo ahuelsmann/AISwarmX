@@ -17,6 +17,7 @@ public sealed partial class CodexMonitorProvider
     private const string Profile = "P2";
     private const string Tool = "ChatGPT Codex";
     private static readonly TimeSpan BusyThreshold = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan SubAgentActiveWindow = TimeSpan.FromMinutes(3);
 
     public Task<MonitorInfo> GetMonitorAsync(ResolvedDashboardPaths paths, CancellationToken cancellationToken)
     {
@@ -42,25 +43,32 @@ public sealed partial class CodexMonitorProvider
                 ORDER BY updated_at DESC
                 """;
 
+            var allActiveThreads = new List<CodexThreadRecord>();
             var standingThreads = new List<CodexThreadRecord>();
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
+                var id = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
                 var name = reader.IsDBNull(1) ? null : reader.GetString(1);
-                if (string.IsNullOrWhiteSpace(name) ||
-                    string.Equals(name, "Guardian review", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
                 var model = reader.IsDBNull(2) ? null : reader.GetString(2);
                 var updatedAtSeconds = reader.IsDBNull(3) ? 0L : reader.GetInt64(3);
-                standingThreads.Add(new CodexThreadRecord(name, model, updatedAtSeconds));
+                var isStanding = !string.IsNullOrWhiteSpace(name) &&
+                                 !string.Equals(name, "Guardian review", StringComparison.OrdinalIgnoreCase);
+
+                var record = new CodexThreadRecord(id, name ?? string.Empty, model, updatedAtSeconds);
+                allActiveThreads.Add(record);
+                if (isStanding)
+                {
+                    standingThreads.Add(record);
+                }
             }
+
+            var subAgentCutoffSeconds = now.Subtract(SubAgentActiveWindow).ToUnixTimeSeconds();
 
             if (standingThreads.Count == 0)
             {
-                return Task.FromResult(Unavailable(now, "ok", "No active Codex Monitor thread found.", automationStatus));
+                var fallbackSubAgents = allActiveThreads.Count(t => t.UpdatedAtSeconds >= subAgentCutoffSeconds);
+                return Task.FromResult(Unavailable(now, "ok", "No active Codex Monitor thread found.", automationStatus, fallbackSubAgents));
             }
 
             var selected = standingThreads
@@ -75,6 +83,10 @@ public sealed partial class CodexMonitorProvider
             var state = lastActivityUtc.HasValue && (now - lastActivityUtc.Value) <= BusyThreshold
                 ? "busy"
                 : "standby";
+
+            var activeSubAgentCount = allActiveThreads.Count(t =>
+                !string.Equals(t.Id, selected.Id, StringComparison.Ordinal) &&
+                t.UpdatedAtSeconds >= subAgentCutoffSeconds);
 
             var notice = standingThreads.Count > 1
                 ? $"{standingThreads.Count} non-archived named Codex threads active (target: 1)."
@@ -92,7 +104,8 @@ public sealed partial class CodexMonitorProvider
                 RateLimitResetLabel: null,
                 ActiveSessionCount: standingThreads.Count,
                 AutomationStatus: automationStatus,
-                Source: new SourceHealth("ok", now, notice)));
+                Source: new SourceHealth("ok", now, notice),
+                ActiveSubAgentCount: activeSubAgentCount));
         }
         catch (SqliteException ex) when (SqliteReadOnlyHelper.IsBusyOrLocked(ex))
         {
@@ -116,7 +129,8 @@ public sealed partial class CodexMonitorProvider
         DateTimeOffset now,
         string sourceStatus,
         string notice,
-        string? automationStatus)
+        string? automationStatus,
+        int activeSubAgentCount = 0)
     {
         return new MonitorInfo(
             Id: MonitorId,
@@ -130,7 +144,8 @@ public sealed partial class CodexMonitorProvider
             RateLimitResetLabel: null,
             ActiveSessionCount: 0,
             AutomationStatus: automationStatus,
-            Source: new SourceHealth(sourceStatus, now, notice));
+            Source: new SourceHealth(sourceStatus, now, notice),
+            ActiveSubAgentCount: activeSubAgentCount);
     }
 
     private static string? ReadAutomationStatus(string codexHomePath)
@@ -178,5 +193,5 @@ public sealed partial class CodexMonitorProvider
     [GeneratedRegex("^rrule\\s*=\\s*\"([^\"]+)\"", RegexOptions.Multiline)]
     private static partial Regex TomlRruleRegex();
 
-    private sealed record CodexThreadRecord(string Name, string? Model, long UpdatedAtSeconds);
+    private sealed record CodexThreadRecord(string Id, string Name, string? Model, long UpdatedAtSeconds);
 }

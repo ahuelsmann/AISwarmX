@@ -18,10 +18,17 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
     bindAddress: 'http://127.0.0.1:5179',
     overallStatus: 'warnings',
     warningCount: 10,
-    changelogVersion: '3.7.0',
+    changelogVersion: '3.8.0',
     monitors: {
       generatedAtUtc: nowIso,
       source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
+      summary: {
+        standingMonitorsTotal: 3,
+        standingMonitorsOnline: 3,
+        standingMonitorsBusy: 1,
+        activeSubAgentsTotal: 2,
+        totalActiveAgents: 3
+      },
       monitors: [
         {
           id: 'claude-monitor',
@@ -35,7 +42,8 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           rateLimitResetLabel: '12am (Europe/Berlin)',
           activeSessionCount: 1,
           automationStatus: null,
-          source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false }
+          source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
+          activeSubAgentCount: 0
         },
         {
           id: 'codex-monitor',
@@ -49,7 +57,8 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           rateLimitResetLabel: null,
           activeSessionCount: 2,
           automationStatus: 'ACTIVE (FREQ=HOURLY;INTERVAL=1)',
-          source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false }
+          source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
+          activeSubAgentCount: 1
         },
         {
           id: 'antigravity-monitor',
@@ -63,7 +72,8 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           rateLimitResetLabel: null,
           activeSessionCount: 1,
           automationStatus: null,
-          source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false }
+          source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
+          activeSubAgentCount: 1
         }
       ]
     },
@@ -550,11 +560,18 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(
       await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' })
     ).toBeInTheDocument();
-    expect(screen.getByText('v3.7.0')).toBeInTheDocument();
+    expect(screen.getByText('v3.8.0')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Version v3.7.0 — open CHANGELOG.md' })
+      screen.getByRole('button', { name: 'Version v3.8.0 — open CHANGELOG.md' })
     ).toBeInTheDocument();
     expect(screen.getByText('Read-Only · 127.0.0.1')).toBeInTheDocument();
+
+    const activeAgentsStrip = screen.getByRole('region', {
+      name: 'Live Active Agents and Sub-Agents Summary'
+    });
+    expect(within(activeAgentsStrip).getByText('3 Busy / Recent')).toBeInTheDocument();
+    expect(within(activeAgentsStrip).getByText(/Standing Monitors: 3\/3 online/)).toBeInTheDocument();
+    expect(within(activeAgentsStrip).getByText('Sub-Agents (Live/Recent): 2')).toBeInTheDocument();
 
     // Interactive Color & Symbol Legend popover mounts cleanly on demand without polluting DOM
     expect(screen.queryByRole('region', { name: 'Color and symbol legend' })).not.toBeInTheDocument();
@@ -825,6 +842,50 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
         screen.getByText('ci: keep documentation consistent within each pull request')
       ).toBeInTheDocument();
       expect(screen.getByText(/Closed on GitHub — move to Done on Kanban/)).toBeInTheDocument();
+    },
+    10_000
+  );
+
+  it(
+    'switches to Architecture tab and renders interactive Swarm Topology, Lifecycle and Boundary diagrams',
+    async () => {
+      const user = userEvent.setup();
+      stubDashboardFetch();
+
+      render(<App />);
+      await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+
+      await user.click(screen.getByRole('tab', { name: 'Architecture' }));
+
+      expect(
+        await screen.findByText('System Architecture, Agent Hierarchy & Live Workflow Diagrams')
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('group', {
+          name: /Interactive Swarm Topology Diagram/i
+        })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('group', {
+          name: /Task Lifecycle Diagram/i
+        })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('img', {
+          name: /2-Axis Color Architecture/i
+        })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('img', {
+          name: /Read-Only Dashboard Security and Privacy Boundary Diagram/i
+        })
+      ).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Select Codex Monitor' }));
+      expect(screen.getByText(/Codex Monitor · P2/)).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Select lifecycle stage 2. Ready' }));
+      expect(screen.getByText('Stage 2 · Ready (Human Maintainer Trigger)')).toBeInTheDocument();
     },
     10_000
   );
