@@ -18,12 +18,22 @@ export interface MonitorInfo {
   activeSessionCount: number;
   automationStatus?: string | null;
   source: SourceHealth;
+  activeSubAgentCount?: number;
+}
+
+export interface ActiveAgentsSummary {
+  standingMonitorsTotal: number;
+  standingMonitorsOnline: number;
+  standingMonitorsBusy: number;
+  activeSubAgentsTotal: number;
+  totalActiveAgents: number;
 }
 
 export interface MonitorsResponse {
   generatedAtUtc: string;
   monitors: MonitorInfo[];
   source: SourceHealth;
+  summary?: ActiveAgentsSummary | null;
 }
 
 export interface CapabilityProfileInfo {
@@ -271,4 +281,4 @@ export interface DashboardSnapshot {
 }
 
 export type ThemePreference = 'system' | 'light' | 'dark';
-export type DashboardTab = 'live' | 'matrix' | 'mobadev-docs';
+export type DashboardTab = 'live' | 'architecture' | 'matrix' | 'mobadev-docs';

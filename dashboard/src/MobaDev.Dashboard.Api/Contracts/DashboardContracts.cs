@@ -29,12 +29,21 @@ public sealed record MonitorInfo(
     string? RateLimitResetLabel,
     int ActiveSessionCount,
     string? AutomationStatus,
-    SourceHealth Source);
+    SourceHealth Source,
+    int ActiveSubAgentCount = 0);
+
+public sealed record ActiveAgentsSummary(
+    int StandingMonitorsTotal,
+    int StandingMonitorsOnline,
+    int StandingMonitorsBusy,
+    int ActiveSubAgentsTotal,
+    int TotalActiveAgents);
 
 public sealed record MonitorsResponse(
     DateTimeOffset GeneratedAtUtc,
     IReadOnlyList<MonitorInfo> Monitors,
-    SourceHealth Source);
+    SourceHealth Source,
+    ActiveAgentsSummary? Summary = null);
 
 public sealed record CapabilityProfileInfo(
     string Profile,

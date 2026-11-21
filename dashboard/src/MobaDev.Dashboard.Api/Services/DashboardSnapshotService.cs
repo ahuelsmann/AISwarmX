@@ -165,7 +165,8 @@ public sealed partial class DashboardSnapshotService
 
                 var monitorList = new[] { codexTask.Result, claudeTask.Result, antigravityTask.Result };
                 var monitorSource = AggregateSourceHealth(monitorList.Select(m => m.Source), now);
-                monitors = new MonitorsResponse(now, monitorList, monitorSource);
+                var monitorSummary = ComputeActiveAgentsSummary(monitorList);
+                monitors = new MonitorsResponse(now, monitorList, monitorSource, monitorSummary);
 
                 governance = governanceTask.Result;
 
@@ -239,6 +240,20 @@ public sealed partial class DashboardSnapshotService
         {
             _pipelineLock.Release();
         }
+    }
+
+    private static ActiveAgentsSummary ComputeActiveAgentsSummary(IReadOnlyList<MonitorInfo> monitors)
+    {
+        var standingTotal = monitors.Count;
+        var standingOnline = monitors.Count(m => m.State is "standby" or "busy" or "rate_limited");
+        var standingBusy = monitors.Count(m => m.State == "busy");
+        var activeSubAgents = monitors.Sum(m => m.ActiveSubAgentCount);
+        return new ActiveAgentsSummary(
+            StandingMonitorsTotal: standingTotal,
+            StandingMonitorsOnline: standingOnline,
+            StandingMonitorsBusy: standingBusy,
+            ActiveSubAgentsTotal: activeSubAgents,
+            TotalActiveAgents: standingBusy + activeSubAgents);
     }
 
     private static ToolSessionHygiene BuildSessionHygiene(MonitorInfo monitor)

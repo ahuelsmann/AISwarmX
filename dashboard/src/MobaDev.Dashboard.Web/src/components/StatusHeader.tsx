@@ -388,6 +388,7 @@ export function StatusHeader({
             onTabSelect={(_, data) => onTabChange(data.value as DashboardTab)}
           >
             <Tab value="live">Live Operations</Tab>
+            <Tab value="architecture">Architecture</Tab>
             <Tab value="matrix">
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <span>Matrix &amp; Rules</span>

@@ -14,6 +14,7 @@ namespace MobaDev.Dashboard.Api.Providers;
 public sealed partial class ClaudeMonitorProvider
 {
     private const int TailReadBytes = 64 * 1024;
+    private static readonly TimeSpan SubAgentActiveWindow = TimeSpan.FromMinutes(2);
     private const string MonitorId = "claude-monitor";
     private const string DisplayName = "Claude Monitor";
     private const string Role = "Chief Operating Officer (COO)";
@@ -25,22 +26,28 @@ public sealed partial class ClaudeMonitorProvider
         cancellationToken.ThrowIfCancellationRequested();
         var now = DateTimeOffset.UtcNow;
 
+        var activeSubagentFiles = CountActiveSubagentFiles(paths.ClaudeHomePath, now);
         var sessionsDir = Path.Combine(paths.ClaudeHomePath, "sessions");
         if (!Directory.Exists(sessionsDir))
         {
-            return Task.FromResult(Offline(now, "Claude sessions directory not found."));
+            return Task.FromResult(Offline(now, "Claude sessions directory not found.", activeSubagentFiles));
         }
 
         var sessions = LoadSessionRecords(sessionsDir);
         if (sessions.Count == 0)
         {
-            return Task.FromResult(Offline(now, "No active Claude session detected."));
+            return Task.FromResult(Offline(now, "No active Claude session detected.", activeSubagentFiles));
         }
 
         var selected = sessions
             .OrderByDescending(s => string.Equals(s.Name, DisplayName, StringComparison.OrdinalIgnoreCase))
             .ThenByDescending(s => s.UpdatedAtMs)
             .First();
+
+        var busyExtraSessions = sessions.Count(s =>
+            !string.Equals(s.SessionId, selected.SessionId, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(s.Status, "busy", StringComparison.OrdinalIgnoreCase));
+        var activeSubAgentCount = activeSubagentFiles + busyExtraSessions;
 
         var lastActivityUtc = selected.UpdatedAtMs > 0
             ? DateTimeOffset.FromUnixTimeMilliseconds(selected.UpdatedAtMs)
@@ -79,10 +86,11 @@ public sealed partial class ClaudeMonitorProvider
             RateLimitResetLabel: rateLimitResetLabel,
             ActiveSessionCount: sessions.Count,
             AutomationStatus: null,
-            Source: new SourceHealth("ok", now, notice)));
+            Source: new SourceHealth("ok", now, notice),
+            ActiveSubAgentCount: activeSubAgentCount));
     }
 
-    private static MonitorInfo Offline(DateTimeOffset now, string notice)
+    private static MonitorInfo Offline(DateTimeOffset now, string notice, int activeSubAgentCount = 0)
     {
         return new MonitorInfo(
             Id: MonitorId,
@@ -96,7 +104,52 @@ public sealed partial class ClaudeMonitorProvider
             RateLimitResetLabel: null,
             ActiveSessionCount: 0,
             AutomationStatus: null,
-            Source: new SourceHealth("unavailable", now, notice));
+            Source: new SourceHealth("unavailable", now, notice),
+            ActiveSubAgentCount: activeSubAgentCount);
+    }
+
+    private static int CountActiveSubagentFiles(string claudeHomePath, DateTimeOffset nowUtc)
+    {
+        var projectsDir = Path.Combine(claudeHomePath, "projects");
+        if (!Directory.Exists(projectsDir))
+        {
+            return 0;
+        }
+
+        var cutoffUtc = nowUtc.UtcDateTime - SubAgentActiveWindow;
+        var activeCount = 0;
+
+        try
+        {
+            foreach (var subagentsDir in Directory.EnumerateDirectories(projectsDir, "subagents", SearchOption.AllDirectories))
+            {
+                foreach (var jsonlFile in Directory.EnumerateFiles(subagentsDir, "*.jsonl", SearchOption.TopDirectoryOnly))
+                {
+                    if (!PathWhitelistGuard.IsAllowedFilePath(jsonlFile))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        if (File.GetLastWriteTimeUtc(jsonlFile) >= cutoffUtc)
+                        {
+                            activeCount++;
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore transiently removed or locked subagent metadata.
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Ignore directory enumeration races.
+        }
+
+        return activeCount;
     }
 
     private static List<ClaudeSessionRecord> LoadSessionRecords(string sessionsDir)

@@ -5,6 +5,20 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.8.0] - 2026-11-21
+
+### Added
+- **Live Active Agents & Sub-Agents Telemetry (`CodexMonitorProvider.cs`, `ClaudeMonitorProvider.cs`, `AntigravityMonitorProvider.cs`, `DashboardSnapshotService.cs`, `ActiveAgentsStrip.tsx`):**
+  - Added strictly read-only runtime sub-agent counting across all three tools without reading secrets or chat bodies: unarchived non-monitor Codex threads active within 3 minutes, busy non-monitor Claude sessions plus `<project>/<session>/subagents/*.jsonl` file mtimes within 2 minutes (gated by `PathWhitelistGuard`), and non-monitor Antigravity `CASCADE_RUN_STATUS_RUNNING` conversations.
+  - Added `ActiveAgentsSummary` (`StandingMonitorsTotal`, `StandingMonitorsOnline`, `StandingMonitorsBusy`, `ActiveSubAgentsTotal`, `TotalActiveAgents`) on `MonitorsResponse` and surfaced it in a new **Live Active Agents & Sub-Agents Strip** above the monitor cards plus per-monitor `Sub-agents: N` badges.
+- **Interactive Architecture & Flow Diagrams Tab (`ArchitectureDiagramsView.tsx`, `StatusHeader.tsx`, `App.tsx`):**
+  - Added a dedicated **`Architecture`** tab featuring three interactive, Light/Dark WCAG-AA Fluent 2 SVG diagrams bound to live telemetry:
+    1. **Swarm Topology:** Maintainer → Decision & Steering Triad → Standing Monitors (`Codex P2 → Claude P1 → Antigravity P3`) → Ephemeral Task/PR Sub-Agents → Repositories & GitHub Kanban.
+    2. **End-to-End Task Lifecycle & Merge Gates:** `Planned / Inbox → Ready (Maintainer Trigger) → In progress (Worktrees & WIP ≤ 3) → In review (CI + Sonar + Fresh P1 + Cross-Family) → Done (Head-Bound Auto-Merge & Hygiene)` with live stage counts.
+    3. **2-Axis Color & Read-Only Security Boundary:** Visual reference of AI Identity vs Semantic Status vs Interaction Blue alongside `PathWhitelistGuard`, `GET`-only enforcement, and `127.0.0.1` loopback binding.
+
+---
+
 ## [3.7.0] - 2026-11-20
 
 ### Added
