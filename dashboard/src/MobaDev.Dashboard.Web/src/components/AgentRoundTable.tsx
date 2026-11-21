@@ -1,10 +1,16 @@
 import { useId, useState, type ReactNode } from 'react';
 import { Badge, Text, ToggleButton, makeStyles, tokens } from '@fluentui/react-components';
 import { Bot16Regular } from '@fluentui/react-icons';
-import { getToneStyles, type AccentTone } from '../theme/mobaFluentTheme';
+import {
+  STATUS_TONES,
+  getToneStyles,
+  type AccentTone,
+  type StatusToneKey,
+  type ToneStylePair
+} from '../theme/mobaFluentTheme';
 import type { TaskParticipantInfo } from '../types/dashboard';
 import { GlossaryTooltip } from './GlossaryTooltip';
-import { resolveProfileTone } from './RoleAndModelIcons';
+import { resolveProfileTone, resolveToolTone } from './RoleAndModelIcons';
 
 const useStyles = makeStyles({
   root: {
@@ -100,6 +106,8 @@ interface PositionedSeat {
   participant: TaskParticipantInfo;
   isSteering: boolean;
   spokeToCenter: boolean;
+  workflowStep: number | null;
+  identityTone: AccentTone;
   angleDeg: number;
   rad: number;
   x: number;
@@ -111,7 +119,7 @@ interface PositionedSeat {
   connectorY1: number;
   connectorX2: number;
   connectorY2: number;
-  statusTone: AccentTone;
+  statusTone: StatusToneKey;
   statusDashed: boolean;
   iconKey: RoleIconKey;
 }
@@ -155,25 +163,29 @@ function roleSortWeight(participant: TaskParticipantInfo): {
   return { weight: 7, isSteering: false, spokeToCenter: false, iconKey: 'bot' };
 }
 
-function resolveParticipantStatusTone(status: string): { tone: AccentTone; dashed: boolean } {
+function resolveSeatIdentityTone(participant: TaskParticipantInfo): AccentTone {
+  const profileTone = resolveProfileTone(participant.profile);
+  if (profileTone !== 'neutral') {
+    return profileTone;
+  }
+  return resolveToolTone(participant.tool);
+}
+
+function resolveParticipantStatusTone(status: string): { tone: StatusToneKey; dashed: boolean } {
+  const normalized = status.trim().toLowerCase();
+  if (/\bnot\s+(?:pass|approved)\b|\bblocked\b|\bfail(?:ed|ing)?\b|\berror\b/.test(normalized)) {
+    return { tone: STATUS_TONES.danger, dashed: false };
+  }
+  if (/\b(?:pass|approved|reviewed)\b/.test(normalized)) {
+    return { tone: STATUS_TONES.ok, dashed: false };
+  }
   if (
-    status === 'PASS' ||
-    status === 'Approved' ||
-    status === 'Consulted · PASS' ||
-    status === 'Reviewed'
+    /\b(?:active|implemented|involved|findings|pending)\b/.test(normalized) ||
+    /\bquota\b/.test(normalized)
   ) {
-    return { tone: 'green', dashed: false };
+    return { tone: STATUS_TONES.warn, dashed: false };
   }
-  if (status === 'Findings' || status === 'Quota Limit') {
-    return { tone: 'gold', dashed: false };
-  }
-  if (status === 'Blocked') {
-    return { tone: 'red', dashed: false };
-  }
-  if (status === 'Implemented' || status === 'Active' || status === 'Involved') {
-    return { tone: 'blue', dashed: false };
-  }
-  return { tone: 'neutral', dashed: true };
+  return { tone: STATUS_TONES.neutral, dashed: true };
 }
 
 function shortRoleLabel(role: string): string {
@@ -287,7 +299,7 @@ function renderCenterTable(
   centerLabel: string,
   centerSub: string,
   centerStatus: string,
-  centerToneStyles: { bg: string; fg: string }
+  centerToneStyles: ToneStylePair
 ) {
   const sub = shortCenterSub(centerSub);
   const badgeW = Math.max(72, centerStatus.length * 5.8 + 14);
@@ -296,7 +308,7 @@ function renderCenterTable(
       <circle
         cx={cx}
         cy={cy}
-        r={rTable + 6}
+        r={rTable + 7}
         fill="none"
         stroke={tokens.colorNeutralStroke2}
         strokeWidth={1}
@@ -307,8 +319,16 @@ function renderCenterTable(
         cy={cy}
         r={rTable}
         fill={tokens.colorNeutralBackground1}
-        stroke={centerToneStyles.fg}
-        strokeWidth={2}
+        stroke={centerToneStyles.solid}
+        strokeWidth={2.2}
+      />
+      <circle
+        cx={cx}
+        cy={cy}
+        r={rTable - 4}
+        fill="none"
+        stroke={centerToneStyles.border}
+        strokeWidth={0.9}
       />
       <text
         x={cx}
@@ -338,7 +358,7 @@ function renderCenterTable(
         height={18}
         rx={9}
         fill={centerToneStyles.bg}
-        stroke={centerToneStyles.fg}
+        stroke={centerToneStyles.solid}
         strokeWidth={1}
       />
       <text
@@ -394,6 +414,8 @@ function computeTableLayout(participants: TaskParticipantInfo[]): LayoutConfig {
   const viewHeight = count === 1 ? 176 : count === 2 ? 250 : count === 3 ? 328 : 396;
   const maxHeight = count === 1 ? 176 : count === 2 ? 240 : count === 3 ? 310 : 368;
 
+  let stepCounter = 0;
+
   const seats: PositionedSeat[] = ordered.map((entry, idx) => {
     const angleDeg =
       count === 1
@@ -408,6 +430,8 @@ function computeTableLayout(participants: TaskParticipantInfo[]): LayoutConfig {
     const y = count === 1 ? cy : cy + R_ORBIT * Math.sin(rad);
 
     const { tone, dashed } = resolveParticipantStatusTone(entry.participant.status);
+    const identityTone = resolveSeatIdentityTone(entry.participant);
+    const workflowStep = entry.meta.isSteering ? null : ++stepCounter;
     const key = `${entry.participant.role}-${entry.participant.tool}-${entry.participant.profile}-${idx}`;
 
     let cardSide: CardPlacementSide;
@@ -451,6 +475,8 @@ function computeTableLayout(participants: TaskParticipantInfo[]): LayoutConfig {
       participant: entry.participant,
       isSteering: entry.meta.isSteering,
       spokeToCenter: count === 1 ? true : entry.meta.spokeToCenter,
+      workflowStep,
+      identityTone,
       angleDeg,
       rad,
       x,
@@ -649,13 +675,12 @@ export function AgentRoundTable({
         <div className={styles.leftMeta}>
           <Bot16Regular aria-hidden="true" />
           <span>Participating Agents</span>
-          <Badge appearance="tint" color="brand" shape="rounded" size="small" className="tabular">
+          <Badge appearance="tint" color="subtle" shape="rounded" size="small" className="tabular">
             {countLabel}
           </Badge>
           <span className={styles.avatarStack} aria-hidden="true">
             {seats.map((seat) => {
-              const pStyles = getToneStyles(resolveProfileTone(seat.participant.profile), isDark);
-              const sStyles = getToneStyles(seat.statusTone, isDark);
+              const pStyles = getToneStyles(seat.identityTone, isDark);
               return (
                 <span
                   key={seat.key}
@@ -663,7 +688,7 @@ export function AgentRoundTable({
                   title={`${seat.participant.profile} · ${seat.participant.role} · ${seat.participant.model} · ${seat.participant.status}`}
                   style={{
                     backgroundColor: tokens.colorNeutralBackground1,
-                    borderColor: sStyles.fg,
+                    borderColor: pStyles.solid,
                     color: pStyles.fg
                   }}
                 >
@@ -718,7 +743,7 @@ export function AgentRoundTable({
             aria-label={`Round table of ${countLabel} for ${centerLabel}`}
           >
             <defs>
-              {(['green', 'blue', 'gold', 'red', 'neutral'] as const).map((toneKey) => (
+              {(['green', 'gold', 'red', 'neutral'] as const).map((toneKey) => (
                 <marker
                   key={toneKey}
                   id={`${markerPrefix}-arrow-${toneKey}`}
@@ -734,7 +759,7 @@ export function AgentRoundTable({
                     fill={
                       toneKey === 'neutral'
                         ? tokens.colorNeutralForeground3
-                        : getToneStyles(toneKey, isDark).fg
+                        : getToneStyles(toneKey, isDark).solid
                     }
                   />
                 </marker>
@@ -755,7 +780,7 @@ export function AgentRoundTable({
               />
             )}
 
-            {/* Sequential workflow arcs */}
+            {/* Sequential workflow arcs (Axis 2: Status only, never blue) */}
             {showArrows &&
               workflowSeats.map((from, idx) => {
                 if (idx >= workflowSeats.length - 1) {
@@ -781,18 +806,18 @@ export function AgentRoundTable({
                 const largeArc = span > Math.PI ? 1 : 0;
 
                 const isRelated = !focusKey || focusKey === from.key || focusKey === to.key;
-                const edgeToneKey =
+                const edgeToneKey: StatusToneKey =
                   to.statusTone === 'red' || to.statusTone === 'gold'
                     ? to.statusTone
                     : to.statusTone === 'neutral'
                       ? 'neutral'
                       : from.statusTone === 'green' && to.statusTone === 'green'
                         ? 'green'
-                        : 'blue';
+                        : 'gold';
                 const strokeColor =
                   edgeToneKey === 'neutral'
                     ? tokens.colorNeutralForeground3
-                    : getToneStyles(edgeToneKey, isDark).fg;
+                    : getToneStyles(edgeToneKey, isDark).solid;
 
                 return (
                   <path
@@ -809,7 +834,7 @@ export function AgentRoundTable({
                 );
               })}
 
-            {/* Dashed steering/advisory spokes to center table */}
+            {/* Dashed steering/advisory spokes to center table (Axis 2: Status only) */}
             {showArrows &&
               seats
                 .filter((s) => s.spokeToCenter)
@@ -825,12 +850,11 @@ export function AgentRoundTable({
                   const ex = cx - (R_TABLE + 6) * dx;
                   const ey = cy - (R_TABLE + 6) * dy;
                   const isRelated = !focusKey || focusKey === seat.key;
-                  const strokeTone =
-                    seat.statusTone === 'neutral' ? 'neutral' : (seat.statusTone as 'green' | 'blue' | 'gold' | 'red');
+                  const strokeTone: StatusToneKey = seat.statusTone;
                   const strokeColor =
                     strokeTone === 'neutral'
                       ? tokens.colorNeutralForeground3
-                      : getToneStyles(strokeTone, isDark).fg;
+                      : getToneStyles(strokeTone, isDark).solid;
 
                   return (
                     <line
@@ -851,23 +875,25 @@ export function AgentRoundTable({
             {/* Center Round Table */}
             {renderCenterTable(cx, cy, R_TABLE, centerLabel, centerSub, centerStatus, centerToneStyles)}
 
-            {/* Agent Seats + Framed Visitenkarten */}
+            {/* Agent Seats (Axis 1 Identity) + Top-Right Status Dot & Framed Visitenkarten */}
             {seats.map((seat) => {
               const isFocused = focusKey === seat.key;
               const statusColors = getToneStyles(seat.statusTone, isDark);
-              const profileColors = getToneStyles(
-                resolveProfileTone(seat.participant.profile),
-                isDark
-              );
-              const ringStroke = seat.statusDashed
+              const profileColors = getToneStyles(seat.identityTone, isDark);
+              const statusStroke = seat.statusDashed
                 ? tokens.colorNeutralStroke1
-                : statusColors.fg;
+                : statusColors.solid;
 
               const statusText = shortStatusLabel(seat.participant.status);
               const pillW = Math.max(40, statusText.length * 5.6 + 14);
               const pillX = seat.cardX + CARD_W - 8 - pillW;
               const pillY = seat.cardY + 28;
               const pillBg = seat.statusDashed ? tokens.colorNeutralBackground3 : statusColors.bg;
+
+              const stepX = seat.x - R_NODE * 0.72;
+              const stepY = seat.y - R_NODE * 0.72;
+              const statusDotX = seat.x + R_NODE * 0.72;
+              const statusDotY = seat.y - R_NODE * 0.72;
 
               const toggleSelect = () => {
                 setSelectedKey((prev) => (prev === seat.key ? null : seat.key));
@@ -876,13 +902,15 @@ export function AgentRoundTable({
               return (
                 <g
                   key={seat.key}
+                  className="roundtable-seat"
                   style={{ cursor: 'pointer' }}
                   tabIndex={0}
                   role="button"
                   aria-label={`${seat.participant.profile} ${seat.participant.role} · ${seat.participant.model} · ${seat.participant.status}`}
-                  opacity={focusKey && !isFocused ? 0.55 : 1}
                   onMouseEnter={() => setHoveredKey(seat.key)}
                   onMouseLeave={() => setHoveredKey(null)}
+                  onFocus={() => setHoveredKey(seat.key)}
+                  onBlur={() => setHoveredKey((prev) => (prev === seat.key ? null : prev))}
                   onClick={toggleSelect}
                   onKeyDown={(ev) => {
                     if (ev.key === 'Enter' || ev.key === ' ') {
@@ -899,7 +927,7 @@ export function AgentRoundTable({
                     y1={seat.connectorY1.toFixed(1)}
                     x2={seat.connectorX2.toFixed(1)}
                     y2={seat.connectorY2.toFixed(1)}
-                    stroke={isFocused ? ringStroke : tokens.colorNeutralStroke2}
+                    stroke={isFocused ? profileColors.solid : tokens.colorNeutralStroke2}
                     strokeWidth={isFocused ? 1.6 : 1.1}
                   />
 
@@ -909,30 +937,31 @@ export function AgentRoundTable({
                       cy={seat.y.toFixed(1)}
                       r={R_NODE + 5}
                       fill="none"
-                      stroke={ringStroke}
+                      stroke={profileColors.solid}
                       strokeWidth={2}
                       opacity={0.45}
                     />
                   )}
 
-                  {/* Agent Seat Circle */}
+                  {/* Agent Seat Circle = WHO (AI Identity) */}
                   <circle
                     cx={seat.x.toFixed(1)}
                     cy={seat.y.toFixed(1)}
                     r={R_NODE}
                     fill={tokens.colorNeutralBackground1}
-                    stroke={ringStroke}
+                  />
+                  <circle
+                    cx={seat.x.toFixed(1)}
+                    cy={seat.y.toFixed(1)}
+                    r={R_NODE}
+                    fill={profileColors.bg}
+                    stroke={profileColors.fg}
                     strokeWidth={3}
-                    strokeDasharray={seat.statusDashed ? '4 3' : undefined}
                   />
 
                   <g
                     transform={`translate(${seat.x.toFixed(1)}, ${(seat.y - 5).toFixed(1)})`}
-                    style={{
-                      color: seat.statusDashed
-                        ? tokens.colorNeutralForeground2
-                        : statusColors.fg
-                    }}
+                    style={{ color: profileColors.fg }}
                   >
                     {renderRoleGlyphSvg(seat.iconKey)}
                   </g>
@@ -949,6 +978,51 @@ export function AgentRoundTable({
                     {seat.participant.profile}
                   </text>
 
+                  {/* Top-left numbered workflow station badge (omitted on steering spokes) */}
+                  {seat.workflowStep !== null && (
+                    <g aria-hidden="true">
+                      <circle
+                        cx={stepX.toFixed(1)}
+                        cy={stepY.toFixed(1)}
+                        r={8}
+                        fill={tokens.colorNeutralBackground1}
+                        stroke={profileColors.fg}
+                        strokeWidth={1.5}
+                      />
+                      <text
+                        x={stepX.toFixed(1)}
+                        y={(stepY + 3.2).toFixed(1)}
+                        textAnchor="middle"
+                        fill={profileColors.fg}
+                        fontSize={9}
+                        fontWeight={700}
+                      >
+                        {seat.workflowStep}
+                      </text>
+                    </g>
+                  )}
+
+                  {/* Top-right Axis-2 live status indicator dot */}
+                  <circle
+                    cx={statusDotX.toFixed(1)}
+                    cy={statusDotY.toFixed(1)}
+                    r={5.5}
+                    fill={seat.statusDashed ? tokens.colorNeutralBackground3 : statusColors.solid}
+                    stroke={tokens.colorNeutralBackground1}
+                    strokeWidth={2}
+                  />
+                  {seat.statusDashed && (
+                    <circle
+                      cx={statusDotX.toFixed(1)}
+                      cy={statusDotY.toFixed(1)}
+                      r={4.2}
+                      fill="none"
+                      stroke={tokens.colorNeutralStroke1}
+                      strokeWidth={1.1}
+                      strokeDasharray="2 1.5"
+                    />
+                  )}
+
                   {/* Framed Visitenkarte */}
                   <rect
                     x={seat.cardX.toFixed(1)}
@@ -957,17 +1031,17 @@ export function AgentRoundTable({
                     height={CARD_H}
                     rx={8}
                     fill={tokens.colorNeutralBackground1}
-                    stroke={isFocused ? ringStroke : tokens.colorNeutralStroke1}
+                    stroke={isFocused ? profileColors.solid : tokens.colorNeutralStroke1}
                     strokeWidth={isFocused ? 1.8 : 1}
                   />
 
-                  {/* Left Profile Accent Bar */}
+                  {/* Left 4px Profile Accent Bar (Axis 1 Identity) */}
                   <rect
                     x={(seat.cardX + 3.5).toFixed(1)}
                     y={(seat.cardY + 7).toFixed(1)}
-                    width={3.5}
+                    width={4}
                     height={CARD_H - 14}
-                    rx={1.75}
+                    rx={2}
                     fill={profileColors.fg}
                   />
 
@@ -992,7 +1066,7 @@ export function AgentRoundTable({
                     {shortToolLabel(seat.participant.tool)}
                   </text>
 
-                  {/* Row 2: Model + Framed Status Pill */}
+                  {/* Row 2: Model + Framed Status Pill (Axis 2 Status) */}
                   <text
                     x={(seat.cardX + 14).toFixed(1)}
                     y={(seat.cardY + 40).toFixed(1)}
@@ -1010,8 +1084,9 @@ export function AgentRoundTable({
                     height={17}
                     rx={8.5}
                     fill={pillBg}
-                    stroke={ringStroke}
+                    stroke={statusStroke}
                     strokeWidth={1}
+                    strokeDasharray={seat.statusDashed ? '3 2' : undefined}
                   />
                   <text
                     x={(pillX + pillW / 2).toFixed(1)}
@@ -1037,10 +1112,7 @@ export function AgentRoundTable({
                       className="mono"
                       style={{
                         fontWeight: tokens.fontWeightBold,
-                        color: getToneStyles(
-                          resolveProfileTone(focusedSeat.participant.profile),
-                          isDark
-                        ).fg
+                        color: getToneStyles(focusedSeat.identityTone, isDark).fg
                       }}
                     >
                       {focusedSeat.participant.profile}
@@ -1065,7 +1137,7 @@ export function AgentRoundTable({
                   Click or hover an agent card for full role, model, and PR evidence details.
                 </Text>
                 <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-                  Solid ring = Workflow · Dashed spoke = Steering
+                  Circle &amp; bar = AI Identity · Dot &amp; pill = Status · 1→2→3 = Workflow · Dashed = Steering
                 </Text>
               </>
             )}

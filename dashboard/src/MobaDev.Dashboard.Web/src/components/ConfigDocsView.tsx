@@ -356,7 +356,7 @@ export function ConfigDocsView({
                 <Text size={400} weight="semibold">
                   {activeDoc.fileName}
                 </Text>
-                <Badge appearance="tint" color="brand" shape="rounded" icon={<Eye16Regular />}>
+                <Badge appearance="tint" color="subtle" shape="rounded" icon={<Eye16Regular />}>
                   Read-Only
                 </Badge>
                 <Badge appearance="tint" color="subtle" shape="rounded" className="mono">

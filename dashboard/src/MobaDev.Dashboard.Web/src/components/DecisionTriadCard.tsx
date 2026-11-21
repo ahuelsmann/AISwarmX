@@ -6,7 +6,7 @@ import {
   Timer16Regular,
   Warning16Regular
 } from '@fluentui/react-icons';
-import { getToneStyles } from '../theme/mobaFluentTheme';
+import { getIdentityStyles, getStatusStyles } from '../theme/mobaFluentTheme';
 import type { GovernanceResponse, MonitorInfo, PullRequestInfo } from '../types/dashboard';
 import { GlossaryTooltip } from './GlossaryTooltip';
 import { IconGlyphBox, ModelBadge, ProfileBadge, RoleBadge } from './RoleAndModelIcons';
@@ -59,6 +59,13 @@ const useStyles = makeStyles({
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     whiteSpace: 'nowrap',
     maxWidth: '100%'
+  },
+  seatStateDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: tokens.borderRadiusCircular,
+    display: 'inline-block',
+    flexShrink: 0
   }
 });
 
@@ -131,7 +138,7 @@ export function DecisionTriadCard({
   onOpenMatrix
 }: DecisionTriadCardProps) {
   const styles = useStyles();
-  const purpleAccent = getToneStyles('purple', isDark);
+  const triadAccent = getIdentityStyles('triad', isDark);
 
   const triadDef = governance.roles.find((r) => r.role.toLowerCase().includes('triad'));
   const totalSeats = monitors.length > 0 ? monitors.length : 3;
@@ -147,7 +154,7 @@ export function DecisionTriadCard({
       className={styles.card}
       appearance="filled"
       aria-label="Decision and Steering Triad selection panel"
-      style={{ borderLeft: `3px solid ${purpleAccent.fg}` }}
+      style={{ borderLeft: `3px solid ${triadAccent.solid}` }}
     >
       <div className={styles.headerRow}>
         <div className={styles.titleGroup} title={triadDef?.responsibility}>
@@ -229,6 +236,14 @@ export function DecisionTriadCard({
           const monitor = monitors.find((m) => m.id === seat.monitorId);
           const stateLabel = formatMonitorStateText(monitor?.state);
           const toolName = monitor?.tool ?? seat.tool;
+          const isBusy = monitor?.state === 'busy';
+          const dotStatusKey =
+            monitor?.state === 'standby'
+              ? 'ok'
+              : isBusy || monitor?.state === 'rate_limited'
+                ? 'warn'
+                : 'neutral';
+          const dotColor = getStatusStyles(dotStatusKey, isDark).solid;
 
           return (
             <div
@@ -236,6 +251,11 @@ export function DecisionTriadCard({
               className={styles.seatPill}
               title={`${seat.roleMatch} · ${toolName} · ${stateLabel} · ${seat.mandate}`}
             >
+              <span
+                className={isBusy ? 'pulse-dot' : styles.seatStateDot}
+                aria-hidden="true"
+                style={isBusy ? { color: dotColor } : { backgroundColor: dotColor }}
+              />
               <GlossaryTooltip term={seat.profile}>
                 <ProfileBadge profile={seat.profile} isDark={isDark} />
               </GlossaryTooltip>

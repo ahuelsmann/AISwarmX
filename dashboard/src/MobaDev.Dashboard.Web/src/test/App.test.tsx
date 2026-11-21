@@ -18,7 +18,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
     bindAddress: 'http://127.0.0.1:5179',
     overallStatus: 'warnings',
     warningCount: 10,
-    changelogVersion: '3.6.1',
+    changelogVersion: '3.7.0',
     monitors: {
       generatedAtUtc: nowIso,
       source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
@@ -550,11 +550,23 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(
       await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' })
     ).toBeInTheDocument();
-    expect(screen.getByText('v3.6.1')).toBeInTheDocument();
+    expect(screen.getByText('v3.7.0')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Version v3.6.1 — open CHANGELOG.md' })
+      screen.getByRole('button', { name: 'Version v3.7.0 — open CHANGELOG.md' })
     ).toBeInTheDocument();
     expect(screen.getByText('Read-Only · 127.0.0.1')).toBeInTheDocument();
+
+    // Interactive Color & Symbol Legend popover mounts cleanly on demand without polluting DOM
+    expect(screen.queryByRole('region', { name: 'Color and symbol legend' })).not.toBeInTheDocument();
+    const legendBtn = screen.getByRole('button', { name: 'Open color and symbol legend' });
+    await user.click(legendBtn);
+    const legendRegion = await screen.findByRole('region', { name: 'Color and symbol legend' });
+    expect(within(legendRegion).getByText('Axis 1 · AI Identity (Who)')).toBeInTheDocument();
+    expect(within(legendRegion).getByText('Axis 2 · Status (State)')).toBeInTheDocument();
+    expect(within(legendRegion).getByText('Round Table Key')).toBeInTheDocument();
+    expect(within(legendRegion).getByText('Fast Delivery (Docs & Quick Tasks)')).toBeInTheDocument();
+    await user.click(legendBtn);
+    expect(screen.queryByRole('region', { name: 'Color and symbol legend' })).not.toBeInTheDocument();
 
     const pipelineToggleLabels = within(
       screen.getByRole('group', { name: 'Filter pipeline view' })
@@ -598,6 +610,9 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(resolveModelVisual('gpt-6.2-sol').tone).toBe('teal');
     expect(resolveRoleVisual('Technical Director & CPM').tone).toBe('teal');
     expect(resolveProfileTone('P2')).toBe('teal');
+    expect(resolveProfileTone('P4')).toBe('pink');
+    expect(resolveModelVisual('Gemini 4 Hydrogen').tone).toBe('pink');
+    expect(resolveRoleVisual('Final Reviewer').tone).toBe('neutral');
 
     // Row 3: Switch to Open PRs (#492 with Checks Pending, Merge Gates, linked issue & Round Table Visitenkarte)
     await user.click(screen.getByRole('button', { name: /Open PRs \(1\)/i }));
