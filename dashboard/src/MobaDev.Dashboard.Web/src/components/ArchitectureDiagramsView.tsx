@@ -7,7 +7,11 @@ import {
 } from '@fluentui/react-icons';
 import { getIdentityStyles, getStatusStyles, type StatusKey } from '../theme/mobaFluentTheme';
 import type { DashboardSnapshot, MonitorInfo } from '../types/dashboard';
-import { deriveActiveAgentsSummary, resolveActiveSummaryTone } from './ActiveAgentsStrip';
+import {
+  countPipelineSeats,
+  deriveActiveAgentsSummary,
+  resolveActiveSummaryTone
+} from './ActiveAgentsStrip';
 import { StatusBadge } from './shared/StatusBadge';
 import { ContextChip } from './shared/ContextChip';
 
@@ -162,9 +166,7 @@ export function ArchitectureDiagramsView({
   const openPrCount = snapshot.pipeline.pullRequests.length;
   const mergedCount = snapshot.pipeline.recentlyMerged.length;
 
-  const participantSeatCount =
-    snapshot.pipeline.pullRequests.reduce((acc, pr) => acc + pr.participants.length, 0) +
-    activeIssues.reduce((acc, item) => acc + item.participants.length, 0);
+  const participantSeatCount = countPipelineSeats(snapshot.pipeline);
 
   const topologyDetails: Record<
     TopologyNodeId,

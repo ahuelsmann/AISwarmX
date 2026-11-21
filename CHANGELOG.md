@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.8.1] - 2026-11-21
+
+### Added
+- **`Pipeline Seats (GitHub)` Clarification Chip (`ActiveAgentsStrip.tsx`, `App.tsx`, `ArchitectureDiagramsView.tsx`):** Added a neutral `Pipeline Seats (GitHub): N` context chip right beside `Sub-Agents (Live/Recent)` in the top KPI strip (sharing `countPipelineSeats`) so it is immediately clear why GitHub issues/PRs can carry historical or assigned Round Table seats while `0` ephemeral local runtime sub-agents are currently executing.
+
+---
+
 ## [3.8.0] - 2026-11-21
 
 ### Added
