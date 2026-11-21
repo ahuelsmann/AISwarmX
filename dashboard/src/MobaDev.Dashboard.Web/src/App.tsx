@@ -181,9 +181,14 @@ export function App() {
       return;
     }
 
+    const reducedMotion =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const scrollBehavior: ScrollBehavior = reducedMotion ? 'auto' : 'smooth';
+
     setActiveTab('live');
     if (target === 'monitors') {
-      window.scrollTo?.({ top: 0, behavior: 'smooth' });
+      window.scrollTo?.({ top: 0, behavior: scrollBehavior });
       return;
     }
 
@@ -194,7 +199,7 @@ export function App() {
           : target === 'branches'
             ? 'section-branches'
             : 'section-sessions';
-      document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+      document.getElementById(id)?.scrollIntoView?.({ behavior: scrollBehavior, block: 'start' });
     });
   };
 
@@ -240,6 +245,7 @@ export function App() {
           activeTab={activeTab}
           onTabChange={setActiveTab}
           driftBadgeCount={driftBadgeCount}
+          isDark={isDark}
         />
 
         <main className={styles.mainContent}>

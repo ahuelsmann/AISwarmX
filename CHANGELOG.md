@@ -5,6 +5,19 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.7.0] - 2026-11-20
+
+### Added
+- **Interactive Color & Symbol Legend (`ColorLegendPopover.tsx`):** Added an on-demand `Legend` popover explaining Axis 1 (AI Identity), Axis 2 (Semantic Status), and Round Table glyphs in plain English without cluttering the live canvas.
+- **Shared Badge & Card Primitives (`components/shared/StatusBadge.tsx`, `ContextChip.tsx`, `SectionCard.tsx`, `statusMaps.ts`, `theme/spacing.ts`):** Standardized status badges, neutral context chips, spacing rhythm, and card framing across all dashboard views while removing overloaded static `color="brand"` badges.
+- **Plain-English Glossary Upgrades (`GlossaryTooltip.tsx`):** Added `Round Table`, `Color Semantics`, `Branch Hygiene`, `Closed PRs`, and `Merge Gates` entries, updated `P4` to reflect the magenta-orchid fast-delivery profile, and translated `UNSTABLE` into plain English (`Checks Pending / Checks Failing`).
+
+### Changed
+- **Orthogonal 2-Axis Color System (`mobaFluentTheme.ts`, `RoleAndModelIcons.tsx`, `base.css`):** Strictly separated **AI Identity** (`P2` ChatGPT/Codex = Teal, `P1` Claude/Opus = Orange, `P3` Antigravity/Gemini = Light Blue, `P4` Fast Delivery = Magenta-Orchid + Flash glyph, `Triad` = Purple) from **Semantic Status** (`green` = pass/ready, `gold`/amber = warning/active/pending/attention, `red` = blocked/error/Class H, `neutral` = context/idle), reserving Fluent Brand Blue (`#0078D4`) exclusively for interactive controls. Verified WCAG AA contrast (`>= 4.5:1` text, `>= 3.0:1` strokes) across Light and Dark `Background1/2/3` surfaces, fixed `sol` word-boundary matching, and defaulted task-dynamic roles to `neutral` rather than hardcoded danger-red or wrong-tool colors.
+- **Round Table v2 & Visual Storytelling (`AgentRoundTable.tsx`, `MonitorCards.tsx`, `DecisionTriadCard.tsx`, `PipelineCard.tsx`):** Updated Round Table seats to encode Identity on the circle & left Visitenkarte bar and Status on the top-right seat dot & framed pill, added numbered sequential workflow stations (`1→2→3`), added profile top-accent bars on Monitor cards, added live per-seat status dots on Decision Triad chips, and added `prefers-reduced-motion` transition guards.
+
+---
+
 ## [3.6.1] - 2026-11-20
 
 ### Changed

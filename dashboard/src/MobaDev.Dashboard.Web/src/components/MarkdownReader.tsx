@@ -390,7 +390,7 @@ export function MarkdownReader({ content }: MarkdownReaderProps) {
         <div className={styles.frontmatterCard} aria-label="Document metadata">
           {meta.map((entry) => (
             <div key={entry.key} className={styles.frontmatterItem}>
-              <Badge appearance="tint" color="brand" shape="rounded" size="small">
+              <Badge appearance="tint" color="subtle" shape="rounded" size="small">
                 {entry.key}
               </Badge>
               <Text size={200}>{entry.value}</Text>

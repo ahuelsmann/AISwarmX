@@ -343,7 +343,7 @@ export function HygieneAndSyncPanel({
                 </Badge>
               )}
               {wt.status === 'active' && (
-                <Badge appearance="tint" color="brand" shape="rounded">
+                <Badge appearance="tint" color="warning" shape="rounded">
                   <span className="tabular">
                     Active{wt.linkedPrNumber ? ` (#${wt.linkedPrNumber})` : ''}
                   </span>
@@ -385,6 +385,7 @@ export function HygieneAndSyncPanel({
           <div className={styles.titleGroup}>
             <BranchFork16Regular aria-hidden="true" />
             <h2 className={styles.title}>Branch Hygiene (Local &amp; Remote)</h2>
+            <GlossaryTooltip term="Branch Hygiene" iconOnly />
           </div>
 
           {staleBranchTotal > 0 ? (
@@ -449,7 +450,7 @@ export function HygieneAndSyncPanel({
                     Stale
                   </Badge>
                 ) : (
-                  <Badge appearance="tint" color="brand" shape="rounded">
+                  <Badge appearance="tint" color="warning" shape="rounded">
                     <span className="tabular">
                       Active{branch.linkedPrNumber ? ` (#${branch.linkedPrNumber})` : ''}
                     </span>

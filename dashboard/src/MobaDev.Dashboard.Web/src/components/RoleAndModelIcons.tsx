@@ -10,88 +10,123 @@ import {
   Color16Regular,
   DocumentBulletList16Regular,
   Edit16Regular,
+  Flash12Regular,
   Flash16Regular,
   Globe16Regular,
   HatGraduation16Regular,
   PeopleTeam16Regular,
   Person16Regular,
+  PersonSupport16Regular,
   Scales16Regular,
   ShieldCheckmark16Regular,
   Sparkle16Regular,
   WindowConsole20Regular,
   Wrench16Regular
 } from '@fluentui/react-icons';
-import { getToneStyles, type AccentTone } from '../theme/mobaFluentTheme';
+import { IDENTITY_TONES, getToneStyles, type AccentTone } from '../theme/mobaFluentTheme';
 
 export interface ResolvedVisual {
   icon: ReactNode;
   tone: AccentTone;
 }
 
+/**
+ * Tool family -> Axis-1 identity tone (WHO):
+ * ChatGPT/Codex = teal · Claude = orange · Antigravity/Gemini = blue · anything else = neutral.
+ */
+export function resolveToolTone(tool: string | null | undefined): AccentTone {
+  const normalized = (tool ?? '').trim().toLowerCase();
+
+  if (/chatgpt|\bgpt|codex|openai/.test(normalized)) {
+    return IDENTITY_TONES.p2;
+  }
+  if (/claude|anthropic|opus|sonnet|fable/.test(normalized)) {
+    return IDENTITY_TONES.p1;
+  }
+  if (/antigravity|gemini|google/.test(normalized)) {
+    return IDENTITY_TONES.p3;
+  }
+
+  return 'neutral';
+}
+
+// `sol` must be a whole token (gpt-6.2-sol, "Sol"), never part of words like console/resolver.
+const SOL_TOKEN = /(?:^|[\s\-_/])sol(?:$|[\s\-_/0-9.])/i;
+
 export function resolveModelVisual(model: string | null | undefined): ResolvedVisual {
   const normalized = (model ?? '').trim().toLowerCase();
 
-  if (normalized.includes('orchestrator') || normalized.includes('neon')) {
-    return { icon: <Beaker16Regular aria-hidden="true" />, tone: 'blue' };
+  // P4 fast delivery: pink + Flash glyph (never gold/amber).
+  if (normalized.includes('fable') || normalized.includes('hydrogen')) {
+    return { icon: <Flash16Regular aria-hidden="true" />, tone: IDENTITY_TONES.p4 };
   }
-  if (normalized.includes('opus')) {
-    return {
-      icon: <BrainCircuit20Regular style={{ width: 16, height: 16 }} aria-hidden="true" />,
-      tone: 'orange'
-    };
+  if (normalized.includes('orchestrator') || normalized.includes('neon')) {
+    return { icon: <Beaker16Regular aria-hidden="true" />, tone: IDENTITY_TONES.p3 };
   }
   if (
-    normalized.includes('fable') ||
+    normalized.includes('opus') ||
     normalized.includes('sonnet') ||
-    normalized.includes('hydrogen')
+    normalized.includes('claude')
   ) {
-    return { icon: <Flash16Regular aria-hidden="true" />, tone: 'gold' };
+    return {
+      icon: <BrainCircuit20Regular style={{ width: 16, height: 16 }} aria-hidden="true" />,
+      tone: IDENTITY_TONES.p1
+    };
   }
   if (
     normalized.includes('gpt') ||
     normalized.includes('astra') ||
     normalized.includes('codex') ||
-    normalized.includes('sol')
+    SOL_TOKEN.test(normalized)
   ) {
-    return { icon: <Braces16Regular aria-hidden="true" />, tone: 'teal' };
+    return { icon: <Braces16Regular aria-hidden="true" />, tone: IDENTITY_TONES.p2 };
   }
   if (
     normalized.includes('argon') ||
     normalized.includes('gemini') ||
     normalized.includes('antigravity')
   ) {
-    return { icon: <Sparkle16Regular aria-hidden="true" />, tone: 'blue' };
+    return { icon: <Sparkle16Regular aria-hidden="true" />, tone: IDENTITY_TONES.p3 };
   }
 
   return { icon: <Bot16Regular aria-hidden="true" />, tone: 'neutral' };
 }
 
+/**
+ * Role tones: only the standing Triad roles carry an identity tone
+ * (Triad = purple, COO = orange, TD & CPM = teal, Head of AI Strategy = blue).
+ * Every task-dynamic role is neutral — never red/gold/green — and may be tinted by the
+ * participant's known identity via RoleBadge `identityTone`.
+ */
 export function resolveRoleVisual(role: string | null | undefined): ResolvedVisual {
   const normalized = (role ?? '').trim().toLowerCase().replace(/[-_]+/g, ' ');
 
   if (normalized.includes('triad') || normalized.includes('council')) {
-    return { icon: <PeopleTeam16Regular aria-hidden="true" />, tone: 'purple' };
+    return { icon: <PeopleTeam16Regular aria-hidden="true" />, tone: IDENTITY_TONES.triad };
   }
-  if (normalized.includes('coo') || normalized.includes('chief operating')) {
-    return { icon: <Briefcase16Regular aria-hidden="true" />, tone: 'orange' };
+  if (normalized.includes('cross family') || normalized.includes('verifier')) {
+    return { icon: <ShieldCheckmark16Regular aria-hidden="true" />, tone: 'neutral' };
+  }
+  if (/\bcoo\b/.test(normalized) || normalized.includes('chief operating')) {
+    return { icon: <Briefcase16Regular aria-hidden="true" />, tone: IDENTITY_TONES.p1 };
   }
   if (
     normalized.includes('technical director') ||
-    normalized.includes('cpm') ||
+    /\bcpm\b/.test(normalized) ||
     normalized.includes('td/cpm') ||
     normalized.includes('project manager')
   ) {
-    return { icon: <Wrench16Regular aria-hidden="true" />, tone: 'teal' };
+    return { icon: <Wrench16Regular aria-hidden="true" />, tone: IDENTITY_TONES.p2 };
   }
   if (normalized.includes('ai strategy')) {
-    return { icon: <Beaker16Regular aria-hidden="true" />, tone: 'blue' };
+    return { icon: <Beaker16Regular aria-hidden="true" />, tone: IDENTITY_TONES.p3 };
   }
   if (
     normalized.includes('ui/ux') ||
     normalized.includes('ui ux') ||
     normalized.includes('product experience')
   ) {
-    return { icon: <Color16Regular aria-hidden="true" />, tone: 'pink' };
+    return { icon: <Color16Regular aria-hidden="true" />, tone: 'neutral' };
   }
   if (
     normalized.includes('mobanews') ||
@@ -99,37 +134,34 @@ export function resolveRoleVisual(role: string | null | undefined): ResolvedVisu
     normalized.includes('editorial') ||
     normalized.includes('documentation')
   ) {
-    return { icon: <Book16Regular aria-hidden="true" />, tone: 'blue' };
+    return { icon: <Book16Regular aria-hidden="true" />, tone: 'neutral' };
   }
   if (normalized.includes('final review')) {
-    return { icon: <Scales16Regular aria-hidden="true" />, tone: 'red' };
+    return { icon: <Scales16Regular aria-hidden="true" />, tone: 'neutral' };
   }
-  if (normalized.includes('cross-family') || normalized.includes('verifier')) {
-    return { icon: <ShieldCheckmark16Regular aria-hidden="true" />, tone: 'purple' };
-  }
-  if (normalized.includes('companion') || normalized.includes('auto-review')) {
-    return { icon: <Edit16Regular aria-hidden="true" />, tone: 'teal' };
+  if (normalized.includes('companion') || normalized.includes('auto review')) {
+    return { icon: <Edit16Regular aria-hidden="true" />, tone: 'neutral' };
   }
   if (normalized.includes('writer') || normalized.includes('senior developer')) {
     return {
       icon: <WindowConsole20Regular style={{ width: 16, height: 16 }} aria-hidden="true" />,
-      tone: 'blue'
+      tone: 'neutral'
     };
   }
   if (normalized.includes('architect')) {
-    return { icon: <HatGraduation16Regular aria-hidden="true" />, tone: 'red' };
+    return { icon: <HatGraduation16Regular aria-hidden="true" />, tone: 'neutral' };
   }
   if (normalized.includes('executive assistant')) {
-    return { icon: <Flash16Regular aria-hidden="true" />, tone: 'gold' };
+    return { icon: <PersonSupport16Regular aria-hidden="true" />, tone: 'neutral' };
   }
   if (normalized.includes('domain lead')) {
-    return { icon: <Globe16Regular aria-hidden="true" />, tone: 'gold' };
+    return { icon: <Globe16Regular aria-hidden="true" />, tone: 'neutral' };
   }
   if (normalized.includes('human') || normalized.includes('maintainer')) {
     return { icon: <Person16Regular aria-hidden="true" />, tone: 'neutral' };
   }
   if (normalized.includes('rule')) {
-    return { icon: <DocumentBulletList16Regular aria-hidden="true" />, tone: 'blue' };
+    return { icon: <DocumentBulletList16Regular aria-hidden="true" />, tone: 'neutral' };
   }
 
   return { icon: <Bot16Regular aria-hidden="true" />, tone: 'neutral' };
@@ -138,13 +170,13 @@ export function resolveRoleVisual(role: string | null | undefined): ResolvedVisu
 export function resolveProfileTone(profile: string | null | undefined): AccentTone {
   switch ((profile ?? '').trim().toUpperCase()) {
     case 'P1':
-      return 'orange';
+      return IDENTITY_TONES.p1;
     case 'P2':
-      return 'teal';
+      return IDENTITY_TONES.p2;
     case 'P3':
-      return 'blue';
+      return IDENTITY_TONES.p3;
     case 'P4':
-      return 'gold';
+      return IDENTITY_TONES.p4;
     default:
       return 'neutral';
   }
@@ -188,10 +220,16 @@ interface RoleBadgeProps {
   isDark: boolean;
   label?: string;
   compact?: boolean;
+  /** Optional Axis-1 identity (e.g. resolveProfileTone/resolveToolTone) applied only to neutral task roles. */
+  identityTone?: AccentTone;
 }
 
-export function RoleBadge({ role, isDark, label, compact = false }: RoleBadgeProps) {
-  const visual = resolveRoleVisual(role);
+export function RoleBadge({ role, isDark, label, compact = false, identityTone }: RoleBadgeProps) {
+  const resolved = resolveRoleVisual(role);
+  const visual: ResolvedVisual =
+    resolved.tone === 'neutral' && identityTone && identityTone !== 'neutral'
+      ? { icon: resolved.icon, tone: identityTone }
+      : resolved;
   const styles = getToneStyles(visual.tone, isDark);
   const text = label ?? role;
 
@@ -239,7 +277,8 @@ export function RoleBadge({ role, isDark, label, compact = false }: RoleBadgePro
           width: 20,
           height: 20,
           borderRadius: tokens.borderRadiusCircular,
-          backgroundColor: isDark ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.65)',
+          backgroundColor: tokens.colorNeutralBackground1,
+          border: `1px solid ${styles.border}`,
           color: styles.fg,
           flexShrink: 0,
           lineHeight: 0
@@ -341,6 +380,9 @@ export function ProfileBadge({ profile, isDark }: ProfileBadgeProps) {
         lineHeight: '18px'
       }}
     >
+      {profile.trim().toUpperCase() === 'P4' && (
+        <Flash12Regular aria-hidden="true" style={{ marginRight: 2 }} />
+      )}
       {profile}
     </span>
   );

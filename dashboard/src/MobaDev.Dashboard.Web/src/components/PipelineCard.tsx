@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import {
   Badge,
   Card,
@@ -31,7 +31,7 @@ import {
   WifiOff20Regular
 } from '@fluentui/react-icons';
 import { formatAbsoluteEn, formatRelativeTimeEn } from '../api/dashboardClient';
-import type { AccentTone } from '../theme/mobaFluentTheme';
+import { getStatusStyles, type AccentTone } from '../theme/mobaFluentTheme';
 import type {
   ActiveIssueInfo,
   LinkedIssueInfo,
@@ -42,7 +42,9 @@ import type {
 } from '../types/dashboard';
 import { AgentRoundTable } from './AgentRoundTable';
 import { GlossaryTooltip } from './GlossaryTooltip';
-import { ModelBadge, ProfileBadge, RoleBadge } from './RoleAndModelIcons';
+import { ModelBadge, ProfileBadge, RoleBadge, resolveProfileTone } from './RoleAndModelIcons';
+import { ContextChip } from './shared/ContextChip';
+import { StatusBadge } from './shared/StatusBadge';
 
 const useStyles = makeStyles({
   card: {
@@ -50,7 +52,7 @@ const useStyles = makeStyles({
     gap: '14px',
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderTop: `3px solid ${tokens.colorBrandBackground}`
+    borderTop: `3px solid ${tokens.colorNeutralStroke1}`
   },
   header: {
     display: 'flex',
@@ -214,7 +216,22 @@ const useStyles = makeStyles({
     display: 'inline-flex',
     flexWrap: 'wrap',
     alignItems: 'center',
-    gap: '8px'
+    gap: '6px'
+  },
+  chevronSep: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    userSelect: 'none'
+  },
+  stageBarTrack: {
+    display: 'flex',
+    gap: '2px',
+    height: '4px',
+    width: '100%',
+    borderRadius: tokens.borderRadiusCircular,
+    overflow: 'hidden',
+    backgroundColor: tokens.colorNeutralBackground3,
+    marginTop: '-6px'
   },
   kanbanGroupHeader: {
     display: 'flex',
@@ -271,9 +288,7 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
         <div className={styles.titleGroup}>
           <BranchRequest20Regular aria-hidden="true" />
           <h2 className={styles.title}>Task &amp; PR Pipeline</h2>
-          <Badge appearance="tint" color="brand" shape="rounded" className="mono">
-            Repository: {pipeline.repository}
-          </Badge>
+          <ContextChip mono>Repository: {pipeline.repository}</ContextChip>
         </div>
 
         <div className={styles.filterGroup} role="group" aria-label="Filter pipeline view">
@@ -359,13 +374,19 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
         <>
           <div className={styles.kanbanSummaryStrip}>
             <div className={styles.kanbanCountsGroup}>
-              <Badge appearance="tint" color="success" shape="rounded" className="tabular">
+              <StatusBadge tone="ok" className="tabular">
                 Ready: {readyItems.length}
-              </Badge>
-              <Badge appearance="tint" color="warning" shape="rounded" className="tabular">
+              </StatusBadge>
+              <span className={styles.chevronSep} aria-hidden="true">
+                ›
+              </span>
+              <StatusBadge tone="warn" className="tabular">
                 In progress: {inProgressItems.length}
-              </Badge>
-              <Badge appearance="tint" color="brand" shape="rounded" className="tabular">
+              </StatusBadge>
+              <span className={styles.chevronSep} aria-hidden="true">
+                ›
+              </span>
+              <Badge appearance="tint" color="informative" shape="rounded" className="tabular">
                 In review: {inReviewItems.length}
               </Badge>
             </div>
@@ -388,6 +409,39 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
               </Link>
             )}
           </div>
+
+          {readyItems.length + inProgressItems.length + inReviewItems.length > 0 && (
+            <div
+              className={styles.stageBarTrack}
+              role="img"
+              aria-label={`Workflow distribution: Ready ${readyItems.length}, In progress ${inProgressItems.length}, In review ${inReviewItems.length}`}
+            >
+              {readyItems.length > 0 && (
+                <div
+                  style={{
+                    flexGrow: readyItems.length,
+                    backgroundColor: getStatusStyles('ok', isDark).solid
+                  }}
+                />
+              )}
+              {inProgressItems.length > 0 && (
+                <div
+                  style={{
+                    flexGrow: inProgressItems.length,
+                    backgroundColor: getStatusStyles('warn', isDark).solid
+                  }}
+                />
+              )}
+              {inReviewItems.length > 0 && (
+                <div
+                  style={{
+                    flexGrow: inReviewItems.length,
+                    backgroundColor: getStatusStyles('neutral', isDark).solid
+                  }}
+                />
+              )}
+            </div>
+          )}
 
           {allKanbanItems.length === 0 ? (
             <div className={styles.emptyState}>
@@ -530,11 +584,7 @@ function PullRequestRow({
           </>
         )}
 
-        {pr.projectStatus && (
-          <Badge appearance="tint" color="brand" shape="rounded">
-            Kanban: {pr.projectStatus}
-          </Badge>
-        )}
+        {pr.projectStatus && <ContextChip appearance="tint">Kanban: {pr.projectStatus}</ContextChip>}
 
         <Text
           size={200}
@@ -548,33 +598,12 @@ function PullRequestRow({
 
       <MergeGatesStrip pr={pr} isMerged={isMerged} styles={styles} />
 
-      {pr.lockedAreas.length > 0 && (
-        <div className={styles.prMetaRow}>
-          <LockClosed16Regular
-            style={{ width: 14, height: 14, color: tokens.colorNeutralForeground2 }}
-            aria-hidden="true"
-          />
-          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-            Locked Areas:
-          </Text>
-          {pr.lockedAreas.map((area) => (
-            <span
-              key={area}
-              className={`${styles.monoPill} mono`}
-              style={
-                pr.riskClass === 'H'
-                  ? {
-                      borderColor: tokens.colorPaletteRedBorderActive,
-                      color: tokens.colorPaletteRedForeground1
-                    }
-                  : undefined
-              }
-            >
-              {area}
-            </span>
-          ))}
-        </div>
-      )}
+      <LockedAreasRow
+        lockedAreas={pr.lockedAreas}
+        riskClass={pr.riskClass}
+        isDark={isDark}
+        styles={styles}
+      />
 
       <AgentRoundTable
         centerLabel={`#${pr.number}`}
@@ -593,7 +622,11 @@ function PullRequestRow({
             ? ('green' as AccentTone)
             : normalizedMergeState === 'DIRTY' || normalizedMergeState === 'BLOCKED'
               ? ('red' as AccentTone)
-              : ('blue' as AccentTone)
+              : normalizedMergeState === 'BEHIND' ||
+                  normalizedMergeState === 'UNSTABLE' ||
+                  pr.isDraft
+                ? ('gold' as AccentTone)
+                : ('neutral' as AccentTone)
         }
         participants={pr.participants}
         isDark={isDark}
@@ -695,35 +728,88 @@ function MergeGatesStrip({
           Gates {passedCount}/{gates.length}:
         </span>
       </Text>
-      {gates.map((gate) => (
-        <Badge
-          key={gate.label}
-          appearance={gate.state === 'todo' ? 'outline' : 'tint'}
-          color={
-            gate.state === 'pass'
-              ? 'success'
-              : gate.state === 'pending'
-                ? 'warning'
-                : gate.state === 'fail'
-                  ? 'danger'
-                  : 'subtle'
-          }
-          shape="rounded"
-          size="small"
-          icon={
-            gate.state === 'pass' ? (
-              <CheckmarkCircle16Regular />
-            ) : gate.state === 'pending' ? (
-              <Clock16Regular />
-            ) : gate.state === 'fail' ? (
-              <DismissCircle16Regular />
-            ) : (
-              <Circle16Regular />
-            )
+      <GlossaryTooltip term="Merge Gates" iconOnly />
+      {gates.map((gate, idx) => (
+        <Fragment key={gate.label}>
+          {idx > 0 && (
+            <span className={styles.chevronSep} aria-hidden="true">
+              ›
+            </span>
+          )}
+          <Badge
+            appearance={gate.state === 'todo' ? 'outline' : 'tint'}
+            color={
+              gate.state === 'pass'
+                ? 'success'
+                : gate.state === 'pending'
+                  ? 'warning'
+                  : gate.state === 'fail'
+                    ? 'danger'
+                    : 'subtle'
+            }
+            shape="rounded"
+            size="small"
+            icon={
+              gate.state === 'pass' ? (
+                <CheckmarkCircle16Regular />
+              ) : gate.state === 'pending' ? (
+                <Clock16Regular />
+              ) : gate.state === 'fail' ? (
+                <DismissCircle16Regular />
+              ) : (
+                <Circle16Regular />
+              )
+            }
+          >
+            {gate.label}
+          </Badge>
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+function LockedAreasRow({
+  lockedAreas,
+  riskClass,
+  isDark,
+  styles
+}: {
+  lockedAreas: string[];
+  riskClass?: string | null;
+  isDark: boolean;
+  styles: ReturnType<typeof useStyles>;
+}) {
+  if (lockedAreas.length === 0) {
+    return null;
+  }
+
+  const dangerStyles = getStatusStyles('danger', isDark);
+
+  return (
+    <div className={styles.prMetaRow}>
+      <LockClosed16Regular
+        style={{ width: 14, height: 14, color: tokens.colorNeutralForeground2 }}
+        aria-hidden="true"
+      />
+      <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+        Locked Areas:
+      </Text>
+      {lockedAreas.map((area) => (
+        <span
+          key={area}
+          className={`${styles.monoPill} mono`}
+          style={
+            riskClass === 'H'
+              ? {
+                  borderColor: dangerStyles.border,
+                  color: dangerStyles.fg
+                }
+              : undefined
           }
         >
-          {gate.label}
-        </Badge>
+          {area}
+        </span>
       ))}
     </div>
   );
@@ -773,18 +859,21 @@ function ParticipantPill({
   isDark: boolean;
   styles: ReturnType<typeof useStyles>;
 }) {
-  const statusColor: 'success' | 'warning' | 'danger' | 'brand' | 'subtle' =
+  const statusColor: 'success' | 'warning' | 'danger' | 'subtle' =
     participant.status === 'PASS' ||
     participant.status === 'Approved' ||
+    participant.status === 'Reviewed' ||
     participant.status === 'Consulted · PASS'
       ? 'success'
-      : participant.status === 'Findings' || participant.status === 'Quota Limit'
+      : participant.status === 'Findings' ||
+          participant.status === 'Quota Limit' ||
+          participant.status === 'Implemented' ||
+          participant.status === 'Active' ||
+          participant.status === 'Involved'
         ? 'warning'
         : participant.status === 'Blocked'
           ? 'danger'
-          : participant.status === 'Implemented' || participant.status === 'Active'
-            ? 'brand'
-            : 'subtle';
+          : 'subtle';
 
   const summaryTitle = `${participant.agent} (${participant.tool} · ${participant.model}) · Evidence: ${participant.evidenceSource}`;
 
@@ -797,7 +886,12 @@ function ParticipantPill({
       <GlossaryTooltip term={participant.profile}>
         <ProfileBadge profile={participant.profile} isDark={isDark} />
       </GlossaryTooltip>
-      <RoleBadge role={participant.role} isDark={isDark} compact />
+      <RoleBadge
+        role={participant.role}
+        isDark={isDark}
+        compact
+        identityTone={resolveProfileTone(participant.profile)}
+      />
       <ModelBadge model={participant.model} isDark={isDark} mono />
       <Badge appearance="tint" color={statusColor} shape="rounded" size="small">
         {participant.status}
@@ -831,7 +925,7 @@ function PrStateBadge({ stateLabel, isMerged }: { stateLabel: string; isMerged: 
     );
   }
   return (
-    <Badge appearance="tint" color="brand" shape="rounded">
+    <Badge appearance="tint" color="success" shape="rounded">
       Ready
     </Badge>
   );
@@ -1001,7 +1095,7 @@ function KanbanItemRow({
         <div className={styles.prTitleWrap}>
           <Badge
             appearance={isPr ? 'tint' : 'outline'}
-            color={isPr ? 'brand' : 'subtle'}
+            color="subtle"
             shape="rounded"
             size="small"
           >
@@ -1109,33 +1203,12 @@ function KanbanItemRow({
         </Text>
       </div>
 
-      {issue.lockedAreas.length > 0 && (
-        <div className={styles.prMetaRow}>
-          <LockClosed16Regular
-            style={{ width: 14, height: 14, color: tokens.colorNeutralForeground2 }}
-            aria-hidden="true"
-          />
-          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-            Locked Areas:
-          </Text>
-          {issue.lockedAreas.map((area) => (
-            <span
-              key={area}
-              className={`${styles.monoPill} mono`}
-              style={
-                issue.riskClass === 'H'
-                  ? {
-                      borderColor: tokens.colorPaletteRedBorderActive,
-                      color: tokens.colorPaletteRedForeground1
-                    }
-                  : undefined
-              }
-            >
-              {area}
-            </span>
-          ))}
-        </div>
-      )}
+      <LockedAreasRow
+        lockedAreas={issue.lockedAreas}
+        riskClass={issue.riskClass}
+        isDark={isDark}
+        styles={styles}
+      />
 
       <AgentRoundTable
         centerLabel={`${isPr ? 'PR' : 'Issue'} #${issue.number}`}
@@ -1146,11 +1219,13 @@ function KanbanItemRow({
         }
         centerStatus={issue.kanbanStatus}
         centerTone={
-          issue.kanbanStatus.toLowerCase() === 'in review'
-            ? ('blue' as AccentTone)
+          issue.gitHubState.toUpperCase() === 'CLOSED'
+            ? ('red' as AccentTone)
             : issue.kanbanStatus.toLowerCase() === 'ready'
               ? ('green' as AccentTone)
-              : ('gold' as AccentTone)
+              : issue.kanbanStatus.toLowerCase() === 'in progress'
+                ? ('gold' as AccentTone)
+                : ('neutral' as AccentTone)
         }
         participants={issue.participants}
         isDark={isDark}
@@ -1176,7 +1251,7 @@ function KanbanStatusBadge({ status }: { status: string }) {
   switch (status.toLowerCase()) {
     case 'in review':
       return (
-        <Badge appearance="tint" color="brand" shape="rounded">
+        <Badge appearance="tint" color="informative" shape="rounded">
           {status}
         </Badge>
       );
@@ -1203,10 +1278,15 @@ function KanbanStatusBadge({ status }: { status: string }) {
 
 function PriorityBadge({ priority }: { priority: string }) {
   const normalized = priority.toUpperCase();
-  const color: 'danger' | 'warning' | 'subtle' =
-    normalized === 'P0' ? 'danger' : normalized === 'P1' ? 'warning' : 'subtle';
+  if (normalized === 'P0') {
+    return (
+      <Badge appearance="tint" color="danger" shape="rounded">
+        {normalized}
+      </Badge>
+    );
+  }
   return (
-    <Badge appearance="tint" color={color} shape="rounded">
+    <Badge appearance="outline" color="subtle" shape="rounded">
       {normalized}
     </Badge>
   );
@@ -1232,7 +1312,7 @@ function LinkedPullRequestPill({
       </span>
       <Badge
         appearance="tint"
-        color={prRef.isMerged ? 'informative' : 'brand'}
+        color={prRef.isMerged ? 'success' : 'subtle'}
         shape="rounded"
         size="small"
       >

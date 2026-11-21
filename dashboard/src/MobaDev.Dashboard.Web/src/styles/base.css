@@ -81,3 +81,39 @@ html[data-theme='light'] body {
     animation: none !important;
   }
 }
+
+/* v3.7.0 Round Table seat polish: calm, GPU-cheap transitions (opacity/stroke only) */
+.roundtable-seat {
+  outline: none;
+  transition:
+    opacity 160ms ease,
+    filter 160ms ease;
+}
+
+.roundtable-seat:hover {
+  filter: brightness(1.04);
+}
+
+/* Visible keyboard focus on custom SVG seat controls (Fluent buttons manage their own ring) */
+svg g[role='button']:focus-visible,
+.roundtable-seat:focus-visible {
+  outline: 2px solid var(--colorStrokeFocus2, #005fb8);
+  outline-offset: 2px;
+}
+
+html[data-theme='dark'] svg g[role='button']:focus-visible,
+html[data-theme='dark'] .roundtable-seat:focus-visible {
+  outline-color: var(--colorStrokeFocus2, #ffffff);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .roundtable-seat,
+  .roundtable-seat:hover {
+    transition: none !important;
+    filter: none !important;
+  }
+
+  * {
+    scroll-behavior: auto !important;
+  }
+}

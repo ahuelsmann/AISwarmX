@@ -26,7 +26,9 @@ import {
 } from '@fluentui/react-icons';
 import { formatAbsoluteEn, formatRelativeTimeEn } from '../api/dashboardClient';
 import type { DashboardTab, ThemePreference, WarningBreakdown } from '../types/dashboard';
+import { ColorLegendPopover } from './ColorLegendPopover';
 import { GlossaryTooltip } from './GlossaryTooltip';
+import { ContextChip } from './shared/ContextChip';
 
 const useStyles = makeStyles({
   header: {
@@ -120,6 +122,7 @@ interface StatusHeaderProps {
   activeTab: DashboardTab;
   onTabChange: (tab: DashboardTab) => void;
   driftBadgeCount: number;
+  isDark: boolean;
 }
 
 export function StatusHeader({
@@ -137,7 +140,8 @@ export function StatusHeader({
   onThemeChange,
   activeTab,
   onTabChange,
-  driftBadgeCount
+  driftBadgeCount,
+  isDark
 }: StatusHeaderProps) {
   const styles = useStyles();
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -314,9 +318,9 @@ export function StatusHeader({
               </Button>
             )}
             <GlossaryTooltip term="Read-Only" showIcon>
-              <Badge appearance="tint" color="brand" shape="rounded" icon={<Eye16Regular />}>
+              <ContextChip appearance="tint" icon={<Eye16Regular />}>
                 Read-Only · 127.0.0.1
-              </Badge>
+              </ContextChip>
             </GlossaryTooltip>
             {renderOverallBadge()}
           </div>
@@ -330,6 +334,8 @@ export function StatusHeader({
             >
               Updated: {formatRelativeTimeEn(generatedAtUtc, nowMs)}
             </Text>
+
+            <ColorLegendPopover isDark={isDark} />
 
             <Button
               size="small"

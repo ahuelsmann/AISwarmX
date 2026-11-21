@@ -18,9 +18,16 @@ import {
   formatAutomationStatusEn,
   formatRelativeTimeEn
 } from '../api/dashboardClient';
+import { getToneStyles } from '../theme/mobaFluentTheme';
 import type { MonitorInfo } from '../types/dashboard';
 import { GlossaryTooltip } from './GlossaryTooltip';
-import { ModelBadge, ProfileBadge, RoleBadge } from './RoleAndModelIcons';
+import {
+  ModelBadge,
+  ProfileBadge,
+  RoleBadge,
+  resolveProfileTone,
+  resolveToolTone
+} from './RoleAndModelIcons';
 
 const useStyles = makeStyles({
   grid: {
@@ -112,9 +119,18 @@ export function MonitorCards({ monitors, nowMs, isDark }: MonitorCardsProps) {
       <div className={styles.grid}>
         {orderedMonitors.map((monitor) => {
           const automationLabel = formatAutomationStatusEn(monitor.automationStatus);
+          const profileTone = resolveProfileTone(monitor.profile);
+          const identityTone =
+            profileTone !== 'neutral' ? profileTone : resolveToolTone(monitor.tool);
+          const identityStyles = getToneStyles(identityTone, isDark);
 
           return (
-            <Card key={monitor.id} className={styles.card} appearance="filled">
+            <Card
+              key={monitor.id}
+              className={styles.card}
+              appearance="filled"
+              style={{ borderTop: `3px solid ${identityStyles.solid}` }}
+            >
               <div className={styles.topBand}>
                 <div className={styles.headerRow}>
                   <div className={styles.titleGroup}>
@@ -127,7 +143,12 @@ export function MonitorCards({ monitors, nowMs, isDark }: MonitorCardsProps) {
                 </div>
 
                 <div className={styles.roleRow}>
-                  <RoleBadge role={monitor.role} isDark={isDark} compact />
+                  <RoleBadge
+                    role={monitor.role}
+                    isDark={isDark}
+                    compact
+                    identityTone={identityTone}
+                  />
                   <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
                     · {monitor.tool}
                   </Text>
@@ -184,7 +205,7 @@ function MonitorStateBadge({ state }: { state: string }) {
   switch (state) {
     case 'busy':
       return (
-        <Badge appearance="tint" color="brand" shape="rounded">
+        <Badge appearance="tint" color="warning" shape="rounded">
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
             <span className="pulse-dot" aria-hidden="true" />
             Active / Busy
