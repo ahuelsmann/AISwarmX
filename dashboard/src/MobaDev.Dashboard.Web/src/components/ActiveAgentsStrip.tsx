@@ -1,8 +1,14 @@
 import { Badge, Card, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { Bot16Regular, PeopleTeam16Regular } from '@fluentui/react-icons';
 import { getStatusStyles, getToneStyles, type StatusKey } from '../theme/mobaFluentTheme';
-import type { ActiveAgentsSummary, MonitorInfo, MonitorsResponse } from '../types/dashboard';
+import type {
+  ActiveAgentsSummary,
+  MonitorInfo,
+  MonitorsResponse,
+  PipelineResponse
+} from '../types/dashboard';
 import { resolveProfileTone, resolveToolTone } from './RoleAndModelIcons';
+import { ContextChip } from './shared/ContextChip';
 import { StatusBadge } from './shared/StatusBadge';
 
 const useStyles = makeStyles({
@@ -86,6 +92,15 @@ export function resolveActiveSummaryTone(summary: ActiveAgentsSummary): StatusKe
   return summary.standingMonitorsOnline > 0 ? 'ok' : 'danger';
 }
 
+export function countPipelineSeats(pipeline: PipelineResponse): number {
+  const prSeats = pipeline.pullRequests.reduce((acc, pr) => acc + pr.participants.length, 0);
+  const issueSeats = (pipeline.activeIssues ?? []).reduce(
+    (acc, item) => acc + item.participants.length,
+    0
+  );
+  return prSeats + issueSeats;
+}
+
 function getToolDetectionHint(id: string): string {
   if (id === 'codex-monitor') {
     return '3m active thread window (read-only)';
@@ -102,9 +117,14 @@ function getToolDetectionHint(id: string): string {
 interface ActiveAgentsStripProps {
   monitorsResponse: MonitorsResponse;
   isDark: boolean;
+  pipelineSeatCount?: number;
 }
 
-export function ActiveAgentsStrip({ monitorsResponse, isDark }: ActiveAgentsStripProps) {
+export function ActiveAgentsStrip({
+  monitorsResponse,
+  isDark,
+  pipelineSeatCount
+}: ActiveAgentsStripProps) {
   const styles = useStyles();
   const summary = deriveActiveAgentsSummary(monitorsResponse);
   const orderedMonitors = sortMonitors(monitorsResponse.monitors);
@@ -159,6 +179,17 @@ export function ActiveAgentsStrip({ monitorsResponse, isDark }: ActiveAgentsStri
                 Sub-Agents (Live/Recent): {summary.activeSubAgentsTotal}
               </span>
             </StatusBadge>
+
+            {pipelineSeatCount !== undefined && (
+              <ContextChip
+                appearance="outline"
+                title="Agent roles recorded on open GitHub Issues & PRs (assigned/historical Round Table seats — not necessarily running locally right now)"
+              >
+                <span className="tabular">
+                  Pipeline Seats (GitHub): {pipelineSeatCount}
+                </span>
+              </ContextChip>
+            )}
           </div>
 
           <div className={styles.rightGroup} aria-label="Live or recent sub-agents per tool">

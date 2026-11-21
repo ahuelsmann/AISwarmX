@@ -9,7 +9,7 @@ import {
   tokens
 } from '@fluentui/react-components';
 import { fetchSnapshot } from './api/dashboardClient';
-import { ActiveAgentsStrip } from './components/ActiveAgentsStrip';
+import { ActiveAgentsStrip, countPipelineSeats } from './components/ActiveAgentsStrip';
 import { ArchitectureDiagramsView } from './components/ArchitectureDiagramsView';
 import { ConfigDocsView } from './components/ConfigDocsView';
 import { DecisionTriadCard } from './components/DecisionTriadCard';
@@ -265,7 +265,11 @@ export function App() {
 
           {snapshot && activeTab === 'live' && (
             <>
-              <ActiveAgentsStrip monitorsResponse={snapshot.monitors} isDark={isDark} />
+              <ActiveAgentsStrip
+                monitorsResponse={snapshot.monitors}
+                isDark={isDark}
+                pipelineSeatCount={countPipelineSeats(snapshot.pipeline)}
+              />
 
               <MonitorCards
                 monitors={snapshot.monitors.monitors}
