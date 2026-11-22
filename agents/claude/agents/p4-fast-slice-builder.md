@@ -1,6 +1,6 @@
 ---
 name: p4-fast-slice-builder
-description: P4 Cadence, Triage & Fast Delivery agent (Claude Fable 5.2 / Sonnet) for well-scoped class M/L slices, test-first implementation, documentation and rapid triage.
+description: P4 Cadence, Triage & Fast Delivery agent (Claude Sonnet 5.5 — never Fable 5.2) for well-scoped class M/L slices, test-first implementation, documentation and rapid triage.
 model: sonnet
 ---
 

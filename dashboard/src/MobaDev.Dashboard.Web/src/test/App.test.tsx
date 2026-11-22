@@ -18,7 +18,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
     bindAddress: 'http://127.0.0.1:5179',
     overallStatus: 'warnings',
     warningCount: 10,
-    changelogVersion: '3.8.1',
+    changelogVersion: '3.8.2',
     monitors: {
       generatedAtUtc: nowIso,
       source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
@@ -560,9 +560,9 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(
       await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' })
     ).toBeInTheDocument();
-    expect(screen.getByText('v3.8.1')).toBeInTheDocument();
+    expect(screen.getByText('v3.8.2')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Version v3.8.1 — open CHANGELOG.md' })
+      screen.getByRole('button', { name: 'Version v3.8.2 — open CHANGELOG.md' })
     ).toBeInTheDocument();
     expect(screen.getByText('Read-Only · 127.0.0.1')).toBeInTheDocument();
 

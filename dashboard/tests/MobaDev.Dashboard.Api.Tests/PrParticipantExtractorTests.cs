@@ -75,7 +75,7 @@ public sealed class PrParticipantExtractorTests
 
         var writer = Assert.Single(participants, p => p.Role == "Writer");
         Assert.Equal("P4", writer.Profile);
-        Assert.Equal("Claude Fable 5.2", writer.Model);
+        Assert.Equal("Claude Sonnet 5.5", writer.Model);
         Assert.Equal("Claude Code", writer.Tool);
         Assert.Equal("Slice Header", writer.EvidenceSource);
     }

@@ -1,6 +1,6 @@
 # MOBAdev Agent Swarm Gen#3 Dashboard — Architektur- & UI/UX-Konzept
 
-**Status:** Umgesetzt (v3.8.0 / Gen#3 — interaktiver **`Architecture`**-Tab mit 3 Live-SVG-Diagrammen für Schwarm-Topologie, Task-Lifecycle & Security-Boundary, Live-KPI-Leiste für stehende Monitore + aktive Laufzeit-Sub-Agenten, orthogonales 2-Achsen-Farbsystem mit WCAG-AA-Kontrastprüfung, `ColorLegendPopover`, `Round Table v2`, Workflow-Folge `Open Issues` → `Open PRs` → `Closed PRs` & `Ready` → `In progress` → `In review`, Branch-Hygiene-Monitor, einheitliche Tool-Reihenfolge `ChatGPT/GPT → Claude/Opus → Antigravity/Gemini` & plain-English Glossar)  
+**Status:** Umgesetzt (v3.8.2 / Gen#3 — **`Claude Fable 5.2`-Verbot (Max `Opus 5.5`, `P4` = `Sonnet 5.5`)**, **Antigravity Multi-Model Quota-Failover** (`Gemini` + `Opus 5.5` + `Sonnet 5.5` + `GPT-OSS 120B`), deutsche Limit-Erkennung, interaktiver **`Architecture`**-Tab mit 3 Live-SVG-Diagrammen, Live-KPI-Leiste für Monitore + Sub-Agenten + `Pipeline Seats`, orthogonales 2-Achsen-WCAG-AA-Farbsystem, `ColorLegendPopover`, `Round Table v2`, Workflow-Folge `Open Issues` → `Open PRs` → `Closed PRs` & `Ready` → `In progress` → `In review`, Branch-Hygiene-Monitor, einheitliche Tool-Reihenfolge `ChatGPT/GPT → Claude/Opus → Antigravity/Gemini` & plain-English Glossar)  
 **Verantwortlich:** `Antigravity Monitor` (`Head of AI Strategy`, `P3`) gemeinsam mit `Head of UI/UX` (`P3`)  
 **Ziel-Repository:** `ahuelsmann/MOBAdev` (`PRIVATE`, unter `dashboard/`)  
 **Stack:** ASP.NET Core Minimal API (`.NET 10`) + React (`TypeScript` + `Vite`)

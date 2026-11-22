@@ -56,18 +56,18 @@ const SOL_TOKEN = /(?:^|[\s\-_/])sol(?:$|[\s\-_/0-9.])/i;
 export function resolveModelVisual(model: string | null | undefined): ResolvedVisual {
   const normalized = (model ?? '').trim().toLowerCase();
 
-  // P4 fast delivery: pink + Flash glyph (never gold/amber).
-  if (normalized.includes('fable') || normalized.includes('hydrogen')) {
+  // P4 fast delivery: pink + Flash glyph (never gold/amber). Claude Sonnet 5.5 replaces banned Fable 5.2.
+  if (
+    normalized.includes('sonnet') ||
+    normalized.includes('hydrogen') ||
+    normalized.includes('fable')
+  ) {
     return { icon: <Flash16Regular aria-hidden="true" />, tone: IDENTITY_TONES.p4 };
   }
   if (normalized.includes('orchestrator') || normalized.includes('neon')) {
     return { icon: <Beaker16Regular aria-hidden="true" />, tone: IDENTITY_TONES.p3 };
   }
-  if (
-    normalized.includes('opus') ||
-    normalized.includes('sonnet') ||
-    normalized.includes('claude')
-  ) {
+  if (normalized.includes('opus') || normalized.includes('claude')) {
     return {
       icon: <BrainCircuit20Regular style={{ width: 16, height: 16 }} aria-hidden="true" />,
       tone: IDENTITY_TONES.p1

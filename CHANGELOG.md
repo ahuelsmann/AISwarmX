@@ -5,6 +5,15 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.8.2] - 2026-11-22
+
+### Changed
+- **Prohibit `Claude Fable 5.2` & Enforce `Claude Opus 5.5` Ceiling (`manifest.md`, `delivery-workflow.md`, `p4-fast-slice-builder.md`, `PrParticipantExtractor.cs`, `GlossaryTooltip.tsx`, `RoleAndModelIcons.tsx`):** Replaced active `Claude Fable 5.2` references with `Claude Sonnet 5.5` for `P4` fast delivery (`pink` + Flash glyph) while locking `Claude Opus 5.5` as the maximum Claude tier (`P1`).
+- **Antigravity Multi-Model Failover & `P1` Quota Shield (`ai-strategy-and-pilots.md`, `manifest.md`):** Formalized `2/3 Quorum Failover` when `Claude Code` hits a spend/usage limit (`Codex Monitor` + `Antigravity Monitor` as `Acting COO`, routing `Fresh P1 Final Review` and `P1`–`P4` failover execution through Antigravity's built-in `Claude Opus 5.5`, `Claude Sonnet 5.5`, `GPT-OSS 120B`, and `Gemini 4` pool) plus shared GitHub cloud-fleet architecture (`MOBAflow #337`).
+- **German Claude Spend-Limit Detection (`ClaudeMonitorProvider.cs`):** Extended `RateLimitResetRegex` to recognize German spend/usage limit notices (`Monatliches Ausgabenlimit erreicht ... wird am <Datum> zurückgesetzt`).
+
+---
+
 ## [3.8.1] - 2026-11-21
 
 ### Added
