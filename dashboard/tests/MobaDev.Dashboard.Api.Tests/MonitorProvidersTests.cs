@@ -54,6 +54,15 @@ public sealed class MonitorProvidersTests
         var germanMonitor = await provider.GetMonitorAsync(paths, CancellationToken.None);
         Assert.Equal("rate_limited", germanMonitor.State);
         Assert.Equal("Mo., 23. Nov., 20:00", germanMonitor.RateLimitResetLabel);
+
+        // Also verifies rate_limited quota pause remains visible even after local session file is closed
+        Directory.Delete(sessionsDir, recursive: true);
+        const string closedWeeklyLimitLine = """{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your weekly limit resets Nov 23, 8pm (Europe/Berlin)"}]}}""";
+        await File.WriteAllLinesAsync(Path.Combine(projectDir, $"{sessionId}.jsonl"), [closedWeeklyLimitLine]);
+        var closedMonitor = await provider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("rate_limited", closedMonitor.State);
+        Assert.Equal("Nov 23, 8pm (Europe/Berlin)", closedMonitor.RateLimitResetLabel);
+        Assert.Equal(0, closedMonitor.ActiveSessionCount);
     }
 
     [Fact]

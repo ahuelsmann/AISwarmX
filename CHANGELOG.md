@@ -5,6 +5,15 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.8.3] - 2026-11-22
+
+### Changed
+- **Closed-Session Quota Pause Fallback (`ClaudeMonitorProvider.cs`):** When no live Claude session file exists because `Claude Code` was closed during an active spend/weekly limit, inspects the latest project transcript metadata tail (without exposing chat content) so the dashboard accurately displays `Quota Pause` and the reset timestamp instead of misleading `Offline`, and adds `weekly limit` / `monthly limit` patterns to `RateLimitResetRegex`.
+- **Legacy `Fable 5.2` Table Sanitization (`GovernanceProvider.cs`):** Normalizes legacy `Claude Fable 5.2` profile text in parsed governance tables to `Claude Sonnet 5.5` so `Matrix & Rules` stays aligned with the `Fable 5.2` ban.
+- **Triad & Architecture Failover Visibility (`DecisionTriadCard.tsx`, `ArchitectureDiagramsView.tsx`, `ColorLegendPopover.tsx`):** Surfaces `(Antigravity + Codex Failover)` on the Triad quorum badge during quota pauses, updates the `Antigravity Monitor` mandate and diagram details to show its built-in `Gemini 4 + Opus 5.5 + Sonnet 5.5 + GPT-OSS 120B` pool, and updates `P4` legend wording to `Fast Delivery (Sonnet 5.5 & Hydrogen)`.
+
+---
+
 ## [3.8.2] - 2026-11-22
 
 ### Changed

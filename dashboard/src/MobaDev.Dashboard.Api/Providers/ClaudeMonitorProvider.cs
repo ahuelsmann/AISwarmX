@@ -28,15 +28,21 @@ public sealed partial class ClaudeMonitorProvider
 
         var activeSubagentFiles = CountActiveSubagentFiles(paths.ClaudeHomePath, now);
         var sessionsDir = Path.Combine(paths.ClaudeHomePath, "sessions");
-        if (!Directory.Exists(sessionsDir))
-        {
-            return Task.FromResult(Offline(now, "Claude sessions directory not found.", activeSubagentFiles));
-        }
+        var sessions = Directory.Exists(sessionsDir)
+            ? LoadSessionRecords(sessionsDir)
+            : [];
 
-        var sessions = LoadSessionRecords(sessionsDir);
         if (sessions.Count == 0)
         {
-            return Task.FromResult(Offline(now, "No active Claude session detected.", activeSubagentFiles));
+            if (TryCreateClosedQuotaPauseMonitor(paths.ClaudeHomePath, now, activeSubagentFiles, out var pausedMonitor))
+            {
+                return Task.FromResult(pausedMonitor);
+            }
+
+            var noticeText = Directory.Exists(sessionsDir)
+                ? "No active Claude session detected."
+                : "Claude sessions directory not found.";
+            return Task.FromResult(Offline(now, noticeText, activeSubagentFiles));
         }
 
         var selected = sessions
@@ -194,11 +200,105 @@ public sealed partial class ClaudeMonitorProvider
         return results;
     }
 
+    private static bool TryCreateClosedQuotaPauseMonitor(
+        string claudeHomePath,
+        DateTimeOffset now,
+        int activeSubAgentCount,
+        out MonitorInfo monitor)
+    {
+        var latestTranscript = ResolveLatestProjectTranscript(claudeHomePath);
+        if (latestTranscript is not null)
+        {
+            var (model, rateLimitResetLabel) = InspectTranscriptTailFromFile(latestTranscript);
+            if (!string.IsNullOrEmpty(rateLimitResetLabel))
+            {
+                DateTimeOffset? lastActivityUtc = null;
+                try
+                {
+                    lastActivityUtc = new DateTimeOffset(File.GetLastWriteTimeUtc(latestTranscript), TimeSpan.Zero);
+                }
+                catch
+                {
+                    // Ignore timestamp lookup failure on transient transcript files.
+                }
+
+                monitor = new MonitorInfo(
+                    Id: MonitorId,
+                    DisplayName: DisplayName,
+                    Role: Role,
+                    Profile: Profile,
+                    Tool: Tool,
+                    State: "rate_limited",
+                    Model: model,
+                    LastActivityUtc: lastActivityUtc,
+                    RateLimitResetLabel: rateLimitResetLabel,
+                    ActiveSessionCount: 0,
+                    AutomationStatus: null,
+                    Source: new SourceHealth("ok", now, "Claude session closed during active quota pause."),
+                    ActiveSubAgentCount: activeSubAgentCount);
+                return true;
+            }
+        }
+
+        monitor = default!;
+        return false;
+    }
+
+    private static string? ResolveLatestProjectTranscript(string claudeHomePath)
+    {
+        var projectsDir = Path.Combine(claudeHomePath, "projects");
+        if (!Directory.Exists(projectsDir))
+        {
+            return null;
+        }
+
+        string? latestFile = null;
+        var latestWriteUtc = DateTime.MinValue;
+
+        try
+        {
+            foreach (var projectSubDir in Directory.EnumerateDirectories(projectsDir))
+            {
+                foreach (var jsonlFile in Directory.EnumerateFiles(projectSubDir, "*.jsonl", SearchOption.TopDirectoryOnly))
+                {
+                    if (!PathWhitelistGuard.IsAllowedFilePath(jsonlFile))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        var writeUtc = File.GetLastWriteTimeUtc(jsonlFile);
+                        if (writeUtc > latestWriteUtc)
+                        {
+                            latestWriteUtc = writeUtc;
+                            latestFile = jsonlFile;
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore unreadable transcript metadata.
+                    }
+                }
+            }
+        }
+        catch
+        {
+            return null;
+        }
+
+        return latestFile;
+    }
+
     private static (string? Model, string? RateLimitResetLabel) InspectTranscriptTail(
         string claudeHomePath,
         ClaudeSessionRecord session)
     {
-        var transcriptPath = ResolveTranscriptPath(claudeHomePath, session);
+        return InspectTranscriptTailFromFile(ResolveTranscriptPath(claudeHomePath, session));
+    }
+
+    private static (string? Model, string? RateLimitResetLabel) InspectTranscriptTailFromFile(string? transcriptPath)
+    {
         if (transcriptPath is null || !File.Exists(transcriptPath) || !PathWhitelistGuard.IsAllowedFilePath(transcriptPath))
         {
             return (null, null);
@@ -396,7 +496,7 @@ public sealed partial class ClaudeMonitorProvider
     }
 
     [GeneratedRegex(
-        @"(?:(?:5-hour limit|usage limit|spend limit).*?resets\s+(?<resetEn>[^\r\n]+)|(?:Ausgabenlimit|Nutzungslimit).*?wird\s+am\s+(?<resetDe>[^\r\n]+?)(?=\s+zurückgesetzt|\r|\n|$))",
+        @"(?:(?:5-hour limit|weekly limit|monthly limit|usage limit|spend limit).*?resets\s+(?<resetEn>[^\r\n]+)|(?:Ausgabenlimit|Nutzungslimit).*?wird\s+am\s+(?<resetDe>[^\r\n]+?)(?=\s+zurückgesetzt|\r|\n|$))",
         RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex RateLimitResetRegex();
 

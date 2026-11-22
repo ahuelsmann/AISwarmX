@@ -105,7 +105,7 @@ const COUNCIL_SEATS: SeatDefinition[] = [
     roleMatch: 'Head of AI Strategy',
     tool: 'Antigravity',
     fallbackModel: 'Orchestrator (Neon)',
-    mandate: 'Routes models across hosts, aligns UI/UX & safeguards clarity'
+    mandate: 'Multi-model failover host (Gemini 4, Opus 5.5, Sonnet 5.5, GPT-OSS) & UI/UX lead'
   }
 ];
 
@@ -186,7 +186,7 @@ export function DecisionTriadCard({
           ) : rateLimitedCount > 0 ? (
             <Badge appearance="tint" color="warning" shape="rounded" icon={<Timer16Regular />}>
               <span className="tabular">
-                Quorum {readyCount} / {totalSeats} · {rateLimitedCount} Quota Pause
+                Quorum {readyCount} / {totalSeats} · {rateLimitedCount} Quota Pause (Antigravity + Codex Failover)
               </span>
             </Badge>
           ) : (
