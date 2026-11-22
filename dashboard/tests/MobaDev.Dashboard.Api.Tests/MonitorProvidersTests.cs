@@ -47,6 +47,13 @@ public sealed class MonitorProvidersTests
         Assert.Equal("12am (Europe/Berlin)", monitor.RateLimitResetLabel);
         Assert.Equal(1, monitor.ActiveSessionCount);
         Assert.DoesNotContain(secretPrompt, monitor.Source.Notice ?? string.Empty);
+
+        // Also verifies German monthly spend-limit wording is detected accurately
+        const string germanLimitLine = """{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"Monatliches Ausgabenlimit erreicht\nErhöhe dein Limit, um weiterzuarbeiten · Die Plannutzung wird am Mo., 23. Nov., 20:00 zurückgesetzt"}]}}""";
+        await File.WriteAllLinesAsync(Path.Combine(projectDir, $"{sessionId}.jsonl"), [germanLimitLine]);
+        var germanMonitor = await provider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("rate_limited", germanMonitor.State);
+        Assert.Equal("Mo., 23. Nov., 20:00", germanMonitor.RateLimitResetLabel);
     }
 
     [Fact]

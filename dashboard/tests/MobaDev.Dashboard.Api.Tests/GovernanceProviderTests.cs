@@ -27,7 +27,7 @@ public sealed class GovernanceProviderTests
             | `P1` Depth, Architecture & Safety | **Claude Opus 5.5** | Deep architecture and safety gate |
             | `P2` Repo, Build & Fact Precision | **GPT-6 Astra** | Solution/build graph and CI verification |
             | `P3` System Context, Product & UI/UX | **Gemini 4 Argon** | WinUI 3 and MAUI UX |
-            | `P4` Cadence, Triage & Fast Delivery | **Claude Fable 5.2**, **Gemini 4 Hydrogen** | Fast routine slices |
+            | `P4` Cadence, Triage & Fast Delivery | **Claude Sonnet 5.5**, **Gemini 4 Hydrogen** | Fast routine slices |
             """);
 
         await File.WriteAllTextAsync(Path.Combine(instDir, "master-coordination.instructions.md"), """

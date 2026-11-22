@@ -351,7 +351,10 @@ public sealed partial class ClaudeMonitorProvider
             var match = RateLimitResetRegex().Match(text);
             if (match.Success)
             {
-                return match.Groups[1].Value.Trim();
+                var captured = match.Groups["resetEn"].Success
+                    ? match.Groups["resetEn"].Value
+                    : match.Groups["resetDe"].Value;
+                return captured.Trim();
             }
         }
 
@@ -392,7 +395,9 @@ public sealed partial class ClaudeMonitorProvider
             : null;
     }
 
-    [GeneratedRegex(@"(?:5-hour limit|usage limit|spend limit).*?resets\s+([^\r\n]+)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(
+        @"(?:(?:5-hour limit|usage limit|spend limit).*?resets\s+(?<resetEn>[^\r\n]+)|(?:Ausgabenlimit|Nutzungslimit).*?wird\s+am\s+(?<resetDe>[^\r\n]+?)(?=\s+zurückgesetzt|\r|\n|$))",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex RateLimitResetRegex();
 
     private sealed record ClaudeSessionRecord(

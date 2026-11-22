@@ -114,7 +114,7 @@ public static partial class PrParticipantExtractor
 
         var model = (tool, profile) switch
         {
-            ("Claude Code", "P4") => "Claude Fable 5.2",
+            ("Claude Code", "P4") => "Claude Sonnet 5.5",
             ("Claude Code", _) => "Claude Opus 5.5",
             ("ChatGPT Codex", _) => "GPT-6 Astra",
             ("Antigravity", "P4") => "Gemini 4 Hydrogen",
@@ -160,7 +160,7 @@ public static partial class PrParticipantExtractor
                 Tool: "Claude Code",
                 Role: "Writer",
                 Profile: isP4 ? "P4" : "P1",
-                Model: isP4 ? "Claude Fable 5.2" : "Claude Opus 5.5",
+                Model: isP4 ? "Claude Sonnet 5.5" : "Claude Opus 5.5",
                 Status: "Implemented",
                 EvidenceSource: branch.StartsWith("claude/", StringComparison.OrdinalIgnoreCase)
                     ? "Branch & PR Body"

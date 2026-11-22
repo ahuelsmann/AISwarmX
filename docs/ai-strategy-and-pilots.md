@@ -52,3 +52,18 @@ Document `Orchestrator (Neon)` as an explicit `P3`/`P4` option in `MOBAflow/docs
 - **Reviewed:** 2026-11-18
 - **Decision:** Deferred without subscription upgrade or pay-as-you-go API spend.
 - **Rationale:** `P1` (`Claude Opus 5.5`) and `P2` (`Sol 6.2` / `GPT-6 Astra`) already cover deep architecture, concurrency/safety invariants, and build/repo precision. Re-evaluate only if `Gemini 4 Carbon` becomes included in the existing plan at no additional cost or if a concrete capability or quota bottleneck emerges.
+
+---
+
+## Claude Quota Failover via Antigravity Multi-Model Pool & `Fable 5.2` Prohibition
+
+- **Updated:** 2026-11-22
+- **Claude Ceiling (`Max Opus 5.5`, zero `Fable 5.2`):** `Claude Fable 5.2` is explicitly **prohibited** across all tools and profiles due to disproportional token/budget burn. Maximum permitted Claude tier is **`Claude Opus 5.5`** (`P1`), while **`Claude Sonnet 5.5`** serves `P4` routine tasks.
+- **`P1` Quota Shield:** Keep **Claude Code** focused on COO steering, Class `H` safety architecture, and independent `P1` final reviews; route bulk slice writing primarily to **ChatGPT Codex (`P2`)** and **Antigravity (`P3`/`P4`)**.
+- **Antigravity Multi-Model Pool during `Claude Code` Quota Pauses (`2/3 Quorum Failover`):**
+  Because Antigravity exposes multiple vendor families natively alongside Gemini (`Claude Opus 5.5`, `Claude Sonnet 5.5`, `GPT-OSS 120B`, `Gemini 4 Argon / Neon / Hydrogen`), the swarm never stalls when standalone `Claude Code` hits a 5-hour or monthly spend limit:
+  - **`Acting COO` (`2/3 Quorum`):** `Codex Monitor` (`P2`) + `Antigravity Monitor` (`P3`) take over `Ready -> In progress` intake, area locks, and merge readiness.
+  - **`P1` Architecture & Fresh Final Review:** Routed to **`Claude Opus 5.5`** inside Antigravity (`fresh subagent`), preserving the mandatory `P1` gate and cross-family check with `P2` (`Sol 6.2` / `GPT-6 Astra` or `GPT-OSS 120B`) and `P3` (`Gemini 4 Argon / Neon`).
+  - **`P4` Fast Delivery:** Routed to **`Gemini 4 Hydrogen`** or **`Claude Sonnet 5.5`** (never `Fable 5.2`).
+- **Cloud Fleet Direction (Shared GitHub Coordination Bus across All Tools):**
+  Aligns with `MOBAflow #337` so local outages or exhausted desktop quotas do not block cloud-eligible work (~85% of issues: `MOBAdemo`, `Common`, `Backend`, `TrackPlan`, `MOBApi`, `RF-*`, `docs/wiki/`). GitHub (`Project v2`, structured PR slice headers, PR review comments, and `ExecutionHost: local | codex-cloud | claude-cloud | github-actions` lease tracking) serves as the single message bus across **ChatGPT Codex Cloud**, **Claude Web / GitHub Actions**, and **Gemini / Antigravity Cloud Runners**, while physical Z21/ESP32/WinUI-device acceptance remains strictly local under maintainer authorization.
