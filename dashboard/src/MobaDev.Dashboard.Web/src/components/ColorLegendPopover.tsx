@@ -118,7 +118,7 @@ const IDENTITY_ENTRIES: readonly IdentityLegendEntry[] = [
   { key: 'p2', tag: 'P2', label: 'ChatGPT / Codex (Build & Verify)' },
   { key: 'p1', tag: 'P1', label: 'Claude / Opus (Steering & Final Review)' },
   { key: 'p3', tag: 'P3', label: 'Antigravity / Gemini (Strategy & UI/UX)' },
-  { key: 'p4', tag: 'P4', label: 'Fast Delivery (Docs & Quick Tasks)', hasFlash: true },
+  { key: 'p4', tag: 'P4', label: 'Fast Delivery (Sonnet 5.5 & Hydrogen)', hasFlash: true },
   { key: 'triad', tag: 'Triad', label: 'Decision & Steering Triad' }
 ];
 

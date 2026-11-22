@@ -182,7 +182,7 @@ export function ArchitectureDiagramsView({
       title: 'Decision & Steering Triad (Standing Council)',
       badge: `3/3 Seats · Code WIP ${openPrCount}/3`,
       tone: openPrCount > 3 ? 'danger' : 'ok',
-      body: 'The standing alignment layer connecting Codex Monitor (P2 Technical Director & CPM), Claude Monitor (P1 COO), and Antigravity Monitor (P3 Head of AI Strategy). Together they classify risk (L/M/H), slice scope, and keep parallel worktrees conflict-free.'
+      body: 'The standing alignment layer connecting Codex Monitor (P2 Technical Director & CPM), Claude Monitor (P1 COO), and Antigravity Monitor (P3 Head of AI Strategy). During a Claude Code quota pause, Codex + Antigravity activate 2/3 Acting COO failover and route fresh P1 Final Reviews via Antigravity Claude Opus 5.5.'
     },
     'codex-monitor': {
       title: `Codex Monitor · P2 (${codexMon?.model ?? 'ChatGPT Codex'})`,
@@ -200,7 +200,7 @@ export function ArchitectureDiagramsView({
       title: `Antigravity Monitor · P3 (${agMon?.model ?? 'Antigravity'})`,
       badge: `${stateLabelShort(agMon?.state ?? 'offline')} · Sub-agents: ${agMon?.activeSubAgentCount ?? 0}`,
       tone: stateToStatusKey(agMon?.state ?? 'offline'),
-      body: 'Standing Antigravity / Gemini session acting as Head of AI Strategy & UI/UX/MOBAnews Orchestrator. Coordinates multi-model agent teams, UI design critiques, and local MOBAdev upgrades.'
+      body: 'Standing Antigravity host acting as Head of AI Strategy & Multi-Model Failover Hub. Runs Gemini 4 (Argon / Neon / Hydrogen) alongside built-in Claude Opus 5.5, Claude Sonnet 5.5, and GPT-OSS 120B so P1–P4 workflows continue cleanly during external quota limits.'
     },
     subagents: {
       title: 'Ephemeral Runtime Sub-Agents (Spawned per Task / PR)',
@@ -723,7 +723,7 @@ export function ArchitectureDiagramsView({
                 fill={tokens.colorNeutralForeground2}
                 fontSize="11.5"
               >
-                Writer / Senior Dev · Companion Reviewer · Fresh P1 Final · Cross-Family Verifier · UI/UX · MOBAnews · P4 Fast Delivery (Pink)
+                Writer / Companion · Fresh P1 Final (Opus 5.5 Failover) · X-Family (Codex / GPT-OSS) · UI/UX · P4 Sonnet 5.5 / Hydrogen (Pink)
               </text>
               <circle cx="854" cy="332" r="5" fill={p4Colors.solid} />
             </g>

@@ -76,11 +76,18 @@ public sealed partial class GovernanceProvider
             result.Add(new CapabilityProfileInfo(
                 Profile: profileCode,
                 Name: profileName,
-                Models: CleanMarkdown(row[1]),
+                Models: SanitizeDeprecatedModels(CleanMarkdown(row[1])),
                 Strengths: CleanMarkdown(row[2])));
         }
 
         return result;
+    }
+
+    private static string SanitizeDeprecatedModels(string models)
+    {
+        return models
+            .Replace("Claude Fable 5.2 / Sonnet-class", "Claude Sonnet 5.5", StringComparison.OrdinalIgnoreCase)
+            .Replace("Claude Fable 5.2", "Claude Sonnet 5.5", StringComparison.OrdinalIgnoreCase);
     }
 
     private static (List<RoleDefinitionInfo> Roles, List<RiskClassInfo> RiskClasses) ParseMasterCoordination(

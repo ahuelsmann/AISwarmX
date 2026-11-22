@@ -18,7 +18,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
     bindAddress: 'http://127.0.0.1:5179',
     overallStatus: 'warnings',
     warningCount: 10,
-    changelogVersion: '3.8.2',
+    changelogVersion: '3.8.3',
     monitors: {
       generatedAtUtc: nowIso,
       source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
@@ -560,9 +560,9 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(
       await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' })
     ).toBeInTheDocument();
-    expect(screen.getByText('v3.8.2')).toBeInTheDocument();
+    expect(screen.getByText('v3.8.3')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Version v3.8.2 — open CHANGELOG.md' })
+      screen.getByRole('button', { name: 'Version v3.8.3 — open CHANGELOG.md' })
     ).toBeInTheDocument();
     expect(screen.getByText('Read-Only · 127.0.0.1')).toBeInTheDocument();
 
@@ -582,7 +582,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(within(legendRegion).getByText('Axis 1 · AI Identity (Who)')).toBeInTheDocument();
     expect(within(legendRegion).getByText('Axis 2 · Status (State)')).toBeInTheDocument();
     expect(within(legendRegion).getByText('Round Table Key')).toBeInTheDocument();
-    expect(within(legendRegion).getByText('Fast Delivery (Docs & Quick Tasks)')).toBeInTheDocument();
+    expect(within(legendRegion).getByText('Fast Delivery (Sonnet 5.5 & Hydrogen)')).toBeInTheDocument();
     await user.click(legendBtn);
     expect(screen.queryByRole('region', { name: 'Color and symbol legend' })).not.toBeInTheDocument();
 
@@ -612,7 +612,9 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     // Row 2: Compact Triad bar in traditional order (Codex -> Claude -> Antigravity) with Code WIP
     const triadRegion = screen.getByLabelText('Decision and Steering Triad selection panel');
     expect(screen.getByRole('heading', { name: 'Decision & Steering Triad' })).toBeInTheDocument();
-    expect(screen.getByText('Quorum 2 / 3 · 1 Quota Pause')).toBeInTheDocument();
+    expect(
+      screen.getByText('Quorum 2 / 3 · 1 Quota Pause (Antigravity + Codex Failover)')
+    ).toBeInTheDocument();
     expect(screen.getByText('Code WIP: 0 / 3 (+1 Docs)')).toBeInTheDocument();
     expect(screen.getByText('Escalation: Human')).toBeInTheDocument();
     const triadText = triadRegion.textContent ?? '';
