@@ -430,12 +430,9 @@ public sealed partial class PipelineProvider
                         ? item.LockedAreas
                         : matchedPr?.LockedAreas ?? [];
 
-                    IReadOnlyList<TaskParticipantInfo> participants = matchedPr?.Participants ?? [];
-                    if (participants.Count == 0 &&
-                        PrParticipantExtractor.TryParseKanbanWriter(writer) is { } kanbanPrWriter)
-                    {
-                        participants = [kanbanPrWriter];
-                    }
+                    var prParticipants = matchedPr?.Participants ?? [];
+                    var kanbanPrParticipants = PrParticipantExtractor.ParseKanbanParticipants(writer);
+                    var participants = MergePrAndKanbanParticipants(prParticipants, kanbanPrParticipants);
                     var linkedIssues = matchedPr?.LinkedIssues ?? [];
                     var driftReason = item.GitHubState is "MERGED" or "CLOSED"
                         ? "Merged/Closed on GitHub — move to Done on Kanban"
@@ -473,7 +470,7 @@ public sealed partial class PipelineProvider
                     .ToList();
 
                 var linkedPullRequests = BuildLinkedPrRefs(linkedOpenPrs, linkedMergedPrs);
-                IReadOnlyList<TaskParticipantInfo> issueParticipants =
+                var prIssueParticipants =
                     MergeParticipants(linkedOpenPrs.Count > 0 ? linkedOpenPrs : linkedMergedPrs);
 
                 var issueRiskClass = item.RiskClass ??
@@ -488,11 +485,8 @@ public sealed partial class PipelineProvider
                         .FirstOrDefault(pt => string.Equals(pt.Role, "Writer", StringComparison.OrdinalIgnoreCase))
                         ?.Agent;
 
-                if (issueParticipants.Count == 0 &&
-                    PrParticipantExtractor.TryParseKanbanWriter(issueWriter) is { } kanbanIssueWriter)
-                {
-                    issueParticipants = [kanbanIssueWriter];
-                }
+                var kanbanIssueParticipants = PrParticipantExtractor.ParseKanbanParticipants(issueWriter);
+                var issueParticipants = MergePrAndKanbanParticipants(prIssueParticipants, kanbanIssueParticipants);
 
                 var issueLockedAreas = item.LockedAreas.Count > 0
                     ? item.LockedAreas
@@ -634,6 +628,36 @@ public sealed partial class PipelineProvider
             .GroupBy(pt => (pt.Role, pt.Tool, pt.Profile))
             .Select(g => g.First())
             .ToList();
+    }
+
+    private static IReadOnlyList<TaskParticipantInfo> MergePrAndKanbanParticipants(
+        IReadOnlyList<TaskParticipantInfo> prParticipants,
+        IReadOnlyList<TaskParticipantInfo> kanbanParticipants)
+    {
+        if (prParticipants.Count == 0)
+        {
+            return kanbanParticipants;
+        }
+
+        if (kanbanParticipants.Count == 0)
+        {
+            return prParticipants;
+        }
+
+        var merged = new List<TaskParticipantInfo>(prParticipants);
+        foreach (var kp in kanbanParticipants)
+        {
+            var alreadyCovered = merged.Any(p =>
+                string.Equals(p.Profile, kp.Profile, StringComparison.OrdinalIgnoreCase) &&
+                (string.Equals(p.Tool, kp.Tool, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(p.Role, kp.Role, StringComparison.OrdinalIgnoreCase)));
+            if (!alreadyCovered)
+            {
+                merged.Add(kp);
+            }
+        }
+
+        return merged;
     }
 
     private static string? ComputeBoardDriftReason(

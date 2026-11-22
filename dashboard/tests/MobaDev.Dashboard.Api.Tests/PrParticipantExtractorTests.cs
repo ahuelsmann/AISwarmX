@@ -79,4 +79,16 @@ public sealed class PrParticipantExtractorTests
         Assert.Equal("Claude Code", writer.Tool);
         Assert.Equal("Slice Header", writer.EvidenceSource);
     }
+
+    [Fact]
+    public void ParseKanbanParticipants_ExpandsQuorumSwarmIntoWriterReviewerAndCompanion()
+    {
+        var participants = PrParticipantExtractor.ParseKanbanParticipants(
+            "Antigravity (P3 Gemini 4 Argon + P1 Claude Opus 5.5) + Codex (P2 GPT-6.2 Sol)");
+
+        Assert.Equal(3, participants.Count);
+        Assert.Contains(participants, p => p.Role == "Writer" && p.Tool == "Antigravity" && p.Profile == "P3" && p.Model == "Gemini 4 Argon");
+        Assert.Contains(participants, p => p.Role == "Final Reviewer (Quorum)" && p.Tool == "Antigravity" && p.Profile == "P1" && p.Model == "Claude Opus 5.5");
+        Assert.Contains(participants, p => p.Role == "Quorum TD / Companion" && p.Tool == "ChatGPT Codex" && p.Profile == "P2" && p.Model == "GPT-6.2 Sol");
+    }
 }

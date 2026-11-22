@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.8.4] - 2026-11-22
+
+### Changed
+- **Multi-Agent Quorum Swarm Parsing for Kanban Issues (`PrParticipantExtractor.cs`, `PipelineProvider.cs`, `PrParticipantExtractorTests.cs`):** Added `ParseKanbanParticipants` and `MergePrAndKanbanParticipants` so multi-agent `2/3 Quorum` `Writer` assignments on GitHub Project `#1` (e.g., `Antigravity (P3 Gemini 4 Argon + P1 Claude Opus 5.5) + Codex (P2 GPT-6.2 Sol)`) expand into all individual Round-Table seats (`Writer`, `Final Reviewer (Quorum)` on `Claude Opus 5.5`, `Quorum TD / Companion` on `GPT-6.2 Sol`, `Fast Slice Swarm` on `Claude Sonnet 5.5`) and merge cleanly with live PR evidence.
+
+---
+
 ## [3.8.3] - 2026-11-22
 
 ### Changed
