@@ -32,9 +32,9 @@ import {
 const useStyles = makeStyles({
   grid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(225px, 1fr))',
     gap: '12px',
-    '@media (max-width: 959px)': {
+    '@media (max-width: 639px)': {
       gridTemplateColumns: 'minmax(0, 1fr)'
     }
   },
@@ -92,7 +92,28 @@ const useStyles = makeStyles({
   }
 });
 
-const MONITOR_DISPLAY_ORDER = ['codex-monitor', 'claude-monitor', 'antigravity-monitor'];
+const MONITOR_DISPLAY_ORDER = [
+  'codex-monitor',
+  'claude-monitor',
+  'antigravity-monitor',
+  'antigravity-opus-head'
+];
+
+function resolveMonitorMandate(monitor: MonitorInfo): string {
+  if (monitor.id === 'antigravity-opus-head' || /opus head/i.test(monitor.displayName)) {
+    return 'Master/Root Orchestrator (P1 Opus 5.5) · Acting COO & Sub-Agent Swarm Spawner';
+  }
+  if (monitor.id === 'antigravity-monitor' || /argon head/i.test(monitor.displayName)) {
+    return 'Master/Root Orchestrator (P3 Argon) · AI Strategy, UI/UX & Sub-Agent Swarm Spawner';
+  }
+  if (monitor.id === 'claude-monitor' || /claude/i.test(monitor.displayName)) {
+    return 'Master/Root COO (P1) · Kanban Single-Writer & Swarm Spawner';
+  }
+  if (monitor.id === 'codex-monitor' || /gpt head|codex/i.test(monitor.displayName)) {
+    return 'Master/Root TD & CPM (P2) · Architecture Veto & Cross-Family Swarm Spawner';
+  }
+  return monitor.role;
+}
 
 function sortMonitors(monitors: MonitorInfo[]): MonitorInfo[] {
   return [...monitors].sort((a, b) => {
@@ -129,6 +150,7 @@ export function MonitorCards({ monitors, nowMs, isDark }: MonitorCardsProps) {
               key={monitor.id}
               className={styles.card}
               appearance="filled"
+              title={resolveMonitorMandate(monitor)}
               style={{ borderTop: `3px solid ${identityStyles.solid}` }}
             >
               <div className={styles.topBand}>
@@ -182,13 +204,28 @@ export function MonitorCards({ monitors, nowMs, isDark }: MonitorCardsProps) {
 
               <div className={styles.footerRow}>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  <ModelBadge model={monitor.model} isDark={isDark} mono />
+                  <ModelBadge
+                    model={monitor.model}
+                    isDark={isDark}
+                    mono
+                    identityTone={identityTone}
+                    ghosted={
+                      monitor.state === 'rate_limited' ||
+                      monitor.state === 'offline' ||
+                      /^<?synthetic>?$/i.test((monitor.model ?? '').trim())
+                    }
+                  />
                   <Badge
-                    appearance="outline"
-                    color={(monitor.activeSubAgentCount ?? 0) > 0 ? 'warning' : 'subtle'}
+                    appearance="tint"
                     shape="rounded"
                     size="small"
                     className="tabular"
+                    style={{
+                      backgroundColor: identityStyles.bg,
+                      border: `1px solid ${identityStyles.border}`,
+                      color: identityStyles.fg,
+                      opacity: (monitor.activeSubAgentCount ?? 0) > 0 ? 1 : 0.48
+                    }}
                     title="Active or recently updated sub-agents (Antigravity: RUNNING state; Codex: 3m window; Claude: busy sessions + 2m mtime)"
                   >
                     Sub-agents: {monitor.activeSubAgentCount ?? 0}

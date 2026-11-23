@@ -23,8 +23,8 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
       generatedAtUtc: nowIso,
       source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
       summary: {
-        standingMonitorsTotal: 3,
-        standingMonitorsOnline: 3,
+        standingMonitorsTotal: 4,
+        standingMonitorsOnline: 4,
         standingMonitorsBusy: 1,
         activeSubAgentsTotal: 2,
         totalActiveAgents: 3
@@ -32,7 +32,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
       monitors: [
         {
           id: 'claude-monitor',
-          displayName: 'Claude Monitor',
+          displayName: 'Claude Head',
           role: 'Chief Operating Officer (COO)',
           profile: 'P1',
           tool: 'Claude Code',
@@ -47,7 +47,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
         },
         {
           id: 'codex-monitor',
-          displayName: 'Codex Monitor',
+          displayName: 'GPT Head',
           role: 'Technical Director & CPM',
           profile: 'P2',
           tool: 'ChatGPT Codex',
@@ -55,25 +55,40 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           model: 'gpt-6.2-sol',
           lastActivityUtc: nowIso,
           rateLimitResetLabel: null,
-          activeSessionCount: 2,
+          activeSessionCount: 1,
           automationStatus: 'ACTIVE (FREQ=HOURLY;INTERVAL=1)',
           source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
           activeSubAgentCount: 1
         },
         {
           id: 'antigravity-monitor',
-          displayName: 'Antigravity Monitor',
+          displayName: 'Argon Head',
           role: 'Head of AI Strategy',
           profile: 'P3',
           tool: 'Antigravity',
           state: 'busy',
-          model: 'Orchestrator (Neon)',
+          model: 'Orchestrator · Gemini 4 Argon',
           lastActivityUtc: nowIso,
           rateLimitResetLabel: null,
           activeSessionCount: 1,
           automationStatus: null,
           source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
           activeSubAgentCount: 1
+        },
+        {
+          id: 'antigravity-opus-head',
+          displayName: 'Opus Head',
+          role: 'Acting COO & Opus Orchestrator',
+          profile: 'P1',
+          tool: 'Antigravity',
+          state: 'standby',
+          model: 'Orchestrator · Claude Opus 5.5',
+          lastActivityUtc: nowIso,
+          rateLimitResetLabel: null,
+          activeSessionCount: 1,
+          automationStatus: null,
+          source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
+          activeSubAgentCount: 0
         }
       ]
     },
@@ -182,6 +197,15 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
               model: 'GPT-6 Astra',
               status: 'Implemented',
               evidenceSource: 'Slice Header'
+            },
+            {
+              agent: 'Fresh Claude Reviewer',
+              tool: 'Claude Code',
+              role: 'Final Reviewer',
+              profile: 'P1',
+              model: 'Claude Opus 5.5',
+              status: 'PASS',
+              evidenceSource: 'P1 Final Review'
             }
           ],
           linkedIssues: [
@@ -570,7 +594,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
       name: 'Live Active Agents and Sub-Agents Summary'
     });
     expect(within(activeAgentsStrip).getByText('3 Busy / Recent')).toBeInTheDocument();
-    expect(within(activeAgentsStrip).getByText(/Standing Monitors: 3\/3 online/)).toBeInTheDocument();
+    expect(within(activeAgentsStrip).getByText(/Standing Monitors: 4\/4 online/)).toBeInTheDocument();
     expect(within(activeAgentsStrip).getByText('Sub-Agents (Live/Recent): 2')).toBeInTheDocument();
     expect(within(activeAgentsStrip).getByText(/Pipeline Seats \(GitHub\):/)).toBeInTheDocument();
 
@@ -593,38 +617,41 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
       .map((btn) => btn.textContent?.trim());
     expect(pipelineToggleLabels).toEqual([
       'Open Issues (4)',
-      'Open PRs (1)',
-      'Closed PRs (1)'
+      'Open PRs (1)'
     ]);
 
-    // Row 1: Compact monitor cards ordered Codex -> Claude -> Antigravity with human-friendly RRULE label
+    // Row 1: Compact monitor cards ordered GPT Head -> Claude Head -> Argon Head -> Opus Head
     const monitorSection = screen.getByRole('region', { name: 'Live Monitor Status' });
     expect(
       within(monitorSection)
         .getAllByRole('heading', { level: 2 })
         .map((h) => h.textContent)
-    ).toEqual(['Codex Monitor', 'Claude Monitor', 'Antigravity Monitor']);
+    ).toEqual(['GPT Head', 'Claude Head', 'Argon Head', 'Opus Head']);
     expect(screen.getByText(/Reset: 12am \(Europe\/Berlin\)/)).toBeInTheDocument();
     expect(screen.getByText('Active · Hourly')).toBeInTheDocument();
-    expect(screen.getByText('Standby')).toBeInTheDocument();
+    expect(screen.getAllByText('Standby').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('Active / Busy')).toBeInTheDocument();
 
-    // Row 2: Compact Triad bar in traditional order (Codex -> Claude -> Antigravity) with Code WIP
+    // Row 2: Compact Triad bar across 4 Root Heads with Code WIP
     const triadRegion = screen.getByLabelText('Decision and Steering Triad selection panel');
     expect(screen.getByRole('heading', { name: 'Decision & Steering Triad' })).toBeInTheDocument();
     expect(
-      screen.getByText('Quorum 2 / 3 · 1 Quota Pause (Antigravity + Codex Failover)')
+      screen.getByText('Quorum 3 / 4 · 1 Quota Pause (Antigravity + Codex Failover)')
     ).toBeInTheDocument();
     expect(screen.getByText('Code WIP: 0 / 3 (+1 Docs)')).toBeInTheDocument();
     expect(screen.getByText('Escalation: Human')).toBeInTheDocument();
     const triadText = triadRegion.textContent ?? '';
     const idxCpm = triadText.indexOf('CPM & TD');
     const idxCoo = triadText.indexOf('COO');
+    const idxOpus = triadText.indexOf('Opus Root');
     const idxStrategy = triadText.indexOf('AI Strategy');
     expect(idxCpm).toBeGreaterThan(-1);
     expect(idxCoo).toBeGreaterThan(idxCpm);
-    expect(idxStrategy).toBeGreaterThan(idxCoo);
+    expect(idxOpus).toBeGreaterThan(idxCoo);
+    expect(idxStrategy).toBeGreaterThan(idxOpus);
     expect(resolveModelVisual('Orchestrator (Neon)').tone).toBe('blue');
+    expect(resolveModelVisual('Orchestrator · Gemini 4 Argon').tone).toBe('blue');
+    expect(resolveModelVisual('Orchestrator · Claude Opus 5.5').tone).toBe('orange');
     expect(resolveModelVisual('Gemini 4 Argon').tone).toBe('blue');
     expect(resolveRoleVisual('Head of AI Strategy').tone).toBe('blue');
     expect(resolveModelVisual('gpt-6.2-sol').tone).toBe('teal');
@@ -634,23 +661,28 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(resolveModelVisual('Gemini 4 Hydrogen').tone).toBe('pink');
     expect(resolveRoleVisual('Final Reviewer').tone).toBe('neutral');
 
-    // Row 3: Switch to Open PRs (#492 with Checks Pending, Merge Gates, linked issue & Round Table Visitenkarte)
+    // Row 3: Switch to Open PRs (#492 with Checks Pending, Merge Gates, linked issue, Arrows toggle & Round Table Visitenkarte)
     await user.click(screen.getByRole('button', { name: /Open PRs \(1\)/i }));
     expect(screen.getByText('Repository: ahuelsmann/MOBAflow')).toBeInTheDocument();
     expect(screen.getAllByText('#492').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Checks Pending')).toBeInTheDocument();
-    expect(screen.getByText('Gates 1/5:')).toBeInTheDocument();
+    expect(screen.getByText('Gates 2/5:')).toBeInTheDocument();
     expect(screen.getByText('Issue #366')).toBeInTheDocument();
-    expect(screen.getByText('1 Agent')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Round table of 1 Agent for #492' })).toBeInTheDocument();
+    expect(screen.getByText('2 Agents')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Round table of 2 Agents for #492' })).toBeInTheDocument();
+    const arrowsBtn = screen.getByRole('button', { name: 'Arrows: On' });
+    await user.click(arrowsBtn);
+    expect(screen.getByRole('button', { name: 'Arrows: Off' })).toBeInTheDocument();
     expect(screen.getByText('GPT-6 Astra')).toBeInTheDocument();
     expect(screen.getByText('Implemented')).toBeInTheDocument();
     const pipelineSection = screen.getByLabelText('Task and PR Pipeline MOBAflow');
     await user.click(within(pipelineSection).getByRole('button', { name: 'Pills' }));
     expect(
-      screen.queryByRole('img', { name: 'Round table of 1 Agent for #492' })
+      screen.queryByRole('img', { name: 'Round table of 2 Agents for #492' })
     ).not.toBeInTheDocument();
     expect(screen.getByText('GPT-6 Astra')).toBeInTheDocument();
+    expect(screen.getByText('Final Reviewer')).toBeInTheDocument();
+    expect(screen.getByText('Claude Opus 5.5')).toBeInTheDocument();
     expect(screen.getByText(/missing read:project scope/i)).toBeInTheDocument();
 
     // Branch Hygiene card shows local/remote stale counts and active branches
@@ -667,19 +699,8 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     await user.click(screen.getByRole('button', { name: /Show all 4 stale worktrees/i }));
     expect(screen.getByText('codex/old-4')).toBeInTheDocument();
 
-    // Switch to Closed PRs: Round Table renders by default + Arrows toggle + Pills view switch
-    await user.click(screen.getByRole('button', { name: /Closed PRs \(1\)/i }));
-    expect(screen.getAllByText('#495').length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText('2 Agents')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Round table of 2 Agents for #495' })).toBeInTheDocument();
-    const arrowsBtn = screen.getByRole('button', { name: 'Arrows: On' });
-    await user.click(arrowsBtn);
-    expect(screen.getByRole('button', { name: 'Arrows: Off' })).toBeInTheDocument();
-    await user.click(within(pipelineSection).getByRole('button', { name: 'Pills' }));
-    expect(screen.getByText('Final Reviewer')).toBeInTheDocument();
-    expect(screen.getByText('Cross-Family Verifier')).toBeInTheDocument();
-    expect(screen.getByText('Claude Opus 5.5')).toBeInTheDocument();
-    expect(screen.getByText('Gemini 4 Argon')).toBeInTheDocument();
+    // Closed PRs toggle is intentionally removed in Live Operations
+    expect(screen.queryByRole('button', { name: /Closed PRs/i })).not.toBeInTheDocument();
     },
     10_000
   );
@@ -884,14 +905,56 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
         })
       ).toBeInTheDocument();
 
-      await user.click(screen.getByRole('button', { name: 'Select Codex Monitor' }));
-      expect(screen.getByText(/Codex Monitor · P2/)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Select GPT Head' }));
+      expect(screen.getByText(/GPT Head · P2/)).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Select Opus Head' }));
+      expect(screen.getByText(/Opus Head · P1/)).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Select Argon Head' }));
+      expect(screen.getByText(/Argon Head · P3/)).toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: 'Select lifecycle stage 2. Ready' }));
       expect(screen.getByText('Stage 2 · Ready (Human Maintainer Trigger)')).toBeInTheDocument();
     },
     10_000
   );
+
+  it('keeps deactivated <synthetic> and Sub-agents: 0 badges in their original identity color with ghosted opacity', async () => {
+    const snap = createSnapshotFixture();
+    snap.monitors.monitors[0].model = '<synthetic>';
+    snap.monitors.monitors[0].state = 'rate_limited';
+    snap.monitors.monitors[0].activeSubAgentCount = 0;
+    stubDashboardFetch(snap);
+
+    render(<App />);
+    await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+
+    const monitorSection = screen.getByRole('region', { name: 'Live Monitor Status' });
+    const subAgentsZero = within(monitorSection).getAllByText('Sub-agents: 0')[0];
+    expect(subAgentsZero.style.opacity).toBe('0.48');
+    expect(subAgentsZero.style.color).not.toBe('');
+
+    const syntheticText = within(monitorSection).getByText('<synthetic>');
+    const syntheticBadge = syntheticText.parentElement as HTMLElement;
+    expect(syntheticBadge.style.opacity).toBe('0.52');
+    expect(syntheticBadge.style.borderColor).toBe('rgba(255, 154, 82, 0.34)');
+  });
+
+  it('renders Back to top link at the bottom of Live Operations and scrolls to top when clicked', async () => {
+    const user = userEvent.setup();
+    const scrollToSpy = vi.fn();
+    vi.stubGlobal('scrollTo', scrollToSpy);
+    stubDashboardFetch();
+
+    render(<App />);
+    await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+
+    const backToTopLink = screen.getByRole('link', { name: /Back to top/i });
+    expect(backToTopLink).toBeInTheDocument();
+    await user.click(backToTopLink);
+    expect(scrollToSpy).toHaveBeenCalledWith(expect.objectContaining({ top: 0 }));
+  });
 
   it('degrades gracefully when backend is unreachable', async () => {
     vi.stubGlobal(

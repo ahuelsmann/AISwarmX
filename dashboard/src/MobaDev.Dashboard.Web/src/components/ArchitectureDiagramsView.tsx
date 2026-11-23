@@ -19,10 +19,10 @@ const useStyles = makeStyles({
   root: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '14px'
+    gap: '10px'
   },
   introCard: {
-    padding: '12px 16px',
+    padding: '10px 14px',
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`
   },
@@ -30,12 +30,12 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: '12px',
+    gap: '10px',
     flexWrap: 'wrap'
   },
   card: {
-    padding: '14px 16px',
-    gap: '10px',
+    padding: '12px 14px',
+    gap: '8px',
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`
   },
@@ -43,7 +43,7 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: '10px',
+    gap: '8px',
     flexWrap: 'wrap'
   },
   sectionTitle: {
@@ -57,18 +57,18 @@ const useStyles = makeStyles({
     overflowX: 'auto'
   },
   detailBanner: {
-    padding: '10px 12px',
+    padding: '8px 12px',
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground2,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     display: 'flex',
     flexDirection: 'column',
-    gap: '4px'
+    gap: '2px'
   },
   bottomSplit: {
     display: 'grid',
     gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-    gap: '14px',
+    gap: '10px',
     '@media (max-width: 999px)': {
       gridTemplateColumns: 'minmax(0, 1fr)'
     }
@@ -80,6 +80,7 @@ type TopologyNodeId =
   | 'triad'
   | 'codex-monitor'
   | 'claude-monitor'
+  | 'antigravity-opus-head'
   | 'antigravity-monitor'
   | 'subagents'
   | 'delivery';
@@ -150,6 +151,7 @@ export function ArchitectureDiagramsView({
   const summary = deriveActiveAgentsSummary(snapshot.monitors);
   const codexMon = findMonitor(snapshot.monitors.monitors, 'codex-monitor');
   const claudeMon = findMonitor(snapshot.monitors.monitors, 'claude-monitor');
+  const opusMon = findMonitor(snapshot.monitors.monitors, 'antigravity-opus-head');
   const agMon = findMonitor(snapshot.monitors.monitors, 'antigravity-monitor');
 
   const activeIssues = snapshot.pipeline.activeIssues ?? [];
@@ -179,28 +181,34 @@ export function ArchitectureDiagramsView({
       body: 'Defines product goals, moves issues to Ready (the mandatory start signal), resolves ambiguous trade-offs, and performs manual merges whenever required.'
     },
     triad: {
-      title: 'Decision & Steering Triad (Standing Council)',
-      badge: `3/3 Seats · Code WIP ${openPrCount}/3`,
+      title: 'Decision & Steering Triad (4 Standing Master / Root Heads)',
+      badge: `4/4 Root Heads · Code WIP ${openPrCount}/3`,
       tone: openPrCount > 3 ? 'danger' : 'ok',
-      body: 'The standing alignment layer connecting Codex Monitor (P2 Technical Director & CPM), Claude Monitor (P1 COO), and Antigravity Monitor (P3 Head of AI Strategy). During a Claude Code quota pause, Codex + Antigravity activate 2/3 Acting COO failover and route fresh P1 Final Reviews via Antigravity Claude Opus 5.5.'
+      body: 'Standing coordination layer across GPT Head (P2 Technical Director & CPM), Claude Head (P1 COO), Opus Head (P1 Acting COO & Opus Orchestrator), and Argon Head (P3 Head of AI Strategy & UI/UX). All 4 Root Heads can spawn and steer arbitrary multi-model sub-agent swarms.'
     },
     'codex-monitor': {
-      title: `Codex Monitor · P2 (${codexMon?.model ?? 'ChatGPT Codex'})`,
+      title: `GPT Head · P2 (${codexMon?.model ?? 'gpt-6.2-sol'})`,
       badge: `${stateLabelShort(codexMon?.state ?? 'offline')} · Sub-agents: ${codexMon?.activeSubAgentCount ?? 0}`,
       tone: stateToStatusKey(codexMon?.state ?? 'offline'),
-      body: 'Standing ChatGPT Codex session running as Technical Director & CPM. Tracks Kanban slices, dispatches Codex Writer / Reviewer sub-agents in isolated worktrees, and runs read-only P2 cross-family reviews.'
+      body: 'Master/Root ChatGPT Codex session running as Technical Director & CPM. Tracks Kanban slices, dispatches Codex Writer / Reviewer sub-agents in isolated worktrees, and runs read-only P2 cross-family reviews.'
     },
     'claude-monitor': {
-      title: `Claude Monitor · P1 (${claudeMon?.model ?? 'Claude Code'})`,
+      title: `Claude Head · P1 (${claudeMon?.model ?? 'Claude Opus 5.5'})`,
       badge: `${stateLabelShort(claudeMon?.state ?? 'offline')} · Sub-agents: ${claudeMon?.activeSubAgentCount ?? 0}`,
       tone: stateToStatusKey(claudeMon?.state ?? 'offline'),
-      body: 'Standing Claude Code session acting as Chief Operating Officer (COO). Spawns fresh P1 sub-agents for deep architectural implementation and clean-context Final Reviews.'
+      body: 'Master/Root Claude Code session acting as Chief Operating Officer (COO) & Kanban single-writer. Spawns fresh P1 sub-agents for deep architectural implementation and clean-context Final Reviews.'
+    },
+    'antigravity-opus-head': {
+      title: `Opus Head · P1 (${opusMon?.model ?? 'Orchestrator · Claude Opus 5.5'})`,
+      badge: `${stateLabelShort(opusMon?.state ?? 'offline')} · Sub-agents: ${opusMon?.activeSubAgentCount ?? 0}`,
+      tone: stateToStatusKey(opusMon?.state ?? 'offline'),
+      body: 'Master/Root Antigravity Orchestrator running Claude Opus 5.5 Medium under Google AI Ultra. Acts as P1 Acting COO / Architecture Lead & Fresh P1 Final Reviewer with full sub-agent swarm spawning.'
     },
     'antigravity-monitor': {
-      title: `Antigravity Monitor · P3 (${agMon?.model ?? 'Antigravity'})`,
+      title: `Argon Head · P3 (${agMon?.model ?? 'Orchestrator · Gemini 4 Argon'})`,
       badge: `${stateLabelShort(agMon?.state ?? 'offline')} · Sub-agents: ${agMon?.activeSubAgentCount ?? 0}`,
       tone: stateToStatusKey(agMon?.state ?? 'offline'),
-      body: 'Standing Antigravity host acting as Head of AI Strategy & Multi-Model Failover Hub. Runs Gemini 4 (Argon / Neon / Hydrogen) alongside built-in Claude Opus 5.5, Claude Sonnet 5.5, and GPT-OSS 120B so P1–P4 workflows continue cleanly during external quota limits.'
+      body: 'Master/Root Antigravity Orchestrator running Gemini 4 Argon Medium. Acts as Head of AI Strategy, UI/UX Architecture Lead (WinUI 3, MAUI, MOBAdev cockpit), and multi-model sub-agent swarm coordinator.'
     },
     subagents: {
       title: 'Ephemeral Runtime Sub-Agents (Spawned per Task / PR)',
@@ -262,8 +270,9 @@ export function ArchitectureDiagramsView({
   const activeStageInfo = stageDetails[selectedStage];
 
   const monitorBoxes: Array<{
-    id: 'codex-monitor' | 'claude-monitor' | 'antigravity-monitor';
+    id: 'codex-monitor' | 'claude-monitor' | 'antigravity-opus-head' | 'antigravity-monitor';
     x: number;
+    cx: number;
     title: string;
     subtitle: string;
     profile: string;
@@ -272,8 +281,9 @@ export function ArchitectureDiagramsView({
   }> = [
     {
       id: 'codex-monitor',
-      x: 40,
-      title: 'Codex Monitor',
+      x: 22,
+      cx: 124,
+      title: 'GPT Head',
       subtitle: 'Technical Director & CPM',
       profile: 'P2 · ChatGPT Codex',
       identityColors: p2Colors,
@@ -281,19 +291,31 @@ export function ArchitectureDiagramsView({
     },
     {
       id: 'claude-monitor',
-      x: 340,
-      title: 'Claude Monitor',
+      x: 246,
+      cx: 348,
+      title: 'Claude Head',
       subtitle: 'Chief Operating Officer',
       profile: 'P1 · Claude Code',
       identityColors: p1Colors,
       monitor: claudeMon
     },
     {
+      id: 'antigravity-opus-head',
+      x: 470,
+      cx: 572,
+      title: 'Opus Head',
+      subtitle: 'Acting COO · Opus Root',
+      profile: 'P1 · Antigravity Opus',
+      identityColors: p1Colors,
+      monitor: opusMon
+    },
+    {
       id: 'antigravity-monitor',
-      x: 640,
-      title: 'Antigravity Monitor',
-      subtitle: 'Head of AI Strategy',
-      profile: 'P3 · Antigravity',
+      x: 694,
+      cx: 796,
+      title: 'Argon Head',
+      subtitle: 'AI Strategy & UI/UX',
+      profile: 'P3 · Antigravity Argon',
       identityColors: p3Colors,
       monitor: agMon
     }
@@ -390,11 +412,11 @@ export function ArchitectureDiagramsView({
       <Card className={styles.card} appearance="filled">
         <div className={styles.cardHeader}>
           <h2 className={styles.sectionTitle}>
-            1. Swarm Topology: Standing Monitors, Triad &amp; Ephemeral Sub-Agents
+            1. Swarm Topology: 4 Master/Root Heads, Triad &amp; Ephemeral Sub-Agents
           </h2>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <ContextChip appearance="tint">
-              Order: Codex (P2) → Claude (P1) → Antigravity (P3)
+              Heads: GPT (P2) → Claude (P1) → Opus (P1) → Argon (P3)
             </ContextChip>
             <StatusBadge
               tone={summary.activeSubAgentsTotal > 0 ? 'warn' : 'neutral'}
@@ -407,57 +429,94 @@ export function ArchitectureDiagramsView({
 
         <div className={styles.svgWrap}>
           <svg
-            viewBox="0 0 920 430"
+            viewBox="0 0 920 310"
             width="100%"
             style={{ minWidth: 680, maxWidth: '100%', height: 'auto', display: 'block' }}
             role="group"
-            aria-label="Interactive Swarm Topology Diagram connecting Maintainer, Triad, 3 Standing Monitors, Ephemeral Sub-Agents, and Repositories"
+            aria-label="Interactive Swarm Topology Diagram connecting Maintainer, Triad, 4 Master/Root Heads, Ephemeral Sub-Agents, and Repositories"
           >
+            <defs>
+              <clipPath id="topo-clip-triad">
+                <rect x="170" y="64" width="580" height="36" rx="6" />
+              </clipPath>
+              {monitorBoxes.map((box) => (
+                <clipPath key={`clip-${box.id}`} id={`topo-clip-${box.id}`}>
+                  <rect x={box.x} y="120" width="204" height="68" rx="6" />
+                </clipPath>
+              ))}
+              <clipPath id="topo-clip-subagents">
+                <rect x="22" y="206" width="876" height="46" rx="6" />
+              </clipPath>
+            </defs>
+
             {/* Layer 1 -> Layer 2 trunk */}
             <line
               x1="460"
-              y1="56"
+              y1="44"
               x2="460"
-              y2="86"
+              y2="58"
               stroke={tokens.colorNeutralStroke1}
-              strokeWidth="2"
+              strokeWidth="1.5"
             />
-            <polygon points="455,84 465,84 460,92" fill={tokens.colorNeutralStroke1} />
+            <polygon points="456,57 464,57 460,63" fill={tokens.colorNeutralStroke1} />
 
-            {/* Triad horizontal bus connecting the 3 Monitors */}
+            {/* Triad orthogonal bus connecting the 4 Root Heads */}
             <line
-              x1="160"
-              y1="146"
-              x2="760"
-              y2="146"
+              x1="460"
+              y1="100"
+              x2="460"
+              y2="110"
               stroke={triadColors.solid}
-              strokeWidth="2"
+              strokeWidth="1.5"
             />
-            <line x1="160" y1="146" x2="160" y2="168" stroke={p2Colors.solid} strokeWidth="2" />
-            <line x1="460" y1="146" x2="460" y2="168" stroke={p1Colors.solid} strokeWidth="2" />
-            <line x1="760" y1="146" x2="760" y2="168" stroke={p3Colors.solid} strokeWidth="2" />
+            <line
+              x1="124"
+              y1="110"
+              x2="796"
+              y2="110"
+              stroke={triadColors.solid}
+              strokeWidth="1.5"
+            />
+            {monitorBoxes.map((box) => (
+              <line
+                key={`bus-${box.id}`}
+                x1={box.cx}
+                y1="110"
+                x2={box.cx}
+                y2="120"
+                stroke={box.identityColors.solid}
+                strokeWidth="1.5"
+              />
+            ))}
 
-            {/* Arrows down from 3 Monitors into Sub-Agent Runtime Pool */}
-            {[160, 460, 760].map((cx, idx) => {
-              const stroke = idx === 0 ? p2Colors.solid : idx === 1 ? p1Colors.solid : p3Colors.solid;
-              return (
-                <g key={cx}>
-                  <line x1={cx} y1="252" x2={cx} y2="284" stroke={stroke} strokeWidth="2" />
-                  <polygon points={`${cx - 5},282 ${cx + 5},282 ${cx},290`} fill={stroke} />
-                </g>
-              );
-            })}
+            {/* Arrows down from 4 Root Heads into Sub-Agent Pool */}
+            {monitorBoxes.map((box) => (
+              <g key={`down-${box.id}`}>
+                <line
+                  x1={box.cx}
+                  y1="188"
+                  x2={box.cx}
+                  y2="200"
+                  stroke={box.identityColors.solid}
+                  strokeWidth="1.5"
+                />
+                <polygon
+                  points={`${box.cx - 4},199 ${box.cx + 4},199 ${box.cx},205`}
+                  fill={box.identityColors.solid}
+                />
+              </g>
+            ))}
 
             {/* Arrow down from Sub-Agents to Repositories */}
             <line
               x1="460"
-              y1="356"
+              y1="252"
               x2="460"
-              y2="376"
+              y2="264"
               stroke={tokens.colorNeutralStroke1}
-              strokeWidth="2"
+              strokeWidth="1.5"
             />
-            <polygon points="455,374 465,374 460,382" fill={tokens.colorNeutralStroke1} />
+            <polygon points="456,263 464,263 460,269" fill={tokens.colorNeutralStroke1} />
 
             {/* Layer 1: Maintainer */}
             <g
@@ -476,37 +535,37 @@ export function ArchitectureDiagramsView({
               }}
             >
               <rect
-                x="300"
-                y="10"
-                width="320"
-                height="46"
-                rx="8"
+                x="230"
+                y="8"
+                width="460"
+                height="36"
+                rx="6"
                 fill={tokens.colorNeutralBackground2}
                 stroke={
                   selectedTopology === 'maintainer'
                     ? tokens.colorBrandForeground1
-                    : tokens.colorNeutralStroke1
+                    : tokens.colorNeutralStroke2
                 }
-                strokeWidth={selectedTopology === 'maintainer' ? 2.4 : 1.4}
+                strokeWidth={selectedTopology === 'maintainer' ? 2 : 1}
               />
               <text
                 x="460"
-                y="30"
+                y="24"
                 textAnchor="middle"
                 fill={tokens.colorNeutralForeground1}
-                fontSize="13"
+                fontSize="12.5"
                 fontWeight="700"
               >
                 Human Maintainer (Andreas)
               </text>
               <text
                 x="460"
-                y="47"
+                y="38"
                 textAnchor="middle"
                 fill={tokens.colorNeutralForeground2}
-                fontSize="11"
+                fontSize="10.5"
               >
-                Product Goals · Ready Approval Trigger · Escalations
+                Product Goals · Ready Trigger · Escalations
               </text>
             </g>
 
@@ -527,39 +586,65 @@ export function ArchitectureDiagramsView({
               }}
             >
               <rect
-                x="230"
-                y="94"
-                width="460"
-                height="46"
-                rx="8"
+                x="170"
+                y="64"
+                width="580"
+                height="36"
+                rx="6"
                 fill={triadColors.bg}
                 stroke={
-                  selectedTopology === 'triad' ? tokens.colorBrandForeground1 : triadColors.solid
+                  selectedTopology === 'triad' ? tokens.colorBrandForeground1 : triadColors.border
                 }
-                strokeWidth={selectedTopology === 'triad' ? 2.4 : 1.6}
+                strokeWidth={selectedTopology === 'triad' ? 2 : 1}
+              />
+              <rect
+                x="170"
+                y="64"
+                width="580"
+                height="3"
+                fill={triadColors.solid}
+                clipPath="url(#topo-clip-triad)"
               />
               <text
-                x="460"
-                y="114"
-                textAnchor="middle"
+                x="184"
+                y="86"
                 fill={triadColors.fg}
-                fontSize="13"
+                fontSize="12.5"
                 fontWeight="700"
               >
-                Decision &amp; Steering Triad (Purple Identity)
+                Decision &amp; Steering Triad
               </text>
               <text
-                x="460"
-                y="131"
-                textAnchor="middle"
-                fill={tokens.colorNeutralForeground1}
-                fontSize="11"
+                x="358"
+                y="86"
+                fill={tokens.colorNeutralForeground2}
+                fontSize="10.5"
               >
-                Risk L / M / H · Slice Scope · Area Locks · Code WIP {openPrCount}/3
+                Risk L / M / H · Slice Scope · Area Locks
+              </text>
+              <rect
+                x="634"
+                y="72"
+                width="104"
+                height="20"
+                rx="10"
+                fill={openPrCount > 3 ? dangerColors.bg : triadColors.bg}
+                stroke={openPrCount > 3 ? dangerColors.border : triadColors.border}
+                strokeWidth="1"
+              />
+              <text
+                x="686"
+                y="86"
+                textAnchor="middle"
+                fill={openPrCount > 3 ? dangerColors.fg : triadColors.fg}
+                fontSize="10.5"
+                fontWeight="600"
+              >
+                Code WIP {openPrCount}/3
               </text>
             </g>
 
-            {/* Layer 2B: 3 Standing Monitors */}
+            {/* Layer 2B: 4 Master / Root Head Sessions */}
             {monitorBoxes.map((box) => {
               const stKey = stateToStatusKey(box.monitor?.state ?? 'offline');
               const stColors = getStatusStyles(stKey, isDark);
@@ -585,83 +670,94 @@ export function ArchitectureDiagramsView({
                 >
                   <rect
                     x={box.x}
-                    y="168"
-                    width="240"
-                    height="84"
-                    rx="8"
+                    y="120"
+                    width="204"
+                    height="68"
+                    rx="6"
                     fill={box.identityColors.bg}
-                    stroke={isSelected ? tokens.colorBrandForeground1 : box.identityColors.solid}
-                    strokeWidth={isSelected ? 2.5 : 1.6}
+                    stroke={isSelected ? tokens.colorBrandForeground1 : box.identityColors.border}
+                    strokeWidth={isSelected ? 2 : 1}
                   />
                   <rect
                     x={box.x}
-                    y="168"
-                    width="240"
-                    height="5"
-                    rx="3"
+                    y="120"
+                    width="204"
+                    height="3"
                     fill={box.identityColors.solid}
+                    clipPath={`url(#topo-clip-${box.id})`}
                   />
                   <text
-                    x={box.x + 12}
-                    y="191"
+                    x={box.x + 10}
+                    y="139"
                     fill={box.identityColors.fg}
-                    fontSize="13"
+                    fontSize="12"
                     fontWeight="700"
                   >
                     {box.title}
                   </text>
                   <text
-                    x={box.x + 12}
-                    y="207"
+                    x={box.x + 10}
+                    y="154"
                     fill={tokens.colorNeutralForeground2}
-                    fontSize="11"
+                    fontSize="9.5"
                   >
-                    {box.subtitle} · {box.profile}
+                    {box.subtitle}
+                  </text>
+                  <text
+                    x={box.x + 10}
+                    y="175"
+                    fill={box.identityColors.fg}
+                    fontSize="9.5"
+                    fontWeight="600"
+                  >
+                    {box.profile}
                   </text>
 
-                  {/* Status Pill inside Monitor Card */}
+                  {/* Status Pill inside Root Head Card */}
                   <rect
-                    x={box.x + 12}
-                    y="218"
-                    width="96"
-                    height="22"
-                    rx="11"
+                    x={box.x + 114}
+                    y="127"
+                    width="82"
+                    height="18"
+                    rx="9"
                     fill={stColors.bg}
                     stroke={stColors.border}
                     strokeWidth="1"
                   />
-                  <circle cx={box.x + 24} cy="229" r="4" fill={stColors.solid} />
+                  <circle cx={box.x + 123} cy="136" r="3" fill={stColors.solid} />
                   <text
-                    x={box.x + 33}
-                    y="233"
+                    x={box.x + 130}
+                    y="139.5"
                     fill={stColors.fg}
-                    fontSize="11"
+                    fontSize="9.5"
                     fontWeight="600"
                   >
                     {stateLabelShort(box.monitor?.state ?? 'offline')}
                   </text>
 
-                  {/* Sub-agent Counter Pill inside Monitor Card */}
-                  <rect
-                    x={box.x + 116}
-                    y="218"
-                    width="112"
-                    height="22"
-                    rx="11"
-                    fill={subCount > 0 ? warnColors.bg : neutralColors.bg}
-                    stroke={subCount > 0 ? warnColors.border : neutralColors.border}
-                    strokeWidth="1"
-                  />
-                  <text
-                    x={box.x + 172}
-                    y="233"
-                    textAnchor="middle"
-                    fill={subCount > 0 ? warnColors.fg : neutralColors.fg}
-                    fontSize="11"
-                    fontWeight="600"
-                  >
-                    Sub-agents: {subCount}
-                  </text>
+                  {/* Sub-agent Counter Pill inside Root Head Card */}
+                  <g opacity={subCount > 0 ? 1 : 0.48}>
+                    <rect
+                      x={box.x + 114}
+                      y="162"
+                      width="82"
+                      height="18"
+                      rx="9"
+                      fill={box.identityColors.bg}
+                      stroke={box.identityColors.border}
+                      strokeWidth="1"
+                    />
+                    <text
+                      x={box.x + 155}
+                      y="174.5"
+                      textAnchor="middle"
+                      fill={box.identityColors.fg}
+                      fontSize="9.5"
+                      fontWeight="600"
+                    >
+                      Sub-agents: {subCount}
+                    </text>
+                  </g>
                 </g>
               );
             })}
@@ -683,49 +779,96 @@ export function ArchitectureDiagramsView({
               }}
             >
               <rect
-                x="40"
-                y="290"
-                width="840"
-                height="66"
-                rx="8"
+                x="22"
+                y="206"
+                width="876"
+                height="46"
+                rx="6"
                 fill={summary.activeSubAgentsTotal > 0 ? warnColors.bg : tokens.colorNeutralBackground2}
                 stroke={
                   selectedTopology === 'subagents'
                     ? tokens.colorBrandForeground1
                     : summary.activeSubAgentsTotal > 0
-                      ? warnColors.solid
-                      : tokens.colorNeutralStroke1
+                      ? warnColors.border
+                      : tokens.colorNeutralStroke2
                 }
-                strokeWidth={selectedTopology === 'subagents' ? 2.5 : 1.5}
+                strokeWidth={selectedTopology === 'subagents' ? 2 : 1}
+              />
+              <rect
+                x="22"
+                y="206"
+                width="3"
+                height="46"
+                fill={summary.activeSubAgentsTotal > 0 ? warnColors.solid : p4Colors.solid}
+                clipPath="url(#topo-clip-subagents)"
               />
               <text
-                x="56"
-                y="313"
+                x="40"
+                y="224"
                 fill={tokens.colorNeutralForeground1}
-                fontSize="13"
+                fontSize="12.5"
                 fontWeight="700"
               >
-                Ephemeral Task &amp; PR Sub-Agents (Spawned per Slice inside Isolated Worktrees)
+                Ephemeral Task &amp; PR Sub-Agents (Isolated Worktrees)
               </text>
+              <rect
+                x="622"
+                y="210"
+                width="126"
+                height="20"
+                rx="10"
+                fill={summary.activeSubAgentsTotal > 0 ? warnColors.bg : neutralColors.bg}
+                stroke={summary.activeSubAgentsTotal > 0 ? warnColors.border : neutralColors.border}
+                strokeWidth="1"
+              />
               <text
-                x="864"
-                y="313"
-                textAnchor="end"
+                x="685"
+                y="224"
+                textAnchor="middle"
                 fill={summary.activeSubAgentsTotal > 0 ? warnColors.fg : neutralColors.fg}
-                fontSize="12"
-                fontWeight="700"
+                fontSize="10.5"
+                fontWeight="600"
               >
-                Live/Recent: {summary.activeSubAgentsTotal} · Pipeline Seats: {participantSeatCount}
+                Live/Recent: {summary.activeSubAgentsTotal}
+              </text>
+              <rect
+                x="756"
+                y="210"
+                width="126"
+                height="20"
+                rx="10"
+                fill={neutralColors.bg}
+                stroke={neutralColors.border}
+                strokeWidth="1"
+              />
+              <text
+                x="819"
+                y="224"
+                textAnchor="middle"
+                fill={neutralColors.fg}
+                fontSize="10.5"
+                fontWeight="600"
+              >
+                Pipeline Seats: {participantSeatCount}
               </text>
               <text
-                x="56"
-                y="335"
+                x="40"
+                y="241"
                 fill={tokens.colorNeutralForeground2}
-                fontSize="11.5"
+                fontSize="10.5"
               >
-                Writer / Companion · Fresh P1 Final (Opus 5.5 Failover) · X-Family (Codex / GPT-OSS) · UI/UX · P4 Sonnet 5.5 / Hydrogen (Pink)
+                Writer / Companion · Fresh P1 Final (Opus 5.5 Failover) · X-Family (Codex / GPT-OSS) · UI/UX ·
               </text>
-              <circle cx="854" cy="332" r="5" fill={p4Colors.solid} />
+              <circle cx="545" cy="237.5" r="4" fill={p4Colors.solid} />
+              <text
+                x="553"
+                y="241"
+                fill={p4Colors.fg}
+                fontSize="10.5"
+                fontWeight="600"
+              >
+                P4 Fast Delivery (Sonnet 5.5 / Hydrogen)
+              </text>
             </g>
 
             {/* Layer 4: Output Repos */}
@@ -745,28 +888,28 @@ export function ArchitectureDiagramsView({
               }}
             >
               <rect
-                x="40"
-                y="382"
-                width="840"
-                height="40"
-                rx="8"
+                x="26"
+                y="270"
+                width="868"
+                height="32"
+                rx="6"
                 fill={tokens.colorNeutralBackground3}
                 stroke={
                   selectedTopology === 'delivery'
                     ? tokens.colorBrandForeground1
-                    : tokens.colorNeutralStroke1
+                    : tokens.colorNeutralStroke2
                 }
-                strokeWidth={selectedTopology === 'delivery' ? 2.4 : 1.3}
+                strokeWidth={selectedTopology === 'delivery' ? 2 : 1}
               />
               <text
                 x="460"
-                y="406"
+                y="290"
                 textAnchor="middle"
                 fill={tokens.colorNeutralForeground1}
-                fontSize="12.5"
+                fontSize="11.5"
                 fontWeight="600"
               >
-                Live Source of Truth: MOBAflow ({snapshot.hygiene.worktrees.length} Worktree/s) · MOBAdev (Rules &amp; Dashboard) · GitHub Project Kanban
+                Live Source of Truth: MOBAflow ({snapshot.hygiene.worktrees.length} Worktrees) · MOBAdev (Rules &amp; Dashboard) · GitHub Project Kanban
               </text>
             </g>
           </svg>

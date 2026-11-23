@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   FluentProvider,
+  Link,
   MessageBar,
   MessageBarBody,
   Skeleton,
@@ -8,6 +9,7 @@ import {
   makeStyles,
   tokens
 } from '@fluentui/react-components';
+import { ArrowUp16Regular } from '@fluentui/react-icons';
 import { fetchSnapshot } from './api/dashboardClient';
 import { ActiveAgentsStrip, countPipelineSeats } from './components/ActiveAgentsStrip';
 import { ArchitectureDiagramsView } from './components/ArchitectureDiagramsView';
@@ -60,6 +62,21 @@ const useStyles = makeStyles({
     '@media (max-width: 959px)': {
       gridTemplateColumns: 'minmax(0, 1fr)'
     }
+  },
+  liveFooter: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingTop: '10px',
+    marginTop: '4px',
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  backToTopLink: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold
   }
 });
 
@@ -210,6 +227,14 @@ export function App() {
     setActiveTab('mobadev-docs');
   };
 
+  const handleScrollToTop = () => {
+    const reducedMotion =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const scrollBehavior: ScrollBehavior = reducedMotion ? 'auto' : 'smooth';
+    window.scrollTo?.({ top: 0, behavior: scrollBehavior });
+  };
+
   const driftBadgeCount = snapshot
     ? snapshot.governance.driftCount + snapshot.governance.missingCount
     : 0;
@@ -230,7 +255,7 @@ export function App() {
 
   return (
     <FluentProvider theme={isDark ? mobaDarkTheme : mobaLightTheme}>
-      <div className={styles.appShell}>
+      <div id="live-top" className={styles.appShell}>
         <StatusHeader
           overallStatus={snapshot?.overallStatus}
           warningCount={snapshot?.warningCount ?? 0}
@@ -292,6 +317,20 @@ export function App() {
                   hygiene={snapshot.hygiene}
                   onOpenMatrixSync={handleOpenMatrixSync}
                 />
+              </div>
+
+              <div className={styles.liveFooter}>
+                <Link
+                  href="#live-top"
+                  className={styles.backToTopLink}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleScrollToTop();
+                  }}
+                >
+                  <ArrowUp16Regular aria-hidden="true" />
+                  <span>Back to top</span>
+                </Link>
               </div>
             </>
           )}

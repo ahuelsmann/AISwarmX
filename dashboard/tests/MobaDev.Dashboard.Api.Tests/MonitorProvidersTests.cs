@@ -197,4 +197,65 @@ public sealed class MonitorProvidersTests
         Assert.Equal(1, antigravity.ActiveSessionCount);
         Assert.Equal(2, antigravity.ActiveSubAgentCount);
     }
+
+    [Fact]
+    public async Task RootHeadProviders_DetectGptClaudeArgonAndOpusHeadsAndTranscriptModels()
+    {
+        using var fx = new TempDashboardFixture();
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
+            fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
+
+        var nowEpoch = DateTimeOffset.UtcNow.AddMinutes(-2).ToUnixTimeSeconds();
+        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.CodexHomePath, "state_5.sqlite"), $"""
+            CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, model TEXT, archived INTEGER, updated_at INTEGER);
+            INSERT INTO threads VALUES ('t1', 'GPT Head', 'gpt-6.2-sol', 0, {nowEpoch});
+            """);
+
+        var sessionsDir = Path.Combine(fx.ClaudeHomePath, "sessions");
+        Directory.CreateDirectory(sessionsDir);
+        await File.WriteAllTextAsync(Path.Combine(sessionsDir, "20548.json"), """
+            { "sessionId": "44444444-4444-4444-4444-444444444444", "name": "Claude Head", "status": "idle", "updatedAt": 1795418444682 }
+            """);
+
+        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.AntigravityHomePath, "conversation_summaries.db"), """
+            CREATE TABLE conversation_summaries (
+                conversation_id TEXT PRIMARY KEY,
+                title TEXT,
+                status TEXT,
+                last_modified_time TEXT,
+                source TEXT
+            );
+            INSERT INTO conversation_summaries VALUES ('argon-1', 'Argon Head', 'CASCADE_RUN_STATUS_RUNNING', '2026-11-23T07:20:00Z', '');
+            INSERT INTO conversation_summaries VALUES ('opus-1', 'Opus Head', 'CASCADE_RUN_STATUS_IDLE', '2026-11-23T07:14:48Z', '');
+            INSERT INTO conversation_summaries VALUES ('worker-1', 'Worker Slice', 'CASCADE_RUN_STATUS_RUNNING', '2026-11-23T07:20:05Z', 'CORTEX_TRAJECTORY_SOURCE_CLI');
+            """);
+
+        var argonLogDir = Path.Combine(fx.AntigravityHomePath, "brain", "argon-1", ".system_generated", "logs");
+        var opusLogDir = Path.Combine(fx.AntigravityHomePath, "brain", "opus-1", ".system_generated", "logs");
+        Directory.CreateDirectory(argonLogDir);
+        Directory.CreateDirectory(opusLogDir);
+        await File.WriteAllTextAsync(Path.Combine(argonLogDir, "transcript.jsonl"), "{\"model\":\"gemini-4-argon-medium\"}\n{\"model\":\"gemini-4-hydrogen-xhigh\"}\n");
+        await File.WriteAllTextAsync(Path.Combine(opusLogDir, "transcript.jsonl"), "{\"model\":\"claude-opus-5-5-medium\"}\n{\"model\":\"gemini-4-hydrogen-xhigh\"}\n");
+
+        var gpt = await new CodexMonitorProvider().GetMonitorAsync(paths, CancellationToken.None);
+        var claude = await new ClaudeMonitorProvider().GetMonitorAsync(paths, CancellationToken.None);
+        var antigravityHeads = await new AntigravityMonitorProvider().GetMonitorsAsync(paths, CancellationToken.None);
+
+        Assert.Equal("GPT Head", gpt.DisplayName);
+        Assert.Equal("Claude Head", claude.DisplayName);
+        Assert.Equal(2, antigravityHeads.Count);
+        Assert.Equal("Argon Head", antigravityHeads[0].DisplayName);
+        Assert.Equal("Orchestrator · Gemini 4 Argon", antigravityHeads[0].Model);
+        Assert.Equal("busy", antigravityHeads[0].State);
+        Assert.Equal(1, antigravityHeads[0].ActiveSessionCount);
+        Assert.Equal(1, antigravityHeads[0].ActiveSubAgentCount);
+        Assert.Null(antigravityHeads[0].Source.Notice);
+
+        Assert.Equal("Opus Head", antigravityHeads[1].DisplayName);
+        Assert.Equal("Orchestrator · Claude Opus 5.5", antigravityHeads[1].Model);
+        Assert.Equal("standby", antigravityHeads[1].State);
+        Assert.Equal(1, antigravityHeads[1].ActiveSessionCount);
+        Assert.Equal(0, antigravityHeads[1].ActiveSubAgentCount);
+    }
 }

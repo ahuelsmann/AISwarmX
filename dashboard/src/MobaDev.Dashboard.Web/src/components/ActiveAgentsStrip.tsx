@@ -1,6 +1,6 @@
 import { Badge, Card, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { Bot16Regular, PeopleTeam16Regular } from '@fluentui/react-icons';
-import { getStatusStyles, getToneStyles, type StatusKey } from '../theme/mobaFluentTheme';
+import { getToneStyles, type StatusKey } from '../theme/mobaFluentTheme';
 import type {
   ActiveAgentsSummary,
   MonitorInfo,
@@ -140,8 +140,6 @@ export function ActiveAgentsStrip({
 
   const subTone = summary.activeSubAgentsTotal > 0 ? 'warn' : 'neutral';
 
-  const neutralStyles = getStatusStyles('neutral', isDark);
-
   return (
     <section aria-label="Live Active Agents and Sub-Agents Summary">
       <Card className={styles.card} appearance="filled">
@@ -200,7 +198,7 @@ export function ActiveAgentsStrip({
               const subCount = m.activeSubAgentCount ?? 0;
               const pTone = resolveProfileTone(m.profile);
               const tTone = pTone !== 'neutral' ? pTone : resolveToolTone(m.tool);
-              const chipStyles = subCount > 0 ? getToneStyles(tTone, isDark) : neutralStyles;
+              const chipStyles = getToneStyles(tTone, isDark);
 
               const shortTool =
                 m.tool.includes('Codex')
@@ -216,9 +214,10 @@ export function ActiveAgentsStrip({
                   key={m.id}
                   className={styles.toolChip}
                   style={{
-                    backgroundColor: subCount > 0 ? chipStyles.bg : tokens.colorNeutralBackground3,
-                    border: `1px solid ${subCount > 0 ? chipStyles.border : tokens.colorNeutralStroke2}`,
-                    color: subCount > 0 ? chipStyles.fg : tokens.colorNeutralForeground2
+                    backgroundColor: chipStyles.bg,
+                    border: `1px solid ${chipStyles.border}`,
+                    color: chipStyles.fg,
+                    opacity: subCount > 0 ? 1 : 0.48
                   }}
                   title={`${m.tool} (${m.profile}, tone ${tTone}): ${subCount} (${getToolDetectionHint(m.id)})`}
                 >
@@ -230,10 +229,13 @@ export function ActiveAgentsStrip({
                   <span>{shortTool}:</span>
                   <Badge
                     appearance="outline"
-                    color={subCount > 0 ? 'warning' : 'subtle'}
                     shape="rounded"
                     size="small"
                     className="tabular"
+                    style={{
+                      borderColor: chipStyles.border,
+                      color: chipStyles.fg
+                    }}
                   >
                     {subCount}
                   </Badge>

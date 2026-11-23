@@ -156,14 +156,20 @@ public sealed partial class DashboardSnapshotService
             {
                 var claudeTask = _claudeProvider.GetMonitorAsync(paths, cancellationToken);
                 var codexTask = _codexProvider.GetMonitorAsync(paths, cancellationToken);
-                var antigravityTask = _antigravityProvider.GetMonitorAsync(paths, cancellationToken);
+                var antigravityTask = _antigravityProvider.GetMonitorsAsync(paths, cancellationToken);
                 var governanceTask = _governanceProvider.GetGovernanceAsync(paths, cancellationToken);
                 var worktreeTask = _worktreeProvider.GetWorktreesAsync(paths, pipeline.PullRequests, cancellationToken);
                 var branchTask = _worktreeProvider.GetBranchHygieneAsync(paths, pipeline.PullRequests, cancellationToken);
 
                 await Task.WhenAll(claudeTask, codexTask, antigravityTask, governanceTask, worktreeTask, branchTask).ConfigureAwait(false);
 
-                var monitorList = new[] { codexTask.Result, claudeTask.Result, antigravityTask.Result };
+                var monitorList = new List<MonitorInfo>(2 + antigravityTask.Result.Count)
+                {
+                    codexTask.Result,
+                    claudeTask.Result
+                };
+                monitorList.AddRange(antigravityTask.Result);
+
                 var monitorSource = AggregateSourceHealth(monitorList.Select(m => m.Source), now);
                 var monitorSummary = ComputeActiveAgentsSummary(monitorList);
                 monitors = new MonitorsResponse(now, monitorList, monitorSource, monitorSummary);
@@ -172,7 +178,7 @@ public sealed partial class DashboardSnapshotService
 
                 var (worktrees, worktreeSource) = worktreeTask.Result;
                 var (branches, staleLocalBranches, staleRemoteBranches) = branchTask.Result;
-                var sessions = monitorList.Select(m => BuildSessionHygiene(m)).ToList();
+                var sessions = BuildSessionHygieneList(monitorList);
                 var staleCount = worktrees.Count(w => w.Status == "stale");
                 hygiene = new HygieneResponse(
                     now,
@@ -256,28 +262,48 @@ public sealed partial class DashboardSnapshotService
             TotalActiveAgents: standingBusy + activeSubAgents);
     }
 
-    private static ToolSessionHygiene BuildSessionHygiene(MonitorInfo monitor)
+    private static List<ToolSessionHygiene> BuildSessionHygieneList(IReadOnlyList<MonitorInfo> monitors)
     {
-        var status = monitor.ActiveSessionCount switch
+        var results = new List<ToolSessionHygiene>();
+        foreach (var group in monitors.GroupBy(m => m.Tool, StringComparer.OrdinalIgnoreCase))
         {
-            1 => "ok",
-            0 => "inactive",
-            _ => "warning"
-        };
+            var toolMonitors = group.ToList();
+            var targetCount = toolMonitors.Count;
+            var actualCount = toolMonitors.Sum(m => m.ActiveSessionCount);
+            var monitorName = toolMonitors.Count == 1
+                ? toolMonitors[0].DisplayName
+                : string.Join(" + ", toolMonitors.Select(m => m.DisplayName));
 
-        var notice = monitor.ActiveSessionCount > 1
-            ? $"{monitor.ActiveSessionCount} active sessions found — archive extra sessions."
-            : monitor.ActiveSessionCount == 0
-                ? "No standing monitor session detected."
-                : null;
+            string status;
+            string? notice;
+            if (actualCount == 0)
+            {
+                status = "inactive";
+                notice = targetCount > 1
+                    ? "No standing Root Head sessions detected."
+                    : "No standing monitor session detected.";
+            }
+            else if (actualCount <= targetCount)
+            {
+                status = "ok";
+                notice = null;
+            }
+            else
+            {
+                status = "warning";
+                notice = $"{actualCount} active sessions found (target: {targetCount}) — archive extra sessions.";
+            }
 
-        return new ToolSessionHygiene(
-            Tool: monitor.Tool,
-            MonitorName: monitor.DisplayName,
-            TargetCount: 1,
-            ActualCount: monitor.ActiveSessionCount,
-            Status: status,
-            Notice: notice);
+            results.Add(new ToolSessionHygiene(
+                Tool: group.Key,
+                MonitorName: monitorName,
+                TargetCount: targetCount,
+                ActualCount: actualCount,
+                Status: status,
+                Notice: notice));
+        }
+
+        return results;
     }
 
     private static SourceHealth AggregateSourceHealth(IEnumerable<SourceHealth> items, DateTimeOffset now)
