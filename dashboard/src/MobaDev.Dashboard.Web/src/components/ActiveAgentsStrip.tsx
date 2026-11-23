@@ -3,11 +3,11 @@ import { Bot16Regular, PeopleTeam16Regular } from '@fluentui/react-icons';
 import { getToneStyles, type StatusKey } from '../theme/mobaFluentTheme';
 import type {
   ActiveAgentsSummary,
-  MonitorInfo,
   MonitorsResponse,
-  PipelineResponse
+  PipelineResponse,
+  SubAgentModelCount
 } from '../types/dashboard';
-import { resolveProfileTone, resolveToolTone } from './RoleAndModelIcons';
+import { resolveModelVisual, resolveProfileTone } from './RoleAndModelIcons';
 import { ContextChip } from './shared/ContextChip';
 import { StatusBadge } from './shared/StatusBadge';
 
@@ -52,14 +52,112 @@ const useStyles = makeStyles({
   }
 });
 
-const MONITOR_ORDER = ['codex-monitor', 'claude-monitor', 'antigravity-monitor'];
+const CANONICAL_SUBAGENT_MODELS: ReadonlyArray<{ model: string; profile: string }> = [
+  { model: 'GPT-6.2-sol', profile: 'P2' },
+  { model: 'Claude Opus 5.5', profile: 'P1' },
+  { model: 'Gemini 4 Argon', profile: 'P3' },
+  { model: 'Gemini 4 Hydrogen', profile: 'P4' },
+  { model: 'Claude Sonnet 5.5', profile: 'P4' }
+];
 
-function sortMonitors(monitors: MonitorInfo[]): MonitorInfo[] {
-  return [...monitors].sort((a, b) => {
-    const idxA = MONITOR_ORDER.indexOf(a.id);
-    const idxB = MONITOR_ORDER.indexOf(b.id);
-    return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
-  });
+function normalizeSubAgentModel(rawModel: string | null | undefined, fallbackModel = 'Gemini 4 Argon'): { model: string; profile: string } {
+  const trimmed = (rawModel ?? '').trim();
+  const candidate =
+    trimmed === '' ||
+    /^codex-auto-review$/i.test(trimmed) ||
+    /^<?synthetic>?$/i.test(trimmed)
+      ? fallbackModel
+      : trimmed;
+  const lower = candidate.toLowerCase();
+
+  if (lower.includes('opus')) {
+    return { model: 'Claude Opus 5.5', profile: 'P1' };
+  }
+  if (lower.includes('sonnet') || lower.includes('fable')) {
+    return { model: 'Claude Sonnet 5.5', profile: 'P4' };
+  }
+  if (lower.includes('claude')) {
+    return { model: 'Claude Opus 5.5', profile: 'P1' };
+  }
+  if (lower.includes('hydrogen')) {
+    return { model: 'Gemini 4 Hydrogen', profile: 'P4' };
+  }
+  if (
+    lower.includes('argon') ||
+    lower.includes('neon') ||
+    lower.includes('gemini') ||
+    lower.includes('antigravity')
+  ) {
+    return { model: 'Gemini 4 Argon', profile: 'P3' };
+  }
+  if (lower.includes('astra')) {
+    return { model: 'GPT-6.2-astra', profile: 'P2' };
+  }
+  if (lower.includes('gpt') || /\bsol\b/i.test(lower) || lower.includes('codex')) {
+    return { model: 'GPT-6.2-sol', profile: 'P2' };
+  }
+
+  return { model: candidate, profile: 'P3' };
+}
+
+export function deriveSubAgentsByModel(monitorsResponse: MonitorsResponse): SubAgentModelCount[] {
+  if (monitorsResponse.summary?.subAgentsByModel && monitorsResponse.summary.subAgentsByModel.length > 0) {
+    return monitorsResponse.summary.subAgentsByModel;
+  }
+
+  const counts = new Map<string, number>();
+  const profiles = new Map<string, string>();
+
+  for (const entry of CANONICAL_SUBAGENT_MODELS) {
+    counts.set(entry.model, 0);
+    profiles.set(entry.model, entry.profile);
+  }
+
+  for (const monitor of monitorsResponse.monitors) {
+    const byModel = monitor.activeSubAgentsByModel;
+    if (byModel && Object.keys(byModel).length > 0) {
+      for (const [rawKey, rawVal] of Object.entries(byModel)) {
+        if (!rawVal || rawVal <= 0) {
+          continue;
+        }
+        const norm = normalizeSubAgentModel(rawKey, monitor.model ?? 'Gemini 4 Argon');
+        counts.set(norm.model, (counts.get(norm.model) ?? 0) + rawVal);
+        if (!profiles.has(norm.model)) {
+          profiles.set(norm.model, norm.profile);
+        }
+      }
+    } else if ((monitor.activeSubAgentCount ?? 0) > 0) {
+      const fallback = /codex|gpt/i.test(monitor.tool)
+        ? 'GPT-6.2-sol'
+        : /claude/i.test(monitor.tool)
+          ? 'Claude Opus 5.5'
+          : 'Gemini 4 Argon';
+      const norm = normalizeSubAgentModel(monitor.model, fallback);
+      counts.set(norm.model, (counts.get(norm.model) ?? 0) + (monitor.activeSubAgentCount ?? 0));
+      if (!profiles.has(norm.model)) {
+        profiles.set(norm.model, norm.profile);
+      }
+    }
+  }
+
+  const result: SubAgentModelCount[] = CANONICAL_SUBAGENT_MODELS.map((entry) => ({
+    model: entry.model,
+    profile: entry.profile,
+    count: counts.get(entry.model) ?? 0
+  }));
+
+  for (const [model, count] of counts.entries()) {
+    if (CANONICAL_SUBAGENT_MODELS.some((entry) => entry.model === model)) {
+      continue;
+    }
+    result.push({
+      model,
+      profile: profiles.get(model) ?? 'P3',
+      count
+    });
+  }
+
+  return result;
 }
 
 export function deriveActiveAgentsSummary(monitorsResponse: MonitorsResponse): ActiveAgentsSummary {
@@ -80,7 +178,8 @@ export function deriveActiveAgentsSummary(monitorsResponse: MonitorsResponse): A
     standingMonitorsOnline,
     standingMonitorsBusy,
     activeSubAgentsTotal,
-    totalActiveAgents: standingMonitorsBusy + activeSubAgentsTotal
+    totalActiveAgents: standingMonitorsBusy + activeSubAgentsTotal,
+    subAgentsByModel: deriveSubAgentsByModel(monitorsResponse)
   };
 }
 
@@ -101,19 +200,6 @@ export function countPipelineSeats(pipeline: PipelineResponse): number {
   return prSeats + issueSeats;
 }
 
-function getToolDetectionHint(id: string): string {
-  if (id === 'codex-monitor') {
-    return '3m active thread window (read-only)';
-  }
-  if (id === 'claude-monitor') {
-    return 'busy extra sessions + 2m subagent mtime (read-only)';
-  }
-  if (id === 'antigravity-monitor') {
-    return 'live RUNNING conversations (read-only)';
-  }
-  return 'recent activity (read-only)';
-}
-
 interface ActiveAgentsStripProps {
   monitorsResponse: MonitorsResponse;
   isDark: boolean;
@@ -127,7 +213,7 @@ export function ActiveAgentsStrip({
 }: ActiveAgentsStripProps) {
   const styles = useStyles();
   const summary = deriveActiveAgentsSummary(monitorsResponse);
-  const orderedMonitors = sortMonitors(monitorsResponse.monitors);
+  const subAgentsByModel = deriveSubAgentsByModel(monitorsResponse);
 
   const totalTone = resolveActiveSummaryTone(summary);
 
@@ -190,28 +276,22 @@ export function ActiveAgentsStrip({
             )}
           </div>
 
-          <div className={styles.rightGroup} aria-label="Live or recent sub-agents per tool">
+          <div className={styles.rightGroup} aria-label="Live or recent sub-agents per model">
             <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
               Sub-agents (live/recent):
             </Text>
-            {orderedMonitors.map((m) => {
-              const subCount = m.activeSubAgentCount ?? 0;
-              const pTone = resolveProfileTone(m.profile);
-              const tTone = pTone !== 'neutral' ? pTone : resolveToolTone(m.tool);
-              const chipStyles = getToneStyles(tTone, isDark);
-
-              const shortTool =
-                m.tool.includes('Codex')
-                  ? 'Codex'
-                  : m.tool.includes('Claude')
-                    ? 'Claude'
-                    : m.tool.includes('Antigravity')
-                      ? 'Antigravity'
-                      : m.tool;
+            {subAgentsByModel.map((entry) => {
+              const subCount = entry.count;
+              const modelVisual = resolveModelVisual(entry.model);
+              const tone =
+                modelVisual.tone !== 'neutral'
+                  ? modelVisual.tone
+                  : resolveProfileTone(entry.profile);
+              const chipStyles = getToneStyles(tone, isDark);
 
               return (
                 <div
-                  key={m.id}
+                  key={entry.model}
                   className={styles.toolChip}
                   style={{
                     backgroundColor: chipStyles.bg,
@@ -219,14 +299,14 @@ export function ActiveAgentsStrip({
                     color: chipStyles.fg,
                     opacity: subCount > 0 ? 1 : 0.48
                   }}
-                  title={`${m.tool} (${m.profile}, tone ${tTone}): ${subCount} (${getToolDetectionHint(m.id)})`}
+                  title={`${entry.model} (${entry.profile}, tone ${tone}): ${subCount} live/recent sub-agent(s)`}
                 >
                   <span
                     className={styles.dot}
                     style={{ backgroundColor: chipStyles.solid }}
                     aria-hidden="true"
                   />
-                  <span>{shortTool}:</span>
+                  <span>{entry.model}:</span>
                   <Badge
                     appearance="outline"
                     shape="rounded"

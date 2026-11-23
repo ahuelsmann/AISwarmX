@@ -254,12 +254,14 @@ public sealed partial class DashboardSnapshotService
         var standingOnline = monitors.Count(m => m.State is "standby" or "busy" or "rate_limited");
         var standingBusy = monitors.Count(m => m.State == "busy");
         var activeSubAgents = monitors.Sum(m => m.ActiveSubAgentCount);
+        var subAgentsByModel = SubAgentModelCatalog.BuildSummaryList(monitors);
         return new ActiveAgentsSummary(
             StandingMonitorsTotal: standingTotal,
             StandingMonitorsOnline: standingOnline,
             StandingMonitorsBusy: standingBusy,
             ActiveSubAgentsTotal: activeSubAgents,
-            TotalActiveAgents: standingBusy + activeSubAgents);
+            TotalActiveAgents: standingBusy + activeSubAgents,
+            SubAgentsByModel: subAgentsByModel);
     }
 
     private static List<ToolSessionHygiene> BuildSessionHygieneList(IReadOnlyList<MonitorInfo> monitors)

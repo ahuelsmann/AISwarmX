@@ -68,8 +68,11 @@ public sealed partial class CodexMonitorProvider
 
             if (standingThreads.Count == 0)
             {
-                var fallbackSubAgents = allActiveThreads.Count(t => t.UpdatedAtSeconds >= subAgentCutoffSeconds);
-                return Task.FromResult(Unavailable(now, "ok", "No active GPT Head thread found.", automationStatus, fallbackSubAgents));
+                var fallbackThreads = allActiveThreads
+                    .Where(t => t.UpdatedAtSeconds >= subAgentCutoffSeconds)
+                    .ToList();
+                var fallbackByModel = CountThreadsByModel(fallbackThreads, "gpt-6.2-sol");
+                return Task.FromResult(Unavailable(now, "ok", "No active GPT Head thread found.", automationStatus, fallbackThreads.Count, fallbackByModel));
             }
 
             var selected = standingThreads
@@ -87,9 +90,13 @@ public sealed partial class CodexMonitorProvider
                 ? "busy"
                 : "standby";
 
-            var activeSubAgentCount = allActiveThreads.Count(t =>
-                !string.Equals(t.Id, selected.Id, StringComparison.Ordinal) &&
-                t.UpdatedAtSeconds >= subAgentCutoffSeconds);
+            var activeSubThreads = allActiveThreads
+                .Where(t =>
+                    !string.Equals(t.Id, selected.Id, StringComparison.Ordinal) &&
+                    t.UpdatedAtSeconds >= subAgentCutoffSeconds)
+                .ToList();
+            var activeSubAgentCount = activeSubThreads.Count;
+            var activeSubAgentsByModel = CountThreadsByModel(activeSubThreads, selected.Model ?? "gpt-6.2-sol");
 
             var notice = standingThreads.Count > 1
                 ? $"{standingThreads.Count} non-archived named Codex threads active (target: 1)."
@@ -108,7 +115,8 @@ public sealed partial class CodexMonitorProvider
                 ActiveSessionCount: standingThreads.Count,
                 AutomationStatus: automationStatus,
                 Source: new SourceHealth("ok", now, notice),
-                ActiveSubAgentCount: activeSubAgentCount));
+                ActiveSubAgentCount: activeSubAgentCount,
+                ActiveSubAgentsByModel: activeSubAgentsByModel));
         }
         catch (SqliteException ex) when (SqliteReadOnlyHelper.IsBusyOrLocked(ex))
         {
@@ -128,12 +136,27 @@ public sealed partial class CodexMonitorProvider
         }
     }
 
+    private static IReadOnlyDictionary<string, int> CountThreadsByModel(
+        IReadOnlyList<CodexThreadRecord> threads,
+        string fallbackModel)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var thread in threads)
+        {
+            var (canonicalModel, _) = SubAgentModelCatalog.Normalize(thread.Model, fallbackModel);
+            counts[canonicalModel] = counts.GetValueOrDefault(canonicalModel) + 1;
+        }
+
+        return counts;
+    }
+
     private static MonitorInfo Unavailable(
         DateTimeOffset now,
         string sourceStatus,
         string notice,
         string? automationStatus,
-        int activeSubAgentCount = 0)
+        int activeSubAgentCount = 0,
+        IReadOnlyDictionary<string, int>? activeSubAgentsByModel = null)
     {
         return new MonitorInfo(
             Id: MonitorId,
@@ -148,7 +171,8 @@ public sealed partial class CodexMonitorProvider
             ActiveSessionCount: 0,
             AutomationStatus: automationStatus,
             Source: new SourceHealth(sourceStatus, now, notice),
-            ActiveSubAgentCount: activeSubAgentCount);
+            ActiveSubAgentCount: activeSubAgentCount,
+            ActiveSubAgentsByModel: activeSubAgentsByModel);
     }
 
     private static string? ReadAutomationStatus(string codexHomePath)
