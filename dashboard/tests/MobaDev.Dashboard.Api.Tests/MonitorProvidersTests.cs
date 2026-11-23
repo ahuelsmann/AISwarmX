@@ -268,4 +268,65 @@ public sealed class MonitorProvidersTests
         Assert.Contains(summary, x => x.Model == "GPT-6.2-sol" && x.Profile == "P2" && x.Count == 0);
         Assert.Contains(summary, x => x.Model == "Claude Opus 5.5" && x.Profile == "P1" && x.Count == 0);
     }
+
+    [Fact]
+    public async Task CodexMonitorProvider_DetectsUsageLimitExceededAndClearsAfterSuccessfulTurn()
+    {
+        using var fx = new TempDashboardFixture();
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
+            fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
+
+        var recentActivityEpoch = DateTimeOffset.UtcNow.AddSeconds(-30).ToUnixTimeSeconds();
+        var standbyActivityEpoch = DateTimeOffset.UtcNow.AddMinutes(-10).ToUnixTimeSeconds();
+        var futureResetEpoch = DateTimeOffset.UtcNow.AddHours(2).ToUnixTimeSeconds();
+
+        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.CodexHomePath, "state_5.sqlite"), $"""
+            CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, model TEXT, archived INTEGER, updated_at INTEGER);
+            INSERT INTO threads VALUES ('t1', 'GPT Head', 'gpt-6.2-sol', 0, {recentActivityEpoch});
+            """);
+
+        var rolloutDir = Path.Combine(fx.CodexHomePath, "sessions", "2026", "11", "23");
+        Directory.CreateDirectory(rolloutDir);
+        var rolloutPath = Path.Combine(rolloutDir, "rollout-2026-11-23T17-00-00-t1.jsonl");
+
+        const string secretPrompt = "PRIVATE_CODEX_PROMPT_SHOULD_NEVER_LEAK";
+        var promptLine = $$$"""{"timestamp":"2026-11-23T17:02:00Z","type":"event_msg","payload":{"type":"user_message","message":"{{{secretPrompt}}}"}}""";
+        var tokenLine = """{"timestamp":"2026-11-23T17:02:39Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":99.0,"window_minutes":300,"resets_at":__RESET__},"credits":{"has_credits":false,"unlimited":false,"balance":"0"},"rate_limit_reached_type":null}}}"""
+            .Replace("__RESET__", futureResetEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var premiumNullLine = """{"timestamp":"2026-11-23T17:02:41Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"premium","primary":null,"secondary":null,"rate_limit_reached_type":null}}}""";
+        const string limitCompleteLine = """{"timestamp":"2026-11-23T17:02:42Z","type":"event_msg","payload":{"type":"task_complete","error":{"message":"You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 8:46 PM.","codex_error_info":"usage_limit_exceeded"}}}""";
+
+        await File.WriteAllLinesAsync(rolloutPath, [promptLine, tokenLine, premiumNullLine, limitCompleteLine]);
+
+        var provider = new CodexMonitorProvider();
+        var limitedMonitor = await provider.GetMonitorAsync(paths, CancellationToken.None);
+
+        Assert.Equal("rate_limited", limitedMonitor.State);
+        Assert.Equal("8:46 PM · usage limit exceeded", limitedMonitor.RateLimitResetLabel);
+        Assert.DoesNotContain(secretPrompt, limitedMonitor.Source.Notice ?? string.Empty);
+
+        // Move thread activity past the busy window and append a subsequent successful turn.
+        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.CodexHomePath, "state_5.sqlite"), $"""
+            DROP TABLE IF EXISTS threads;
+            CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, model TEXT, archived INTEGER, updated_at INTEGER);
+            INSERT INTO threads VALUES ('t1', 'GPT Head', 'gpt-6.2-sol', 0, {standbyActivityEpoch});
+            """);
+        const string recoveredTurnLine = """{"timestamp":"2026-11-23T19:50:00Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":"Resumed successfully","error":null}}""";
+        await File.AppendAllLinesAsync(rolloutPath, [recoveredTurnLine]);
+
+        var recoveredMonitor = await provider.GetMonitorAsync(paths, CancellationToken.None);
+
+        Assert.Equal("standby", recoveredMonitor.State);
+        Assert.Null(recoveredMonitor.RateLimitResetLabel);
+
+        // Also verifies 100% rate_limits saturation in a newer session triggers rate_limited.
+        var saturatedTokenLine = """{"timestamp":"2026-11-23T20:00:00Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":100.0,"window_minutes":300,"resets_at":__RESET__},"credits":{"has_credits":false,"unlimited":false,"balance":"0"},"rate_limit_reached_type":"primary"}}}"""
+            .Replace("__RESET__", futureResetEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        await File.AppendAllLinesAsync(rolloutPath, [saturatedTokenLine]);
+
+        var saturatedMonitor = await provider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("rate_limited", saturatedMonitor.State);
+        Assert.NotNull(saturatedMonitor.RateLimitResetLabel);
+    }
 }
