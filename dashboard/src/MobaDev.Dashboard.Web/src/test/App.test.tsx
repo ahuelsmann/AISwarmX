@@ -1,7 +1,12 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
+import {
+  clearMonitorGridCookie,
+  MONITOR_GRID_COOKIE,
+  readMonitorGridCookie
+} from '../components/MonitorCards';
 import { resolveModelVisual, resolveProfileTone, resolveRoleVisual } from '../components/RoleAndModelIcons';
 import type {
   ConfigDocContentResponse,
@@ -578,6 +583,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     window.localStorage.clear();
+    clearMonitorGridCookie();
   });
 
   it(
@@ -989,6 +995,106 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     const argonChip = within(perModelGroup).getByText('Gemini 4 Argon:').parentElement as HTMLElement;
     expect(argonChip.style.opacity).toBe('0.48');
     expect(argonChip.style.color).not.toBe('');
+  });
+
+  it('renders a 2x3 monitor grid (6 slots), persists free arrangement in cookie, and restores it on reload', async () => {
+    const user = userEvent.setup();
+    stubDashboardFetch();
+
+    const { unmount } = render(<App />);
+    await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+
+    const monitorSection = screen.getByRole('region', { name: 'Live Monitor Status' });
+    for (let idx = 0; idx < 6; idx += 1) {
+      expect(within(monitorSection).getByTestId(`monitor-slot-${idx}`)).toBeInTheDocument();
+    }
+
+    expect(
+      within(within(monitorSection).getByTestId('monitor-slot-3')).getByRole('heading', {
+        name: 'Opus Head'
+      })
+    ).toBeInTheDocument();
+    expect(within(monitorSection).getByTestId('monitor-slot-4')).toHaveTextContent(/Empty slot/i);
+    expect(within(monitorSection).getByTestId('monitor-slot-5')).toHaveTextContent(/Empty slot/i);
+
+    // Move Opus Head (slot 3) to empty slot 5 via click-move button
+    await user.click(within(monitorSection).getByRole('button', { name: 'Move Opus Head' }));
+    await user.click(within(monitorSection).getByRole('button', { name: 'Place in grid slot 6' }));
+
+    expect(
+      within(within(monitorSection).getByTestId('monitor-slot-5')).getByRole('heading', {
+        name: 'Opus Head'
+      })
+    ).toBeInTheDocument();
+    expect(within(monitorSection).getByTestId('monitor-slot-3')).toHaveTextContent(/Empty slot/i);
+    expect(document.cookie).toContain(`${MONITOR_GRID_COOKIE}=`);
+    expect(readMonitorGridCookie()).toEqual([
+      'codex-monitor',
+      'claude-monitor',
+      'antigravity-monitor',
+      null,
+      null,
+      'antigravity-opus-head'
+    ]);
+
+    // Drag & drop swap: drag Claude Head (slot 1) onto Argon Head (slot 2)
+    const slot1 = within(monitorSection).getByTestId('monitor-slot-1');
+    const slot2 = within(monitorSection).getByTestId('monitor-slot-2');
+    const claudeCard = slot1.querySelector('[draggable="true"]') as HTMLElement;
+    expect(claudeCard).not.toBeNull();
+    const dataTransfer = {
+      data: {} as Record<string, string>,
+      effectAllowed: 'move',
+      dropEffect: 'move',
+      setData(type: string, val: string) {
+        this.data[type] = val;
+      },
+      getData(type: string) {
+        return this.data[type] ?? '';
+      }
+    };
+    fireEvent.dragStart(claudeCard, { dataTransfer });
+    fireEvent.dragOver(slot2, { dataTransfer });
+    fireEvent.drop(slot2, { dataTransfer });
+
+    expect(readMonitorGridCookie()).toEqual([
+      'codex-monitor',
+      'antigravity-monitor',
+      'claude-monitor',
+      null,
+      null,
+      'antigravity-opus-head'
+    ]);
+
+    // Unmount and remount cleanly -> restores layout from cookie
+    unmount();
+    render(<App />);
+    await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+    const reloadedSection = screen.getByRole('region', { name: 'Live Monitor Status' });
+    expect(
+      within(within(reloadedSection).getByTestId('monitor-slot-1')).getByRole('heading', {
+        name: 'Argon Head'
+      })
+    ).toBeInTheDocument();
+    expect(
+      within(within(reloadedSection).getByTestId('monitor-slot-2')).getByRole('heading', {
+        name: 'Claude Head'
+      })
+    ).toBeInTheDocument();
+    expect(
+      within(within(reloadedSection).getByTestId('monitor-slot-5')).getByRole('heading', {
+        name: 'Opus Head'
+      })
+    ).toBeInTheDocument();
+
+    // Reset layout clears custom cookie back to default order
+    await user.click(within(reloadedSection).getByRole('button', { name: 'Reset 2×3 layout' }));
+    expect(readMonitorGridCookie()).toBeNull();
+    expect(
+      within(within(reloadedSection).getByTestId('monitor-slot-3')).getByRole('heading', {
+        name: 'Opus Head'
+      })
+    ).toBeInTheDocument();
   });
 
   it('degrades gracefully when backend is unreachable', async () => {

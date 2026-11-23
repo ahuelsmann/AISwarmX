@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.8.7] - 2026-11-23
+
+### Changed
+- **Free 2×3 Agent Monitor Grid with Cookie Persistence (`MonitorCards.tsx`):** Arranged `Live Monitor Status` into a 2-row × 3-column grid (6 slots including free drop zones) where tiles can be freely reordered or placed into empty slots via Drag & Drop or the tile grip/move control, persisted across reloads in the `mobadev_monitor_grid_v1` cookie (with a one-click `Reset 2×3 layout` action).
+
+---
+
 ## [3.8.6] - 2026-11-23
 
 ### Changed
