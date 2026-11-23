@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.8.9] - 2026-11-23
+
+### Changed
+- **Codex Quota Exhaustion (`rate_limited`) Detection (`CodexMonitorProvider.cs`, `MonitorProvidersTests.cs`):** Inspects the tail of local Codex session rollout telemetry (`~/.codex/sessions/**/*.jsonl`) strictly read-only without exposing prompts or chat content so usage-limit aborts (`codex_error_info: "usage_limit_exceeded"`) and exhausted `token_count.rate_limits` windows report `Quota Pause` (`rate_limited`) plus the reset timestamp on `GPT Head`, and automatically clear once a subsequent turn completes cleanly or the reset window passes.
+
+---
+
 ## [3.8.8] - 2026-11-23
 
 ### Changed
