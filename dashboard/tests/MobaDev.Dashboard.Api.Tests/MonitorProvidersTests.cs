@@ -233,10 +233,13 @@ public sealed class MonitorProvidersTests
 
         var argonLogDir = Path.Combine(fx.AntigravityHomePath, "brain", "argon-1", ".system_generated", "logs");
         var opusLogDir = Path.Combine(fx.AntigravityHomePath, "brain", "opus-1", ".system_generated", "logs");
+        var workerLogDir = Path.Combine(fx.AntigravityHomePath, "brain", "worker-1", ".system_generated", "logs");
         Directory.CreateDirectory(argonLogDir);
         Directory.CreateDirectory(opusLogDir);
+        Directory.CreateDirectory(workerLogDir);
         await File.WriteAllTextAsync(Path.Combine(argonLogDir, "transcript.jsonl"), "{\"model\":\"gemini-4-argon-medium\"}\n{\"model\":\"gemini-4-hydrogen-xhigh\"}\n");
         await File.WriteAllTextAsync(Path.Combine(opusLogDir, "transcript.jsonl"), "{\"model\":\"claude-opus-5-5-medium\"}\n{\"model\":\"gemini-4-hydrogen-xhigh\"}\n");
+        await File.WriteAllTextAsync(Path.Combine(workerLogDir, "transcript.jsonl"), "{\"model\":\"gemini-4-hydrogen-xhigh\"}\n");
 
         var gpt = await new CodexMonitorProvider().GetMonitorAsync(paths, CancellationToken.None);
         var claude = await new ClaudeMonitorProvider().GetMonitorAsync(paths, CancellationToken.None);
@@ -250,6 +253,8 @@ public sealed class MonitorProvidersTests
         Assert.Equal("busy", antigravityHeads[0].State);
         Assert.Equal(1, antigravityHeads[0].ActiveSessionCount);
         Assert.Equal(1, antigravityHeads[0].ActiveSubAgentCount);
+        Assert.NotNull(antigravityHeads[0].ActiveSubAgentsByModel);
+        Assert.Equal(1, antigravityHeads[0].ActiveSubAgentsByModel!["Gemini 4 Hydrogen"]);
         Assert.Null(antigravityHeads[0].Source.Notice);
 
         Assert.Equal("Opus Head", antigravityHeads[1].DisplayName);
@@ -257,5 +262,10 @@ public sealed class MonitorProvidersTests
         Assert.Equal("standby", antigravityHeads[1].State);
         Assert.Equal(1, antigravityHeads[1].ActiveSessionCount);
         Assert.Equal(0, antigravityHeads[1].ActiveSubAgentCount);
+
+        var summary = MobaDev.Dashboard.Api.Contracts.SubAgentModelCatalog.BuildSummaryList([gpt, claude, .. antigravityHeads]);
+        Assert.Contains(summary, x => x.Model == "Gemini 4 Hydrogen" && x.Profile == "P4" && x.Count == 1);
+        Assert.Contains(summary, x => x.Model == "GPT-6.2-sol" && x.Profile == "P2" && x.Count == 0);
+        Assert.Contains(summary, x => x.Model == "Claude Opus 5.5" && x.Profile == "P1" && x.Count == 0);
     }
 }

@@ -30,14 +30,159 @@ public sealed record MonitorInfo(
     int ActiveSessionCount,
     string? AutomationStatus,
     SourceHealth Source,
-    int ActiveSubAgentCount = 0);
+    int ActiveSubAgentCount = 0,
+    IReadOnlyDictionary<string, int>? ActiveSubAgentsByModel = null);
+
+public sealed record SubAgentModelCount(
+    string Model,
+    string Profile,
+    int Count);
 
 public sealed record ActiveAgentsSummary(
     int StandingMonitorsTotal,
     int StandingMonitorsOnline,
     int StandingMonitorsBusy,
     int ActiveSubAgentsTotal,
-    int TotalActiveAgents);
+    int TotalActiveAgents,
+    IReadOnlyList<SubAgentModelCount>? SubAgentsByModel = null);
+
+public static class SubAgentModelCatalog
+{
+    public static readonly IReadOnlyList<(string Model, string Profile)> CanonicalModels =
+    [
+        ("GPT-6.2-sol", "P2"),
+        ("Claude Opus 5.5", "P1"),
+        ("Gemini 4 Argon", "P3"),
+        ("Gemini 4 Hydrogen", "P4"),
+        ("Claude Sonnet 5.5", "P4")
+    ];
+
+    public static (string Model, string Profile) Normalize(string? rawModel, string fallbackModel = "Gemini 4 Argon")
+    {
+        var trimmed = rawModel?.Trim() ?? string.Empty;
+        var candidate = string.IsNullOrWhiteSpace(trimmed) ||
+                        string.Equals(trimmed, "codex-auto-review", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(trimmed, "<synthetic>", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(trimmed, "synthetic", StringComparison.OrdinalIgnoreCase)
+            ? fallbackModel
+            : trimmed;
+
+        var lower = candidate.ToLowerInvariant();
+        if (lower.Contains("opus", StringComparison.Ordinal))
+        {
+            return ("Claude Opus 5.5", "P1");
+        }
+
+        if (lower.Contains("sonnet", StringComparison.Ordinal) || lower.Contains("fable", StringComparison.Ordinal))
+        {
+            return ("Claude Sonnet 5.5", "P4");
+        }
+
+        if (lower.Contains("claude", StringComparison.Ordinal))
+        {
+            return ("Claude Opus 5.5", "P1");
+        }
+
+        if (lower.Contains("hydrogen", StringComparison.Ordinal))
+        {
+            return ("Gemini 4 Hydrogen", "P4");
+        }
+
+        if (lower.Contains("argon", StringComparison.Ordinal) ||
+            lower.Contains("neon", StringComparison.Ordinal) ||
+            lower.Contains("gemini", StringComparison.Ordinal) ||
+            lower.Contains("antigravity", StringComparison.Ordinal))
+        {
+            return ("Gemini 4 Argon", "P3");
+        }
+
+        if (lower.Contains("astra", StringComparison.Ordinal))
+        {
+            return ("GPT-6.2-astra", "P2");
+        }
+
+        if (lower.Contains("gpt", StringComparison.Ordinal) ||
+            lower.Contains("sol", StringComparison.Ordinal) ||
+            lower.Contains("codex", StringComparison.Ordinal))
+        {
+            return ("GPT-6.2-sol", "P2");
+        }
+
+        return (candidate, "P3");
+    }
+
+    public static bool IsClaudeModel(string? model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return false;
+        }
+
+        var lower = model.ToLowerInvariant();
+        return lower.Contains("claude", StringComparison.Ordinal) ||
+               lower.Contains("opus", StringComparison.Ordinal) ||
+               lower.Contains("sonnet", StringComparison.Ordinal);
+    }
+
+    public static IReadOnlyList<SubAgentModelCount> BuildSummaryList(IReadOnlyList<MonitorInfo> monitors)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var profiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (canonicalModel, profile) in CanonicalModels)
+        {
+            counts[canonicalModel] = 0;
+            profiles[canonicalModel] = profile;
+        }
+
+        foreach (var monitor in monitors)
+        {
+            if (monitor.ActiveSubAgentsByModel is { Count: > 0 } byModel)
+            {
+                foreach (var kvp in byModel)
+                {
+                    if (kvp.Value <= 0)
+                    {
+                        continue;
+                    }
+
+                    var (normModel, normProfile) = Normalize(kvp.Key, monitor.Model ?? "Gemini 4 Argon");
+                    counts[normModel] = counts.GetValueOrDefault(normModel) + kvp.Value;
+                    profiles.TryAdd(normModel, normProfile);
+                }
+            }
+            else if (monitor.ActiveSubAgentCount > 0)
+            {
+                var fallback = monitor.Tool.Contains("Codex", StringComparison.OrdinalIgnoreCase)
+                    ? "GPT-6.2-sol"
+                    : monitor.Tool.Contains("Claude", StringComparison.OrdinalIgnoreCase)
+                        ? "Claude Opus 5.5"
+                        : "Gemini 4 Argon";
+                var (normModel, normProfile) = Normalize(monitor.Model, fallback);
+                counts[normModel] = counts.GetValueOrDefault(normModel) + monitor.ActiveSubAgentCount;
+                profiles.TryAdd(normModel, normProfile);
+            }
+        }
+
+        var result = new List<SubAgentModelCount>(counts.Count);
+        foreach (var (canonicalModel, profile) in CanonicalModels)
+        {
+            result.Add(new SubAgentModelCount(canonicalModel, profile, counts.GetValueOrDefault(canonicalModel)));
+        }
+
+        foreach (var kvp in counts)
+        {
+            if (CanonicalModels.Any(c => string.Equals(c.Model, kvp.Key, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            result.Add(new SubAgentModelCount(kvp.Key, profiles.GetValueOrDefault(kvp.Key, "P3"), kvp.Value));
+        }
+
+        return result;
+    }
+}
 
 public sealed record MonitorsResponse(
     DateTimeOffset GeneratedAtUtc,

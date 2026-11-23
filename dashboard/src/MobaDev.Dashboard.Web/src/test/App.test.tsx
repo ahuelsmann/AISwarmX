@@ -27,7 +27,14 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
         standingMonitorsOnline: 4,
         standingMonitorsBusy: 1,
         activeSubAgentsTotal: 2,
-        totalActiveAgents: 3
+        totalActiveAgents: 3,
+        subAgentsByModel: [
+          { model: 'GPT-6.2-sol', profile: 'P2', count: 1 },
+          { model: 'Claude Opus 5.5', profile: 'P1', count: 0 },
+          { model: 'Gemini 4 Argon', profile: 'P3', count: 0 },
+          { model: 'Gemini 4 Hydrogen', profile: 'P4', count: 1 },
+          { model: 'Claude Sonnet 5.5', profile: 'P4', count: 0 }
+        ]
       },
       monitors: [
         {
@@ -597,6 +604,12 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(within(activeAgentsStrip).getByText(/Standing Monitors: 4\/4 online/)).toBeInTheDocument();
     expect(within(activeAgentsStrip).getByText('Sub-Agents (Live/Recent): 2')).toBeInTheDocument();
     expect(within(activeAgentsStrip).getByText(/Pipeline Seats \(GitHub\):/)).toBeInTheDocument();
+    expect(within(activeAgentsStrip).getByText('GPT-6.2-sol:')).toBeInTheDocument();
+    expect(within(activeAgentsStrip).getByText('Claude Opus 5.5:')).toBeInTheDocument();
+    expect(within(activeAgentsStrip).getByText('Gemini 4 Argon:')).toBeInTheDocument();
+    expect(within(activeAgentsStrip).getByText('Gemini 4 Hydrogen:')).toBeInTheDocument();
+    expect(within(activeAgentsStrip).getByText('Claude Sonnet 5.5:')).toBeInTheDocument();
+    expect(within(activeAgentsStrip).queryByText('Antigravity:')).not.toBeInTheDocument();
 
     // Interactive Color & Symbol Legend popover mounts cleanly on demand without polluting DOM
     expect(screen.queryByRole('region', { name: 'Color and symbol legend' })).not.toBeInTheDocument();
@@ -954,6 +967,28 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(backToTopLink).toBeInTheDocument();
     await user.click(backToTopLink);
     expect(scrollToSpy).toHaveBeenCalledWith(expect.objectContaining({ top: 0 }));
+  });
+
+  it('aggregates live/recent sub-agents by model with ghosted zero-count identity chips when summary omits subAgentsByModel', async () => {
+    const snap = createSnapshotFixture();
+    snap.monitors.summary = null;
+    snap.monitors.monitors[1].activeSubAgentsByModel = { 'gpt-6.2-sol': 1 };
+    snap.monitors.monitors[2].activeSubAgentsByModel = { 'gemini-4-hydrogen-xhigh': 2 };
+    snap.monitors.monitors[3].activeSubAgentsByModel = { 'claude-opus-5-5-medium': 1 };
+    stubDashboardFetch(snap);
+
+    render(<App />);
+    await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+
+    const strip = screen.getByRole('region', { name: 'Live Active Agents and Sub-Agents Summary' });
+    const perModelGroup = within(strip).getByLabelText('Live or recent sub-agents per model');
+    expect(within(perModelGroup).getByText('GPT-6.2-sol:').parentElement?.style.opacity).toBe('1');
+    expect(within(perModelGroup).getByText('Claude Opus 5.5:').parentElement?.style.opacity).toBe('1');
+    expect(within(perModelGroup).getByText('Gemini 4 Hydrogen:').parentElement?.style.opacity).toBe('1');
+    expect(within(perModelGroup).getByText('Gemini 4 Hydrogen:').parentElement).toHaveTextContent('2');
+    const argonChip = within(perModelGroup).getByText('Gemini 4 Argon:').parentElement as HTMLElement;
+    expect(argonChip.style.opacity).toBe('0.48');
+    expect(argonChip.style.color).not.toBe('');
   });
 
   it('degrades gracefully when backend is unreachable', async () => {

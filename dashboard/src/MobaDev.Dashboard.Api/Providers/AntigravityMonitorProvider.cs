@@ -91,9 +91,10 @@ public sealed partial class AntigravityMonitorProvider
 
             if (namedDesktopConversations.Count == 0)
             {
+                var (emptyArgonByModel, _) = ClassifyAntigravitySubAgents(paths.AntigravityHomePath, runningConversationIds, hasArgonHead: true, hasOpusHead: false);
                 IReadOnlyList<MonitorInfo> empty =
                 [
-                    Unavailable(ArgonMonitorId, ArgonDisplayName, ArgonRole, ArgonProfile, now, "ok", "No named Antigravity desktop session found.", runningConversationIds.Count),
+                    Unavailable(ArgonMonitorId, ArgonDisplayName, ArgonRole, ArgonProfile, now, "ok", "No named Antigravity desktop session found.", runningConversationIds.Count, activeSubAgentsByModel: emptyArgonByModel),
                     Unavailable(OpusMonitorId, OpusDisplayName, OpusRole, OpusProfile, now, "ok", "No Opus Head session found.", defaultModel: DefaultOpusModel)
                 ];
                 return Task.FromResult(empty);
@@ -120,7 +121,15 @@ public sealed partial class AntigravityMonitorProvider
                 rootIds.Add(opusSelected.Id);
             }
 
-            var activeSubAgentCount = runningConversationIds.Count(id => !rootIds.Contains(id));
+            var subAgentIds = runningConversationIds.Where(id => !rootIds.Contains(id)).ToList();
+            var (argonSubAgentsByModel, opusSubAgentsByModel) = ClassifyAntigravitySubAgents(
+                paths.AntigravityHomePath,
+                subAgentIds,
+                hasArgonHead: argonSelected is not null,
+                hasOpusHead: opusSelected is not null);
+            var argonSubAgentCount = argonSubAgentsByModel.Values.Sum();
+            var opusSubAgentCount = opusSubAgentsByModel.Values.Sum();
+
             var extraSessionCount = Math.Max(0, namedDesktopConversations.Count - (argonSelected is not null ? 1 : 0) - (opusSelected is not null ? 1 : 0));
             var extraNotice = namedDesktopConversations.Count > 2
                 ? $"{namedDesktopConversations.Count} named Antigravity sessions found in summaries (target: 2: Argon Head + Opus Head)."
@@ -140,7 +149,8 @@ public sealed partial class AntigravityMonitorProvider
                     argonSelected,
                     model,
                     activeSessionCount: 1 + extraSessionCount,
-                    activeSubAgentCount,
+                    argonSubAgentCount,
+                    argonSubAgentsByModel,
                     now,
                     extraNotice);
             }
@@ -169,7 +179,8 @@ public sealed partial class AntigravityMonitorProvider
                     opusSelected,
                     model,
                     activeSessionCount: 1,
-                    activeSubAgentCount: argonSelected is null ? activeSubAgentCount : 0,
+                    activeSubAgentCount: opusSubAgentCount,
+                    activeSubAgentsByModel: opusSubAgentsByModel,
                     now,
                     notice: null);
             }
@@ -210,6 +221,27 @@ public sealed partial class AntigravityMonitorProvider
         }
     }
 
+    private static (IReadOnlyDictionary<string, int> ArgonByModel, IReadOnlyDictionary<string, int> OpusByModel) ClassifyAntigravitySubAgents(
+        string antigravityHomePath,
+        IReadOnlyList<string> subAgentIds,
+        bool hasArgonHead,
+        bool hasOpusHead)
+    {
+        var argonCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var opusCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var subId in subAgentIds)
+        {
+            var rawModel = InspectConversationModel(antigravityHomePath, subId, DefaultArgonModel);
+            var (canonicalModel, _) = SubAgentModelCatalog.Normalize(rawModel, DefaultArgonModel);
+            var assignToOpus = hasOpusHead && (SubAgentModelCatalog.IsClaudeModel(canonicalModel) || !hasArgonHead);
+            var target = assignToOpus ? opusCounts : argonCounts;
+            target[canonicalModel] = target.GetValueOrDefault(canonicalModel) + 1;
+        }
+
+        return (argonCounts, opusCounts);
+    }
+
     private static MonitorInfo BuildMonitorInfo(
         string id,
         string displayName,
@@ -219,6 +251,7 @@ public sealed partial class AntigravityMonitorProvider
         string model,
         int activeSessionCount,
         int activeSubAgentCount,
+        IReadOnlyDictionary<string, int> activeSubAgentsByModel,
         DateTimeOffset now,
         string? notice)
     {
@@ -247,7 +280,8 @@ public sealed partial class AntigravityMonitorProvider
             ActiveSessionCount: activeSessionCount,
             AutomationStatus: null,
             Source: new SourceHealth("ok", now, notice),
-            ActiveSubAgentCount: activeSubAgentCount);
+            ActiveSubAgentCount: activeSubAgentCount,
+            ActiveSubAgentsByModel: activeSubAgentsByModel);
     }
 
     internal static string InspectConversationModel(string antigravityHomePath, string conversationId, string fallbackModel)
@@ -360,7 +394,8 @@ public sealed partial class AntigravityMonitorProvider
         string sourceStatus,
         string notice,
         int activeSubAgentCount = 0,
-        string? defaultModel = null)
+        string? defaultModel = null,
+        IReadOnlyDictionary<string, int>? activeSubAgentsByModel = null)
     {
         return new MonitorInfo(
             Id: id,
@@ -375,7 +410,8 @@ public sealed partial class AntigravityMonitorProvider
             ActiveSessionCount: 0,
             AutomationStatus: null,
             Source: new SourceHealth(sourceStatus, now, notice),
-            ActiveSubAgentCount: activeSubAgentCount);
+            ActiveSubAgentCount: activeSubAgentCount,
+            ActiveSubAgentsByModel: activeSubAgentsByModel);
     }
 
     [GeneratedRegex("\"model\"\\s*:\\s*\"(?<m>[^\"]+)\"", RegexOptions.CultureInvariant)]

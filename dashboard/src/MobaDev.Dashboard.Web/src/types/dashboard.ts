@@ -19,6 +19,13 @@ export interface MonitorInfo {
   automationStatus?: string | null;
   source: SourceHealth;
   activeSubAgentCount?: number;
+  activeSubAgentsByModel?: Record<string, number> | null;
+}
+
+export interface SubAgentModelCount {
+  model: string;
+  profile: string;
+  count: number;
 }
 
 export interface ActiveAgentsSummary {
@@ -27,6 +34,7 @@ export interface ActiveAgentsSummary {
   standingMonitorsBusy: number;
   activeSubAgentsTotal: number;
   totalActiveAgents: number;
+  subAgentsByModel?: SubAgentModelCount[] | null;
 }
 
 export interface MonitorsResponse {

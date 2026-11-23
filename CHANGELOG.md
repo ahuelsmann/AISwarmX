@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.8.6] - 2026-11-23
+
+### Changed
+- **Sub-Agent Counting by AI Model (`DashboardContracts.cs`, `CodexMonitorProvider.cs`, `ClaudeMonitorProvider.cs`, `AntigravityMonitorProvider.cs`, `DashboardSnapshotService.cs`, `ActiveAgentsStrip.tsx`, `dashboard.ts`):** Replaced the tool-grouped `Codex` / `Claude` / duplicate `Antigravity` chips in `ActiveAgentsStrip` with canonical per-model counts (`GPT-6.2-sol`, `Claude Opus 5.5`, `Gemini 4 Argon`, `Gemini 4 Hydrogen`, `Claude Sonnet 5.5`), read-only inspected from Codex thread models, Claude subagent/session transcripts, and Antigravity sub-agent transcripts while keeping `0`-count chips ghosted in their native model identity color.
+
+---
+
 ## [3.8.5] - 2026-11-23
 
 ### Changed

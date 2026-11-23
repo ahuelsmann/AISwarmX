@@ -27,7 +27,7 @@ public sealed partial class ClaudeMonitorProvider
         cancellationToken.ThrowIfCancellationRequested();
         var now = DateTimeOffset.UtcNow;
 
-        var activeSubagentFiles = CountActiveSubagentFiles(paths.ClaudeHomePath, now);
+        var activeSubagentModels = CollectActiveSubagentFileModels(paths.ClaudeHomePath, now);
         var sessionsDir = Path.Combine(paths.ClaudeHomePath, "sessions");
         var sessions = Directory.Exists(sessionsDir)
             ? LoadSessionRecords(sessionsDir)
@@ -35,7 +35,8 @@ public sealed partial class ClaudeMonitorProvider
 
         if (sessions.Count == 0)
         {
-            if (TryCreateClosedQuotaPauseMonitor(paths.ClaudeHomePath, now, activeSubagentFiles, out var pausedMonitor))
+            var offlineByModel = GroupModels(activeSubagentModels, "claude-opus-5-5");
+            if (TryCreateClosedQuotaPauseMonitor(paths.ClaudeHomePath, now, activeSubagentModels.Count, offlineByModel, out var pausedMonitor))
             {
                 return Task.FromResult(pausedMonitor);
             }
@@ -43,7 +44,7 @@ public sealed partial class ClaudeMonitorProvider
             var noticeText = Directory.Exists(sessionsDir)
                 ? "No active Claude session detected."
                 : "Claude sessions directory not found.";
-            return Task.FromResult(Offline(now, noticeText, activeSubagentFiles));
+            return Task.FromResult(Offline(now, noticeText, activeSubagentModels.Count, offlineByModel));
         }
 
         var selected = sessions
@@ -53,16 +54,29 @@ public sealed partial class ClaudeMonitorProvider
             .ThenByDescending(s => s.UpdatedAtMs)
             .First();
 
-        var busyExtraSessions = sessions.Count(s =>
-            !string.Equals(s.SessionId, selected.SessionId, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(s.Status, "busy", StringComparison.OrdinalIgnoreCase));
-        var activeSubAgentCount = activeSubagentFiles + busyExtraSessions;
+        var (model, rateLimitResetLabel) = InspectTranscriptTail(paths.ClaudeHomePath, selected);
+        var fallbackClaudeModel = model ?? "claude-opus-5-5";
+
+        var busyExtraSessionRecords = sessions
+            .Where(s =>
+                !string.Equals(s.SessionId, selected.SessionId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(s.Status, "busy", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var allSubModels = new List<string?>(activeSubagentModels.Count + busyExtraSessionRecords.Count);
+        allSubModels.AddRange(activeSubagentModels);
+        foreach (var extraSession in busyExtraSessionRecords)
+        {
+            var (extraModel, _) = InspectTranscriptTail(paths.ClaudeHomePath, extraSession);
+            allSubModels.Add(extraModel ?? fallbackClaudeModel);
+        }
+
+        var activeSubAgentCount = allSubModels.Count;
+        var activeSubAgentsByModel = GroupModels(allSubModels, fallbackClaudeModel);
 
         var lastActivityUtc = selected.UpdatedAtMs > 0
             ? DateTimeOffset.FromUnixTimeMilliseconds(selected.UpdatedAtMs)
             : (DateTimeOffset?)null;
-
-        var (model, rateLimitResetLabel) = InspectTranscriptTail(paths.ClaudeHomePath, selected);
 
         string state;
         if (!string.IsNullOrEmpty(rateLimitResetLabel) &&
@@ -96,10 +110,27 @@ public sealed partial class ClaudeMonitorProvider
             ActiveSessionCount: sessions.Count,
             AutomationStatus: null,
             Source: new SourceHealth("ok", now, notice),
-            ActiveSubAgentCount: activeSubAgentCount));
+            ActiveSubAgentCount: activeSubAgentCount,
+            ActiveSubAgentsByModel: activeSubAgentsByModel));
     }
 
-    private static MonitorInfo Offline(DateTimeOffset now, string notice, int activeSubAgentCount = 0)
+    private static IReadOnlyDictionary<string, int> GroupModels(IReadOnlyList<string?> rawModels, string fallbackModel)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in rawModels)
+        {
+            var (canonicalModel, _) = SubAgentModelCatalog.Normalize(raw, fallbackModel);
+            counts[canonicalModel] = counts.GetValueOrDefault(canonicalModel) + 1;
+        }
+
+        return counts;
+    }
+
+    private static MonitorInfo Offline(
+        DateTimeOffset now,
+        string notice,
+        int activeSubAgentCount = 0,
+        IReadOnlyDictionary<string, int>? activeSubAgentsByModel = null)
     {
         return new MonitorInfo(
             Id: MonitorId,
@@ -114,19 +145,20 @@ public sealed partial class ClaudeMonitorProvider
             ActiveSessionCount: 0,
             AutomationStatus: null,
             Source: new SourceHealth("unavailable", now, notice),
-            ActiveSubAgentCount: activeSubAgentCount);
+            ActiveSubAgentCount: activeSubAgentCount,
+            ActiveSubAgentsByModel: activeSubAgentsByModel);
     }
 
-    private static int CountActiveSubagentFiles(string claudeHomePath, DateTimeOffset nowUtc)
+    private static List<string?> CollectActiveSubagentFileModels(string claudeHomePath, DateTimeOffset nowUtc)
     {
         var projectsDir = Path.Combine(claudeHomePath, "projects");
         if (!Directory.Exists(projectsDir))
         {
-            return 0;
+            return [];
         }
 
         var cutoffUtc = nowUtc.UtcDateTime - SubAgentActiveWindow;
-        var activeCount = 0;
+        var models = new List<string?>();
 
         try
         {
@@ -143,7 +175,8 @@ public sealed partial class ClaudeMonitorProvider
                     {
                         if (File.GetLastWriteTimeUtc(jsonlFile) >= cutoffUtc)
                         {
-                            activeCount++;
+                            var (subModel, _) = InspectTranscriptTailFromFile(jsonlFile);
+                            models.Add(subModel);
                         }
                     }
                     catch
@@ -158,7 +191,7 @@ public sealed partial class ClaudeMonitorProvider
             // Ignore directory enumeration races.
         }
 
-        return activeCount;
+        return models;
     }
 
     private static List<ClaudeSessionRecord> LoadSessionRecords(string sessionsDir)
@@ -207,6 +240,7 @@ public sealed partial class ClaudeMonitorProvider
         string claudeHomePath,
         DateTimeOffset now,
         int activeSubAgentCount,
+        IReadOnlyDictionary<string, int> activeSubAgentsByModel,
         out MonitorInfo monitor)
     {
         var latestTranscript = ResolveLatestProjectTranscript(claudeHomePath);
@@ -238,7 +272,8 @@ public sealed partial class ClaudeMonitorProvider
                     ActiveSessionCount: 0,
                     AutomationStatus: null,
                     Source: new SourceHealth("ok", now, "Claude session closed during active quota pause."),
-                    ActiveSubAgentCount: activeSubAgentCount);
+                    ActiveSubAgentCount: activeSubAgentCount,
+                    ActiveSubAgentsByModel: activeSubAgentsByModel);
                 return true;
             }
         }
