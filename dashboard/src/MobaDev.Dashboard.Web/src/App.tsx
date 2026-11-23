@@ -14,7 +14,6 @@ import { fetchSnapshot } from './api/dashboardClient';
 import { ActiveAgentsStrip, countPipelineSeats } from './components/ActiveAgentsStrip';
 import { ArchitectureDiagramsView } from './components/ArchitectureDiagramsView';
 import { ConfigDocsView } from './components/ConfigDocsView';
-import { DecisionTriadCard } from './components/DecisionTriadCard';
 import { GovernanceMatrixView } from './components/GovernanceMatrixView';
 import { HygieneAndSyncPanel } from './components/HygieneAndSyncPanel';
 import { MonitorCards } from './components/MonitorCards';
@@ -300,13 +299,8 @@ export function App() {
                 monitors={snapshot.monitors.monitors}
                 nowMs={nowMs}
                 isDark={isDark}
-              />
-
-              <DecisionTriadCard
-                monitors={snapshot.monitors.monitors}
                 governance={snapshot.governance}
                 pullRequests={snapshot.pipeline.pullRequests}
-                isDark={isDark}
                 onOpenMatrix={() => handleOpenMatrixSync(false)}
               />
 

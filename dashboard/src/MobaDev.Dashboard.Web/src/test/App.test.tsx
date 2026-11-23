@@ -651,7 +651,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(screen.getAllByText('Standby').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('Active / Busy')).toBeInTheDocument();
 
-    // Row 2: Compact Triad bar across 4 Root Heads with Code WIP
+    // Unified Decision & Steering Triad header bar integrated into the 2x3 Monitor Grid without duplicate pills
     const triadRegion = screen.getByLabelText('Decision and Steering Triad selection panel');
     expect(screen.getByRole('heading', { name: 'Decision & Steering Triad' })).toBeInTheDocument();
     expect(
@@ -659,15 +659,10 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('Code WIP: 0 / 3 (+1 Docs)')).toBeInTheDocument();
     expect(screen.getByText('Escalation: Human')).toBeInTheDocument();
-    const triadText = triadRegion.textContent ?? '';
-    const idxCpm = triadText.indexOf('CPM & TD');
-    const idxCoo = triadText.indexOf('COO');
-    const idxOpus = triadText.indexOf('Opus Root');
-    const idxStrategy = triadText.indexOf('AI Strategy');
-    expect(idxCpm).toBeGreaterThan(-1);
-    expect(idxCoo).toBeGreaterThan(idxCpm);
-    expect(idxOpus).toBeGreaterThan(idxCoo);
-    expect(idxStrategy).toBeGreaterThan(idxOpus);
+    expect(within(triadRegion).getByRole('button', { name: 'Selection Rules' })).toBeInTheDocument();
+    expect(monitorSection.contains(triadRegion)).toBe(true);
+    expect(screen.queryByText('CPM & TD')).not.toBeInTheDocument();
+    expect(screen.queryByText('Opus Root')).not.toBeInTheDocument();
     expect(resolveModelVisual('Orchestrator (Neon)').tone).toBe('blue');
     expect(resolveModelVisual('Orchestrator · Gemini 4 Argon').tone).toBe('blue');
     expect(resolveModelVisual('Orchestrator · Claude Opus 5.5').tone).toBe('orange');

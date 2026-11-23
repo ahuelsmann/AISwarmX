@@ -11,22 +11,26 @@ import {
   tokens
 } from '@fluentui/react-components';
 import {
+  ArrowRight16Regular,
   ArrowSwap16Regular,
   CheckmarkCircle16Regular,
   Clock16Regular,
+  PeopleTeam16Regular,
   Prohibited16Regular,
   ReOrderDotsVertical16Regular,
-  Timer16Regular
+  Timer16Regular,
+  Warning16Regular
 } from '@fluentui/react-icons';
 import {
   formatAbsoluteEn,
   formatAutomationStatusEn,
   formatRelativeTimeEn
 } from '../api/dashboardClient';
-import { getToneStyles } from '../theme/mobaFluentTheme';
-import type { MonitorInfo } from '../types/dashboard';
+import { getIdentityStyles, getToneStyles } from '../theme/mobaFluentTheme';
+import type { GovernanceResponse, MonitorInfo, PullRequestInfo } from '../types/dashboard';
 import { GlossaryTooltip } from './GlossaryTooltip';
 import {
+  IconGlyphBox,
   ModelBadge,
   ProfileBadge,
   RoleBadge,
@@ -46,17 +50,47 @@ export const DEFAULT_MONITOR_SLOTS: (string | null)[] = [
 ];
 
 const useStyles = makeStyles({
-  toolbarRow: {
+  triadHeaderCard: {
+    padding: '8px 14px',
+    marginBottom: '10px',
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  triadHeaderRow: {
     display: 'flex',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: '8px',
-    flexWrap: 'wrap',
-    marginBottom: '6px'
+    gap: '8px'
   },
-  toolbarHint: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200
+  triadTitleGroup: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  triadTitle: {
+    margin: 0,
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1
+  },
+  triadControls: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  escalationPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '3px 8px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    whiteSpace: 'nowrap',
+    maxWidth: '100%'
   },
   grid: {
     display: 'grid',
@@ -324,10 +358,21 @@ interface MonitorCardsProps {
   monitors: MonitorInfo[];
   nowMs: number;
   isDark: boolean;
+  governance?: GovernanceResponse;
+  pullRequests?: PullRequestInfo[];
+  onOpenMatrix?: () => void;
 }
 
-export function MonitorCards({ monitors, nowMs, isDark }: MonitorCardsProps) {
+export function MonitorCards({
+  monitors,
+  nowMs,
+  isDark,
+  governance,
+  pullRequests = [],
+  onOpenMatrix
+}: MonitorCardsProps) {
   const styles = useStyles();
+  const triadAccent = getIdentityStyles('triad', isDark);
   const [savedSlotIds, setSavedSlotIds] = useState<(string | null)[] | null>(() =>
     readMonitorGridCookie()
   );
@@ -338,6 +383,15 @@ export function MonitorCards({ monitors, nowMs, isDark }: MonitorCardsProps) {
   const { slots, slotIds } = resolveMonitorGridSlots(monitors, savedSlotIds);
   const defaultSlotIds = resolveMonitorGridSlots(monitors, null).slotIds;
   const isCustomLayout = !slotsEqual(slotIds, defaultSlotIds);
+
+  const triadDef = governance?.roles.find((r) => r.role.toLowerCase().includes('triad'));
+  const totalSeats = monitors.length > 0 ? monitors.length : 4;
+  const readyCount = monitors.filter((m) => m.state === 'busy' || m.state === 'standby').length;
+  const rateLimitedCount = monitors.filter((m) => m.state === 'rate_limited').length;
+
+  const codeSliceCount = pullRequests.filter((p) => p.riskClass !== 'L').length;
+  const docSliceCount = pullRequests.filter((p) => p.riskClass === 'L').length;
+  const wipText = `Code WIP: ${codeSliceCount} / 3${docSliceCount > 0 ? ` (+${docSliceCount} Docs)` : ''}`;
 
   const moveOrSwapSlot = (fromIndex: number, toIndex: number) => {
     if (
@@ -376,23 +430,102 @@ export function MonitorCards({ monitors, nowMs, isDark }: MonitorCardsProps) {
 
   return (
     <section aria-label="Live Monitor Status">
-      <div className={styles.toolbarRow}>
-        <Text className={styles.toolbarHint}>
-          {movingSlotIndex !== null
-            ? 'Select a target slot (2×3 grid) to place or swap the tile, or click the move icon again to cancel.'
-            : '2×3 grid · Drag tiles or use the grip icon to arrange freely (saved in cookie)'}
-        </Text>
-        {isCustomLayout && (
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<ArrowSwap16Regular />}
-            onClick={handleResetLayout}
-          >
-            Reset 2×3 layout
-          </Button>
-        )}
-      </div>
+      <Card
+        className={styles.triadHeaderCard}
+        appearance="filled"
+        aria-label="Decision and Steering Triad selection panel"
+        style={{ borderLeft: `3px solid ${triadAccent.solid}` }}
+      >
+        <div className={styles.triadHeaderRow}>
+          <div className={styles.triadTitleGroup} title={triadDef?.responsibility}>
+            <IconGlyphBox
+              icon={<PeopleTeam16Regular aria-hidden="true" />}
+              tone="purple"
+              isDark={isDark}
+              size="sm"
+            />
+            <h3 className={styles.triadTitle}>Decision &amp; Steering Triad</h3>
+            <GlossaryTooltip term="Triad" iconOnly />
+            <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+              {movingSlotIndex !== null
+                ? 'Select a target slot (2×3 grid) to place or swap the tile, or click the move icon again to cancel.'
+                : 'Selection Council · 2×3 grid (drag or grip to arrange, saved in cookie)'}
+            </Text>
+          </div>
+
+          <div className={styles.triadControls}>
+            {readyCount === totalSeats ? (
+              <Badge
+                appearance="tint"
+                color="success"
+                shape="rounded"
+                icon={<CheckmarkCircle16Regular />}
+              >
+                <span className="tabular">
+                  Quorum {readyCount} / {totalSeats} Ready
+                </span>
+              </Badge>
+            ) : rateLimitedCount > 0 ? (
+              <Badge appearance="tint" color="warning" shape="rounded" icon={<Timer16Regular />}>
+                <span className="tabular">
+                  Quorum {readyCount} / {totalSeats} · {rateLimitedCount} Quota Pause (Antigravity + Codex Failover)
+                </span>
+              </Badge>
+            ) : (
+              <Badge appearance="tint" color="warning" shape="rounded" icon={<Warning16Regular />}>
+                <span className="tabular">
+                  Quorum {readyCount} / {totalSeats} Ready
+                </span>
+              </Badge>
+            )}
+
+            <GlossaryTooltip term="WIP">
+              <Badge
+                appearance="tint"
+                color={codeSliceCount > 3 ? 'warning' : 'subtle'}
+                shape="rounded"
+              >
+                <span className="tabular">{wipText}</span>
+              </Badge>
+            </GlossaryTooltip>
+
+            <div
+              className={styles.escalationPill}
+              title="Human (Maintainer): Product goals, priorities, material UX, architecture & hardware authorizations"
+            >
+              <RoleBadge
+                role="Human (maintainer)"
+                label="Escalation: Human"
+                isDark={isDark}
+                compact
+              />
+            </div>
+
+            {onOpenMatrix && (
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={<ArrowRight16Regular />}
+                iconPosition="after"
+                onClick={onOpenMatrix}
+              >
+                Selection Rules
+              </Button>
+            )}
+
+            {isCustomLayout && (
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<ArrowSwap16Regular />}
+                onClick={handleResetLayout}
+              >
+                Reset 2×3 layout
+              </Button>
+            )}
+          </div>
+        </div>
+      </Card>
 
       <div className={styles.grid}>
         {slots.map((monitor, slotIndex) => {
