@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.8.8] - 2026-11-23
+
+### Changed
+- **Combined Decision Triad & 2×3 Agent Monitor Grid (`MonitorCards.tsx`, `App.tsx`):** Integrated the `Decision & Steering Triad` status header (Quorum, `Code WIP`, `Escalation: Human`, `Selection Rules`, and `Reset 2×3 layout`) directly above the 2×3 Agent Monitor Grid and removed the separate redundant bottom seat-pill bar so each of the 4 Root Heads renders once cleanly.
+
+---
+
 ## [3.8.7] - 2026-11-23
 
 ### Changed
