@@ -9,7 +9,7 @@ import {
 import { getIdentityStyles, getStatusStyles } from '../theme/mobaFluentTheme';
 import type { GovernanceResponse, MonitorInfo, PullRequestInfo } from '../types/dashboard';
 import { GlossaryTooltip } from './GlossaryTooltip';
-import { IconGlyphBox, ModelBadge, ProfileBadge, RoleBadge } from './RoleAndModelIcons';
+import { IconGlyphBox, ModelBadge, ProfileBadge, RoleBadge, resolveProfileTone } from './RoleAndModelIcons';
 
 const useStyles = makeStyles({
   card: {
@@ -87,7 +87,7 @@ const COUNCIL_SEATS: SeatDefinition[] = [
     roleMatch: 'Technical Director & CPM',
     tool: 'ChatGPT Codex',
     fallbackModel: 'Sol 6.2',
-    mandate: 'Prioritizes backlog, validates build graph & holds scope/lock veto'
+    mandate: 'GPT Head: prioritizes backlog, validates build graph & holds scope/lock veto'
   },
   {
     monitorId: 'claude-monitor',
@@ -96,7 +96,16 @@ const COUNCIL_SEATS: SeatDefinition[] = [
     roleMatch: 'Chief Operating Officer (COO)',
     tool: 'Claude Code',
     fallbackModel: 'Claude Opus 5.5',
-    mandate: 'Cuts slices, assigns teams, grants Design Go & arms Auto-Merge'
+    mandate: 'Claude Head: cuts slices, assigns teams, grants Design Go & arms Auto-Merge'
+  },
+  {
+    monitorId: 'antigravity-opus-head',
+    profile: 'P1',
+    shortTag: 'Opus Root',
+    roleMatch: 'Acting COO & Opus Orchestrator',
+    tool: 'Antigravity',
+    fallbackModel: 'Orchestrator · Claude Opus 5.5',
+    mandate: 'Opus Head: P1 Acting COO & Fresh Final Reviewer orchestrating Opus/Sonnet/GPT-OSS swarms'
   },
   {
     monitorId: 'antigravity-monitor',
@@ -104,8 +113,8 @@ const COUNCIL_SEATS: SeatDefinition[] = [
     shortTag: 'AI Strategy',
     roleMatch: 'Head of AI Strategy',
     tool: 'Antigravity',
-    fallbackModel: 'Orchestrator (Neon)',
-    mandate: 'Multi-model failover host (Gemini 4, Opus 5.5, Sonnet 5.5, GPT-OSS) & UI/UX lead'
+    fallbackModel: 'Orchestrator · Gemini 4 Argon',
+    mandate: 'Argon Head: multi-model failover hub, AI Strategy & UI/UX swarm orchestrator'
   }
 ];
 
@@ -141,7 +150,7 @@ export function DecisionTriadCard({
   const triadAccent = getIdentityStyles('triad', isDark);
 
   const triadDef = governance.roles.find((r) => r.role.toLowerCase().includes('triad'));
-  const totalSeats = monitors.length > 0 ? monitors.length : 3;
+  const totalSeats = monitors.length > 0 ? monitors.length : 4;
   const readyCount = monitors.filter((m) => m.state === 'busy' || m.state === 'standby').length;
   const rateLimitedCount = monitors.filter((m) => m.state === 'rate_limited').length;
 
@@ -245,10 +254,18 @@ export function DecisionTriadCard({
                 : 'neutral';
           const dotColor = getStatusStyles(dotStatusKey, isDark).solid;
 
+          const seatTone = resolveProfileTone(seat.profile);
+          const seatModel = monitor?.model ?? seat.fallbackModel;
+          const isGhostModel =
+            monitor?.state === 'rate_limited' ||
+            monitor?.state === 'offline' ||
+            /^<?synthetic>?$/i.test(seatModel.trim());
+
           return (
             <div
               key={seat.monitorId}
               className={styles.seatPill}
+              style={{ opacity: monitor?.state === 'offline' ? 0.55 : 1 }}
               title={`${seat.roleMatch} · ${toolName} · ${stateLabel} · ${seat.mandate}`}
             >
               <span
@@ -260,7 +277,13 @@ export function DecisionTriadCard({
                 <ProfileBadge profile={seat.profile} isDark={isDark} />
               </GlossaryTooltip>
               <RoleBadge role={seat.roleMatch} label={seat.shortTag} isDark={isDark} compact />
-              <ModelBadge model={monitor?.model ?? seat.fallbackModel} isDark={isDark} mono />
+              <ModelBadge
+                model={seatModel}
+                isDark={isDark}
+                mono
+                identityTone={seatTone}
+                ghosted={isGhostModel}
+              />
             </div>
           );
         })}

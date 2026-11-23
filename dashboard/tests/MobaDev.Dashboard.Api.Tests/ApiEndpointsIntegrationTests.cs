@@ -91,12 +91,15 @@ public sealed class ApiEndpointsIntegrationTests
         Assert.NotNull(snapshot);
         Assert.True(snapshot.ReadOnly);
         Assert.Equal("3.5.5", snapshot.ChangelogVersion);
-        Assert.Equal(3, snapshot.Monitors.Monitors.Count);
+        Assert.Equal(4, snapshot.Monitors.Monitors.Count);
         Assert.Equal(
-            ["codex-monitor", "claude-monitor", "antigravity-monitor"],
+            ["codex-monitor", "claude-monitor", "antigravity-monitor", "antigravity-opus-head"],
             snapshot.Monitors.Monitors.Select(m => m.Id));
+        Assert.Equal(
+            ["GPT Head", "Claude Head", "Argon Head", "Opus Head"],
+            snapshot.Monitors.Monitors.Select(m => m.DisplayName));
         Assert.NotNull(snapshot.Monitors.Summary);
-        Assert.Equal(3, snapshot.Monitors.Summary.StandingMonitorsTotal);
+        Assert.Equal(4, snapshot.Monitors.Summary.StandingMonitorsTotal);
         Assert.Single(snapshot.Hygiene.Worktrees);
 
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/monitors")).StatusCode);

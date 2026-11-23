@@ -257,7 +257,7 @@ interface PipelineCardProps {
   isDark: boolean;
 }
 
-type PipelineViewMode = 'open' | 'issues' | 'merged';
+type PipelineViewMode = 'open' | 'issues';
 
 const KANBAN_GROUPS = ['Ready', 'In progress', 'In review', 'Via Open PR'] as const;
 
@@ -280,7 +280,7 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
     ...(fallbackItems.length > 0 ? [{ label: 'Via Open PR', items: fallbackItems }] : [])
   ].filter((g) => g.items.length > 0);
 
-  const activePrList = viewMode === 'open' ? pipeline.pullRequests : pipeline.recentlyMerged;
+  const activePrList = pipeline.pullRequests;
 
   return (
     <Card className={styles.card} appearance="filled" aria-label="Task and PR Pipeline MOBAflow">
@@ -308,14 +308,6 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
           >
             <span className="tabular">Open PRs ({pipeline.pullRequests.length})</span>
           </ToggleButton>
-          <ToggleButton
-            size="small"
-            appearance={viewMode === 'merged' ? 'primary' : 'subtle'}
-            checked={viewMode === 'merged'}
-            onClick={() => setViewMode('merged')}
-          >
-            <span className="tabular">Closed PRs ({pipeline.recentlyMerged.length})</span>
-          </ToggleButton>
         </div>
       </div>
 
@@ -342,21 +334,15 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
         </MessageBar>
       )}
 
-      {pipeline.source.status !== 'unavailable' && viewMode !== 'issues' && activePrList.length === 0 && (
+      {pipeline.source.status !== 'unavailable' && viewMode === 'open' && activePrList.length === 0 && (
         <div className={styles.emptyState}>
           <CheckmarkCircle16Regular style={{ width: 22, height: 22 }} aria-hidden="true" />
-          <Text weight="semibold">
-            {viewMode === 'open' ? 'No open PRs in MOBAflow' : 'No closed PRs found'}
-          </Text>
-          <Text size={200}>
-            {viewMode === 'open'
-              ? 'All changes are currently integrated on main.'
-              : 'Closed and merged PRs will appear here with their participating agents.'}
-          </Text>
+          <Text weight="semibold">No open PRs in MOBAflow</Text>
+          <Text size={200}>All changes are currently integrated on main.</Text>
         </div>
       )}
 
-      {viewMode !== 'issues' && activePrList.length > 0 && (
+      {viewMode === 'open' && activePrList.length > 0 && (
         <div className={styles.prList}>
           {activePrList.map((pr) => (
             <PullRequestRow

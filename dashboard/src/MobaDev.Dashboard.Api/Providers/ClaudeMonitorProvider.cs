@@ -8,7 +8,7 @@ using MobaDev.Dashboard.Api.Security;
 namespace MobaDev.Dashboard.Api.Providers;
 
 /// <summary>
-/// Reads standing Claude Monitor metadata from ~/.claude/sessions/*.json and only model/rate-limit metadata
+/// Reads standing Claude Head (formerly Claude Monitor) metadata from ~/.claude/sessions/*.json and only model/rate-limit metadata
 /// from the tail of the active session transcript without ever exposing chat text.
 /// </summary>
 public sealed partial class ClaudeMonitorProvider
@@ -16,7 +16,8 @@ public sealed partial class ClaudeMonitorProvider
     private const int TailReadBytes = 64 * 1024;
     private static readonly TimeSpan SubAgentActiveWindow = TimeSpan.FromMinutes(2);
     private const string MonitorId = "claude-monitor";
-    private const string DisplayName = "Claude Monitor";
+    private const string DisplayName = "Claude Head";
+    private const string LegacyDisplayName = "Claude Monitor";
     private const string Role = "Chief Operating Officer (COO)";
     private const string Profile = "P1";
     private const string Tool = "Claude Code";
@@ -46,7 +47,9 @@ public sealed partial class ClaudeMonitorProvider
         }
 
         var selected = sessions
-            .OrderByDescending(s => string.Equals(s.Name, DisplayName, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(s =>
+                string.Equals(s.Name, DisplayName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(s.Name, LegacyDisplayName, StringComparison.OrdinalIgnoreCase))
             .ThenByDescending(s => s.UpdatedAtMs)
             .First();
 

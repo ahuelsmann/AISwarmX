@@ -5,6 +5,14 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.8.5] - 2026-11-23
+
+### Changed
+- **4 Master / Root Head Sessions (`CodexMonitorProvider.cs`, `ClaudeMonitorProvider.cs`, `AntigravityMonitorProvider.cs`, `DashboardSnapshotService.cs`, `MonitorCards.tsx`, `DecisionTriadCard.tsx`, `ArchitectureDiagramsView.tsx`):** Upgraded cockpit discovery, session hygiene (`TargetCount: 2` for Antigravity Root Heads), monitor cards, Triad/Steering bar, and Swarm Topology diagram to represent all 4 Master/Root Heads (`GPT Head`, `Claude Head`, `Argon Head`, `Opus Head`) with read-only Antigravity transcript tail model detection (`Orchestrator · Gemini 4 Argon` and `Orchestrator · Claude Opus 5.5`).
+- **Live Operations & Architecture Fluent 2 Refinements (`App.tsx`, `PipelineCard.tsx`, `MonitorCards.tsx`, `DecisionTriadCard.tsx`, `ActiveAgentsStrip.tsx`, `RoleAndModelIcons.tsx`, `ArchitectureDiagramsView.tsx`):** Added a `"Back to top"` link (`#live-top`) at the bottom of Live Operations, kept deactivated/`<synthetic>`/`0`-count pills in their original AI identity color with ghosted opacity (`0.48`–`0.52`), removed the `Closed PRs` view from `Task & PR Pipeline`, and refined the Swarm Topology SVG to `viewBox="0 0 920 310"`.
+
+---
+
 ## [3.8.4] - 2026-11-22
 
 ### Changed

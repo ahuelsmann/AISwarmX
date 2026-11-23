@@ -39,8 +39,6 @@ const GLOSSARY_ENTRIES: Record<string, string> = {
     'Two-axis color rule so identity and status never collide. Axis 1 (Who): P2 ChatGPT/Codex = Teal, P1 Claude/Opus = Orange, P3 Antigravity/Gemini = Light Blue, P4 Fast Delivery = Magenta-Orchid, Triad = Purple. Axis 2 (Health): Green = ready/pass, Amber = active/pending/attention, Red = blocked/conflict/Class H, Neutral = idle/context. Fluent Blue is for clickable controls only.',
   'Branch Hygiene':
     'Scans your local PC (Local Stale) and GitHub (Remote Stale) for leftover Git feature branches whose work is already merged or deleted, keeping both repositories tidy.',
-  'Closed PRs':
-    'Recently merged or closed change requests kept here as a clear audit trail showing which AI agents built, reviewed, and approved each slice.',
   'Merge Gates':
     'Step-by-step quality checkpoints (Writer -> Companion -> CI & Sonar -> P1 Final -> Cross-Family -> Auto-Merge) that every code change must pass before entering main.'
 };

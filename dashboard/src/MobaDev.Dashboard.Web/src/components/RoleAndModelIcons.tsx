@@ -64,9 +64,6 @@ export function resolveModelVisual(model: string | null | undefined): ResolvedVi
   ) {
     return { icon: <Flash16Regular aria-hidden="true" />, tone: IDENTITY_TONES.p4 };
   }
-  if (normalized.includes('orchestrator') || normalized.includes('neon')) {
-    return { icon: <Beaker16Regular aria-hidden="true" />, tone: IDENTITY_TONES.p3 };
-  }
   if (normalized.includes('opus') || normalized.includes('claude')) {
     return {
       icon: <BrainCircuit20Regular style={{ width: 16, height: 16 }} aria-hidden="true" />,
@@ -80,6 +77,9 @@ export function resolveModelVisual(model: string | null | undefined): ResolvedVi
     SOL_TOKEN.test(normalized)
   ) {
     return { icon: <Braces16Regular aria-hidden="true" />, tone: IDENTITY_TONES.p2 };
+  }
+  if (normalized.includes('orchestrator') || normalized.includes('neon')) {
+    return { icon: <Beaker16Regular aria-hidden="true" />, tone: IDENTITY_TONES.p3 };
   }
   if (
     normalized.includes('argon') ||
@@ -297,6 +297,23 @@ interface ModelBadgeProps {
   toolPrefix?: string | null;
   mono?: boolean;
   wrap?: boolean;
+  identityTone?: AccentTone;
+  ghosted?: boolean;
+}
+
+function resolveIdentityFallbackIcon(tone: AccentTone): ReactNode {
+  switch (tone) {
+    case IDENTITY_TONES.p1:
+      return <BrainCircuit20Regular style={{ width: 16, height: 16 }} aria-hidden="true" />;
+    case IDENTITY_TONES.p2:
+      return <Braces16Regular aria-hidden="true" />;
+    case IDENTITY_TONES.p3:
+      return <Sparkle16Regular aria-hidden="true" />;
+    case IDENTITY_TONES.p4:
+      return <Flash16Regular aria-hidden="true" />;
+    default:
+      return <Bot16Regular aria-hidden="true" />;
+  }
 }
 
 export function ModelBadge({
@@ -304,11 +321,19 @@ export function ModelBadge({
   isDark,
   toolPrefix,
   mono = true,
-  wrap = false
+  wrap = false,
+  identityTone,
+  ghosted
 }: ModelBadgeProps) {
   const displayModel = model && model.trim().length > 0 ? model : 'not detected';
-  const visual = resolveModelVisual(displayModel);
+  const isPlaceholderModel = /^<?synthetic>?$|^not detected$|^unknown$/i.test(displayModel.trim());
+  const resolved = resolveModelVisual(displayModel);
+  const visual: ResolvedVisual =
+    resolved.tone === 'neutral' && identityTone && identityTone !== 'neutral'
+      ? { icon: resolveIdentityFallbackIcon(identityTone), tone: identityTone }
+      : resolved;
   const styles = getToneStyles(visual.tone, isDark);
+  const isGhosted = ghosted ?? isPlaceholderModel;
 
   return (
     <span
@@ -325,7 +350,8 @@ export function ModelBadge({
         fontSize: tokens.fontSizeBase200,
         fontWeight: tokens.fontWeightMedium,
         lineHeight: wrap ? '18px' : undefined,
-        maxWidth: '100%'
+        maxWidth: '100%',
+        opacity: isGhosted ? 0.52 : 1
       }}
     >
       <span

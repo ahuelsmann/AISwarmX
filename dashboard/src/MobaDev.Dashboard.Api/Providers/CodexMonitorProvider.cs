@@ -7,12 +7,13 @@ using MobaDev.Dashboard.Api.Security;
 namespace MobaDev.Dashboard.Api.Providers;
 
 /// <summary>
-/// Reads standing Codex Monitor metadata read-only from ~/.codex/state_5.sqlite and automation.toml.
+/// Reads standing GPT Head (formerly Codex Monitor) metadata read-only from ~/.codex/state_5.sqlite and automation.toml.
 /// </summary>
 public sealed partial class CodexMonitorProvider
 {
     private const string MonitorId = "codex-monitor";
-    private const string DisplayName = "Codex Monitor";
+    private const string DisplayName = "GPT Head";
+    private const string LegacyDisplayName = "Codex Monitor";
     private const string Role = "Technical Director & CPM";
     private const string Profile = "P2";
     private const string Tool = "ChatGPT Codex";
@@ -68,11 +69,13 @@ public sealed partial class CodexMonitorProvider
             if (standingThreads.Count == 0)
             {
                 var fallbackSubAgents = allActiveThreads.Count(t => t.UpdatedAtSeconds >= subAgentCutoffSeconds);
-                return Task.FromResult(Unavailable(now, "ok", "No active Codex Monitor thread found.", automationStatus, fallbackSubAgents));
+                return Task.FromResult(Unavailable(now, "ok", "No active GPT Head thread found.", automationStatus, fallbackSubAgents));
             }
 
             var selected = standingThreads
-                .OrderByDescending(t => string.Equals(t.Name, DisplayName, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(t =>
+                    string.Equals(t.Name, DisplayName, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(t.Name, LegacyDisplayName, StringComparison.OrdinalIgnoreCase))
                 .ThenByDescending(t => t.UpdatedAtSeconds)
                 .First();
 
