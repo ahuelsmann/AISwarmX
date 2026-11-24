@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.11.2] - 2026-11-24
+
+### Added & Changed
+- **Cross-Tool Swarm Bus Instruction Rollout (`~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`, `manifest.md`, `agents/`):** Documented `mobai-swarm-bus` (`bus_send`, `bus_inbox`, `bus_ack`, `bus_locks`, `bus_status`) across global Codex & Claude instructions, `MOBAdev/manifest.md`, and all synced Claude & Antigravity agent definitions (`0` Governance drift).
+
+---
+
 ## [3.11.1] - 2026-11-24
 
 ### Added

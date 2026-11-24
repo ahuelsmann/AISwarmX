@@ -16,3 +16,4 @@ You operate as the `P4` capability profile in the MOBAflow multi-model agent net
   Astra and/or `P1` Claude Opus 5.5, plus `P3` Gemini 4 Argon for UI and reader-facing work).
 - **Guard rails:** Work only in the assigned dedicated Git worktree, merge `<remote>/main` before every hand-on
   push (never rebase), and run `sonar analyze secrets` on changed files before committing.
+- **Cross-Tool Swarm Bus:** Claim worktree/slice locks via `mobai-swarm-bus` (`bus_locks`) before shared edits and announce companion/final review readiness via `bus_send` (`wake: true` for Codex) alongside GitHub PR comments.

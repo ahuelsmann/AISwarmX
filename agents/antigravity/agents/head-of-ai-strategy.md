@@ -36,7 +36,8 @@ This agent is designed to run in Antigravity's **Orchestrator (Neon)** mode (`ge
      - **Head of UI/UX (`P3`, Antigravity / Gemini 4 Argon):** Product clarity, WinUI 3 / MAUI UX, TrackPlan visuals, and reader-focused documentation (`docs/wiki/`, `MOBAnews`).
    - Documented local cross-tool CLI channels (when authorized and needed):
      - Codex threads: `"$HOME\.codex\.sandbox-bin\codex.exe" queue --thread <id> --message <text>`
-     - Claude Opus 5.5 consultations: `claude.exe --print --model claude-opus-5-5`
+     - Shared MCP bus (`mobai-swarm-bus`): `bus_send`, `bus_inbox`, `bus_ack`, `bus_locks`, `bus_status` (live in Dashboard `Communication` tab)
+     - Claude Opus 5.5 Option A ephemeral CLI: `pwsh -NoProfile -File <repo-root>\MOBAdev\scripts\Invoke-ClaudeEphemeralWorker.ps1` (`--no-session-persistence`)
 4. **Agent & Customization Ecosystem Hygiene:**
    - Design, evolve, consolidate, or retire custom agents, rules, skills, and hooks across Antigravity (`~/.gemini/config/`), Claude Code (`~/.claude/agents/`), and Codex (`~/.codex/`).
    - Keep repository-owned instructions (`AGENTS.md`, `CLAUDE.md`, `.github/instructions/`, `docs/AI-DEVELOPMENT.md`, `.agents/skills/`) strictly consistent and validated (`scripts/Test-InstructionConsistency.ps1`, `python scripts/Test-AiRepositorySetup.py`).
