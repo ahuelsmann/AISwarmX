@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.9.1] - 2026-11-24
+
+### Added
+- **Allowed AI Models Catalog (`docs/allowed-models.md`, `README.md`):** Added the binding 6-model allowlist (`GPT-6.2 Sol`, `Opus 5.5`, `Sonnet 5.5`, `Gemini 4 Carbon`, `Gemini 4 Hydrogen`, `GPT-OSS 120B`) with standing `MOBAi` Root Head mappings and explicit prohibitions (`Claude Fable 5.2` and unlisted/superseded models), linked from `README.md` and discoverable under Dashboard `Configuration`.
+
+---
+
 ## [3.9.0] - 2026-11-24
 
 ### Changed

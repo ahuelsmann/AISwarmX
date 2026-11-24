@@ -16,6 +16,7 @@ Project-specific build and validation rules live with the product code. Claude, 
 Read the [MOBAflow agent workflow manifesto](manifest.md) for the active team principles and use the [small-batch delivery guide](docs/delivery-workflow.md) to find the board, roles, risk classes (`H`/`M`/`L`) and review flow for MOBAflow work.
 
 - [Versioned agent and rule backups](agents/README.md) for Antigravity and Claude Code
+- [Allowed AI models](docs/allowed-models.md) — binding allowlist of permitted models across Codex, Claude Code, and Antigravity
 - [AI strategy and orchestration pilots](docs/ai-strategy-and-pilots.md) (`Orchestrator (Neon)` & `Sol 6.2` monitor strategy, `Gemini 4 Carbon` decision record)
 - [MOBAdev Agent Swarm Gen#3 Dashboard design concept](dashboard/DESIGN.md) (read-only local ASP.NET Core + React cockpit — launch manually via `.\dashboard\Start-Dashboard.ps1 -OpenBrowser`)
 - [Changelog](CHANGELOG.md) — versioned history of `MOBAdev` and the Agent Swarm dashboard
