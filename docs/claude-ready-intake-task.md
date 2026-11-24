@@ -45,7 +45,8 @@ gh pr list --repo ahuelsmann/MOBAflow --state open --json number,title,isDraft,h
 
 - Count open **Code PRs** (Risk Class `H` or `M`; `L` docs/config slices do not count toward the Code WIP limit of 3).
 - Extract all currently `Locked areas` from open PR slice headers.
-- Pick **at most 1** eligible `Ready` issue per intake pass (unless explicitly asked for more) in priority order (`P0` -> `P1` -> `P2` -> `P3` -> unset -> lowest issue number), skipping any issue that requires a code slice when Code WIP >= 3 or whose required areas are currently locked.
+- **Multi-Tool Parallel Intake:** Fill available disjoint Code WIP slots (`< 3`) across all 3 quota pools rather than bottlenecking on 1 tool at a time (e.g., `Claude` for Backend/`MOBAdemo/Host`; `Codex` via `codex.exe queue` for `MOBAdemo/app` React/TypeScript or CI/Specs; `Antigravity` via `agy.exe` for WinUI/XAML/Themes, `TrackPlan`, or parallel `Class L` Wiki/Help slices). Prioritize by `P0` -> `P1` -> `P2` -> `P3` -> lowest issue number, skipping any issue with locked-area conflicts.
+- **GitHub-as-Mailbox Rule:** Post every design note, Go, and review verdict immediately on the GitHub issue/PR (never only in a local thread). For **Pre-Approved Plan-Slice Fast-Start (`Class M`)** items inside an approved Spec Kit `plan.md`, the writer may start immediately in a Draft PR with TDD (`tests first`) and embed the design note in the PR body.
 - If no `Ready` issue can start safely due to WIP or lock conflicts, leave it in `Ready`, report why to the maintainer, post no noisy issue comment, and stop.
 
 ## Step 3 — Claim Idempotently (`Ready` -> `In progress`)
