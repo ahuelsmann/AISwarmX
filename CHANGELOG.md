@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.9.8] - 2026-11-24
+
+### Changed
+- **Dynamic Quorum / Quota-Pause Context Label (`MonitorCards.tsx`, `DecisionTriadCard.tsx`, `App.test.tsx`):** Replaced the hardcoded `(Antigravity + Codex Failover)` Quorum suffix with `formatQuotaPauseSuffix(monitors)` so the badge reflects the actual active failover pool (for example, `(Claude + Codex + Gemini Active)` when only `MOBAi Antigravity Opus` partner credits are paused, `(Codex + Gemini Failover)` when both Opus pools pause, or `(Antigravity + Codex Failover)` when `MOBAi Claude Opus` pauses).
+
+---
+
 ## [3.9.7] - 2026-11-24
 
 ### Changed

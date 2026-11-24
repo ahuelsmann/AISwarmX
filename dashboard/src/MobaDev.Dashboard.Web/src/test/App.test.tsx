@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import {
   clearMonitorGridCookie,
+  formatQuotaPauseSuffix,
   MONITOR_GRID_COOKIE,
   readMonitorGridCookie
 } from '../components/MonitorCards';
@@ -1202,6 +1203,34 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     const copyBtn = within(worktreesCard).getByRole('button', { name: 'Copy Safe Prune Cmd' });
     await user.click(copyBtn);
     expect(within(worktreesCard).getByRole('button', { name: 'Copied!' })).toBeInTheDocument();
+  });
+
+  it('displays dynamic Quorum quota-pause context matching the paused vs ready Root Heads', async () => {
+    const customPayload = createSnapshotFixture();
+    customPayload.monitors.monitors = customPayload.monitors.monitors.map((m) => {
+      if (m.id === 'claude-monitor') {
+        return { ...m, state: 'standby', rateLimitResetLabel: null };
+      }
+      if (m.id === 'antigravity-opus-head') {
+        return { ...m, state: 'rate_limited', rateLimitResetLabel: 'Nov 30, 08:14 · quota exhausted' };
+      }
+      return m;
+    });
+    stubDashboardFetch(customPayload);
+
+    render(<App />);
+    const triadRegion = await screen.findByLabelText('Decision and Steering Triad selection panel');
+    expect(
+      within(triadRegion).getByText('Quorum 3 / 4 · 1 Quota Pause (Claude + Codex + Gemini Active)')
+    ).toBeInTheDocument();
+
+    // Dual-Opus pause (both Claude Opus and Antigravity Opus rate-limited) -> Codex + Gemini Failover
+    const dualOpusPaused = customPayload.monitors.monitors.map((m) =>
+      m.id === 'claude-monitor' || m.id === 'antigravity-opus-head'
+        ? { ...m, state: 'rate_limited' }
+        : { ...m, state: 'standby' }
+    );
+    expect(formatQuotaPauseSuffix(dualOpusPaused)).toBe('(Codex + Gemini Failover)');
   });
 
   it('degrades gracefully when backend is unreachable', async () => {
