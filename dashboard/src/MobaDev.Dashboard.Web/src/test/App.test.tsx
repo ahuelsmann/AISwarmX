@@ -622,8 +622,8 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(within(claudeSubs).getByText('Sonnet 5.5:')).toBeInTheDocument();
 
     const geminiSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for MOBAi Antigravity Gemini');
-    expect(within(geminiSubs).getByText('Gemini 4 Carbon:')).toBeInTheDocument();
-    expect(within(geminiSubs).getByText('Gemini 4 Hydrogen:')).toBeInTheDocument();
+    expect(within(geminiSubs).getByText('Carbon:')).toBeInTheDocument();
+    expect(within(geminiSubs).getByText('Hydrogen:')).toBeInTheDocument();
     expect(within(geminiSubs).getByText('GPT-OSS 120B:')).toBeInTheDocument();
 
     const opusSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for MOBAi Antigravity Opus');
@@ -889,7 +889,8 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
       ).toBeInTheDocument();
       expect(screen.getByText('No PR yet')).toBeInTheDocument();
 
-      // Round Table renders graphically by default even on 0-agent open issues
+      // Round Table renders graphically by default even on 0-agent open issues; Writer pill shows when 0 participants
+      expect(screen.getAllByText('Writer: COO (Claude)').length).toBeGreaterThanOrEqual(1);
       expect(screen.getByRole('img', { name: 'Round table of 0 Agents for Issue #47' })).toBeInTheDocument();
       expect(screen.getAllByText('Awaiting Agent Assignment').length).toBeGreaterThanOrEqual(1);
 
@@ -901,6 +902,33 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     },
     10_000
   );
+
+  it('omits redundant Writer pill when issue has Round Table participants and normalizes Kanban Argon model to Carbon', async () => {
+    const snap = createSnapshotFixture();
+    snap.pipeline.activeIssues![2].writer = 'REDUNDANT_MULTI_AGENT_WRITER_TEXT';
+    snap.pipeline.activeIssues![2].participants = [
+      {
+        agent: 'Antigravity Specialist',
+        tool: 'Antigravity',
+        role: 'UI/UX & Docs Swarm',
+        profile: 'P3',
+        model: 'Gemini 4 Argon',
+        status: 'Assigned',
+        evidenceSource: 'Kanban Quorum'
+      }
+    ];
+    stubDashboardFetch(snap);
+
+    render(<App />);
+    await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+
+    const pipelineSection = screen.getByLabelText('Task and PR Pipeline MOBAflow');
+    expect(
+      within(pipelineSection).queryByText(/REDUNDANT_MULTI_AGENT_WRITER_TEXT/)
+    ).not.toBeInTheDocument();
+    expect(within(pipelineSection).getAllByText('Writer: COO (Claude)').length).toBeGreaterThanOrEqual(1);
+    expect(within(pipelineSection).getByText('Gemini 4 Carbon')).toBeInTheDocument();
+  });
 
   it(
     'switches to Architecture tab and renders interactive Swarm Topology, Lifecycle and Boundary diagrams',
@@ -1010,12 +1038,12 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     const geminiSubs = within(monitorSection).getByLabelText(
       'Sub-agents for MOBAi Antigravity Gemini'
     );
-    const hydrogenChip = within(geminiSubs).getByText('Gemini 4 Hydrogen:').parentElement as HTMLElement;
+    const hydrogenChip = within(geminiSubs).getByText('Hydrogen:').parentElement as HTMLElement;
     expect(hydrogenChip.style.opacity).toBe('1');
     expect(hydrogenChip).toHaveTextContent('2');
     expect(within(geminiSubs).getByText('GPT-OSS 120B:').parentElement?.style.opacity).toBe('1');
 
-    const carbonChip = within(geminiSubs).getByText('Gemini 4 Carbon:').parentElement as HTMLElement;
+    const carbonChip = within(geminiSubs).getByText('Carbon:').parentElement as HTMLElement;
     expect(carbonChip.style.opacity).toBe('0.48');
     expect(carbonChip.style.color).not.toBe('');
 

@@ -1059,6 +1059,25 @@ function RiskClassBadge({ riskClass }: { riskClass: string }) {
   );
 }
 
+function sanitizeKanbanWriterText(raw: string): string {
+  return raw
+    .replace(/Gemini 4 Argon/gi, 'Gemini 4 Carbon')
+    .replace(/Orchestrator\s*\(Neon\)/gi, 'Gemini 4 Carbon')
+    .replace(/Claude Fable 5\.2/gi, 'Claude Sonnet 5.5');
+}
+
+function normalizeIssueParticipants(participants: TaskParticipantInfo[]): TaskParticipantInfo[] {
+  return participants.map((participant) => {
+    if (
+      participant.evidenceSource?.startsWith('Kanban') &&
+      /^gemini 4 argon$/i.test(participant.model ?? '')
+    ) {
+      return { ...participant, model: 'Gemini 4 Carbon' };
+    }
+    return participant;
+  });
+}
+
 function KanbanItemRow({
   issue,
   nowMs,
@@ -1074,6 +1093,8 @@ function KanbanItemRow({
   const hasOpenPr = isPr || issue.linkedPullRequests.some((p) => !p.isMerged);
   const hasDrift = Boolean(issue.boardDriftReason);
   const isClosed = ['CLOSED', 'MERGED'].includes(issue.gitHubState.toUpperCase());
+  const normalizedParticipants = normalizeIssueParticipants(issue.participants);
+  const dangerStyles = getStatusStyles('danger', isDark);
 
   return (
     <div className={styles.prRow}>
@@ -1160,7 +1181,10 @@ function KanbanItemRow({
         </div>
       )}
 
-      <div className={styles.prMetaRow}>
+      <div
+        className={styles.prMetaRow}
+        style={{ width: '100%' }}
+      >
         {issue.area && (
           <Badge appearance="tint" color="subtle" shape="rounded">
             {issue.area}
@@ -1171,8 +1195,40 @@ function KanbanItemRow({
             {issue.issueType}
           </Badge>
         )}
-        {issue.writer && (
-          <span className={`${styles.monoPill} mono`}>Writer: {issue.writer}</span>
+        {normalizedParticipants.length === 0 && issue.writer && (
+          <span className={`${styles.monoPill} mono`}>
+            Writer: {sanitizeKanbanWriterText(issue.writer)}
+          </span>
+        )}
+        {issue.lockedAreas.length > 0 && (
+          <>
+            <span
+              title="Locked Areas"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                color: tokens.colorNeutralForeground2
+              }}
+            >
+              <LockClosed16Regular style={{ width: 14, height: 14 }} aria-hidden="true" />
+            </span>
+            {issue.lockedAreas.map((area) => (
+              <span
+                key={area}
+                className={`${styles.monoPill} mono`}
+                style={
+                  issue.riskClass === 'H'
+                    ? {
+                        borderColor: dangerStyles.border,
+                        color: dangerStyles.fg
+                      }
+                    : undefined
+                }
+              >
+                {area}
+              </span>
+            ))}
+          </>
         )}
         {isClosed && (
           <Badge appearance="tint" color="danger" shape="rounded">
@@ -1182,19 +1238,12 @@ function KanbanItemRow({
         <Text
           size={200}
           className="tabular"
-          style={{ color: tokens.colorNeutralForeground2 }}
+          style={{ color: tokens.colorNeutralForeground2, marginLeft: 'auto' }}
           title={formatAbsoluteEn(issue.updatedAtUtc)}
         >
           Updated {formatRelativeTimeEn(issue.updatedAtUtc, nowMs)}
         </Text>
       </div>
-
-      <LockedAreasRow
-        lockedAreas={issue.lockedAreas}
-        riskClass={issue.riskClass}
-        isDark={isDark}
-        styles={styles}
-      />
 
       <AgentRoundTable
         centerLabel={`${isPr ? 'PR' : 'Issue'} #${issue.number}`}
@@ -1213,12 +1262,12 @@ function KanbanItemRow({
                 ? ('gold' as AccentTone)
                 : ('neutral' as AccentTone)
         }
-        participants={issue.participants}
+        participants={normalizedParticipants}
         isDark={isDark}
         defaultView="table"
         renderPills={() => (
           <div className={styles.participantsRow}>
-            {issue.participants.map((participant) => (
+            {normalizedParticipants.map((participant) => (
               <ParticipantPill
                 key={`${participant.role}-${participant.tool}-${participant.profile}`}
                 participant={participant}
