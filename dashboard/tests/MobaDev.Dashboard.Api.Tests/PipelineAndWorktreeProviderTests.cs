@@ -451,6 +451,22 @@ public sealed class PipelineAndWorktreeProviderTests
                             "isDraft": true,
                             "updatedAt": "{{recentIso}}"
                           }
+                        },
+                        {
+                          "fieldValues": {
+                            "nodes": [
+                              { "name": "In review", "field": { "name": "Status" } }
+                            ]
+                          },
+                          "content": {
+                            "__typename": "PullRequest",
+                            "number": 502,
+                            "title": "docs: stale merged pr still in review",
+                            "url": "https://github.com/ahuelsmann/MOBAflow/pull/502",
+                            "state": "MERGED",
+                            "isDraft": false,
+                            "updatedAt": "{{recentIso}}"
+                          }
                         }
                       ]
                     }
@@ -492,7 +508,8 @@ public sealed class PipelineAndWorktreeProviderTests
         Assert.Equal("https://github.com/users/ahuelsmann/projects/1", result.ProjectBoardUrl);
         Assert.Equal("In review", Assert.Single(result.PullRequests, p => p.Number == 501).ProjectStatus);
 
-        Assert.Equal([451, 47, 136, 266, 501], result.ActiveIssues.Select(i => i.Number).ToArray());
+        Assert.Equal([451, 47, 136, 266, 502], result.ActiveIssues.Select(i => i.Number).ToArray());
+        Assert.DoesNotContain(result.ActiveIssues, i => i.Number == 501);
 
         var issue451 = result.ActiveIssues[0];
         Assert.Equal("Issue", issue451.ItemKind);
@@ -515,13 +532,10 @@ public sealed class PipelineAndWorktreeProviderTests
         var issue266 = result.ActiveIssues[3];
         Assert.Equal("Closed on GitHub — move to Done on Kanban", issue266.BoardDriftReason);
 
-        var pr501Item = result.ActiveIssues[4];
-        Assert.Equal("PullRequest", pr501Item.ItemKind);
-        Assert.Equal("In review", pr501Item.KanbanStatus);
-        Assert.Equal("L", pr501Item.RiskClass);
-        Assert.Equal(["quality.yml", "CONTRIBUTING.md"], pr501Item.LockedAreas);
-        Assert.Single(pr501Item.LinkedIssues, li => li.Number == 451);
-        Assert.Null(pr501Item.BoardDriftReason);
+        var pr502Item = result.ActiveIssues[4];
+        Assert.Equal("PullRequest", pr502Item.ItemKind);
+        Assert.Equal("In review", pr502Item.KanbanStatus);
+        Assert.Equal("Merged/Closed on GitHub — move to Done on Kanban", pr502Item.BoardDriftReason);
     }
 
     [Fact]
@@ -542,12 +556,11 @@ public sealed class PipelineAndWorktreeProviderTests
                             ]
                           },
                           "content": {
-                            "__typename": "PullRequest",
+                            "__typename": "Issue",
                             "number": 510,
                             "title": "docs: review item",
-                            "url": "https://github.com/ahuelsmann/MOBAflow/pull/510",
+                            "url": "https://github.com/ahuelsmann/MOBAflow/issues/510",
                             "state": "OPEN",
-                            "isDraft": false,
                             "updatedAt": "{{nowIso}}"
                           }
                         },

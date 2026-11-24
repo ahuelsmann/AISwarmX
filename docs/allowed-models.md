@@ -11,7 +11,7 @@ Only the **6 approved AI models** listed in this catalog may be selected or disp
 | Model | Identifier / Alias | Family | Profile | Permitted Tools | Primary Responsibility |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **`GPT-6.2 Sol`** | `gpt-6.2-sol` | OpenAI (`X`) | `P2` | ChatGPT Codex (`MOBAi ChatGPT Codex`) | Technical Director & CPM, repo/build-graph/Spec-Kit precision, `X`-family implementation & cross-family reviews |
-| **`Opus 5.5`** | `claude-opus-5-5` / `Claude Opus 5.5` | Anthropic (`C`) | `P1` | Claude Code (`MOBAi Claude Opus`), Antigravity (`MOBAi Antigravity Opus`) | COO / Acting COO, deep architecture, concurrency/safety invariants, mandatory Fresh Independent `P1` Final Review (hard Claude ceiling) |
+| **`Opus 5.5`** | `claude-opus-5-5` / `Claude Opus 5.5` | Anthropic (`C`) | `P1` | Claude Code (`MOBAi Claude Opus`), Antigravity (`MOBAi Antigravity Opus`) | COO / Acting COO, deep architecture, concurrency/safety invariants; Antigravity `Opus 5.5` (Google AI plan) handles Fresh Independent `P1` Final Reviews by default to shield `MOBAi Claude Opus` (Anthropic plan) |
 | **`Sonnet 5.5`** | `claude-sonnet-5-5` / `Claude Sonnet 5.5` | Anthropic (`C`) | `P4` | Claude Code, Antigravity | Fast routine code/test/doc slices and triage |
 | **`Gemini 4 Carbon`** | `gemini-4-carbon-medium` / `Orchestrator · Gemini 4 Carbon` | Google (`G`) | `P3` | Antigravity (`MOBAi Antigravity Gemini`) | Head of AI Strategy, system context, Product & UI/UX architecture, `G`-family orchestration & cross-family review |
 | **`Gemini 4 Hydrogen`** | `gemini-4-hydrogen-xhigh` | Google (`G`) | `P4` | Antigravity | Fast inner execution turns, bounded inspections, and routine worker tasks *(never used as standalone final sign-off reviewer)* |
@@ -24,8 +24,8 @@ Only the **6 approved AI models** listed in this catalog may be selected or disp
 | Root Head Session | Tool | Profile | Default / Permitted Model(s) |
 | :--- | :--- | :--- | :--- |
 | `MOBAi ChatGPT Codex` | ChatGPT Codex | `P2` | `GPT-6.2 Sol` |
-| `MOBAi Claude Opus` | Claude Code | `P1` | `Opus 5.5` *(spawns `Opus 5.5` / `Sonnet 5.5`)* |
-| `MOBAi Antigravity Opus` | Antigravity | `P1` | `Opus 5.5` *(sub-agent pool within allowed list)* |
+| `MOBAi Claude Opus` | Claude Code | `P1` | `Opus 5.5` *(lean COO intake & steering on Anthropic plan)* |
+| `MOBAi Antigravity Opus` | Antigravity | `P1` | `Opus 5.5` *(default Fresh `P1` Final Review & Acting COO pool on Google AI plan)* |
 | `MOBAi Antigravity Gemini` | Antigravity | `P3` | `Gemini 4 Carbon` *(execution turns via `Gemini 4 Hydrogen`; failover pool within allowed list incl. `GPT-OSS 120B`)* |
 
 ---
