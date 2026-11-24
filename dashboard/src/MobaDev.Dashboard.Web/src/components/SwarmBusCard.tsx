@@ -137,6 +137,18 @@ function formatRelativeUtc(iso: string, nowMs: number): string {
   return `${diffHours}h ago`;
 }
 
+function formatRemainingUtc(iso: string, nowMs: number): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return 'active';
+  const remSec = Math.max(0, Math.floor((ms - nowMs) / 1000));
+  if (remSec < 60) return 'in <1m';
+  const remMin = Math.floor(remSec / 60);
+  if (remMin < 60) return `in ${remMin}m`;
+  const remHours = Math.floor(remMin / 60);
+  const remMinutesRemainder = remMin % 60;
+  return remMinutesRemainder > 0 ? `in ${remHours}h ${remMinutesRemainder}m` : `in ${remHours}h`;
+}
+
 export function SwarmBusCard({ swarmBus, nowMs }: SwarmBusCardProps) {
   const styles = useStyles();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -146,7 +158,7 @@ export function SwarmBusCard({ swarmBus, nowMs }: SwarmBusCardProps) {
   }
 
   const unreadTotal = swarmBus.unreadCount;
-  const ackedTotal = swarmBus.recentMessages.filter((m) => m.status === 'acked').length;
+  const confirmedTotal = swarmBus.recentMessages.filter((m) => m.status === 'acked').length;
   const filteredMessages = swarmBus.recentMessages.filter((m) => {
     if (statusFilter === 'unread') return m.status === 'unread';
     if (statusFilter === 'acked') return m.status === 'acked';
@@ -190,7 +202,7 @@ export function SwarmBusCard({ swarmBus, nowMs }: SwarmBusCardProps) {
                 <strong>{lock.agent}</strong>
                 <span>{lock.pathPattern}</span>
                 {lock.prNumber ? <span>PR #{lock.prNumber}</span> : null}
-                <span>(exp {formatRelativeUtc(lock.expiresAtUtc, nowMs) || 'active'})</span>
+                <span>(exp {formatRemainingUtc(lock.expiresAtUtc, nowMs)})</span>
               </span>
             ))
           )}
@@ -217,7 +229,7 @@ export function SwarmBusCard({ swarmBus, nowMs }: SwarmBusCardProps) {
               appearance={statusFilter === 'acked' ? 'primary' : 'subtle'}
               onClick={() => setStatusFilter('acked')}
             >
-              Acked ({ackedTotal})
+              Confirmed ({confirmedTotal})
             </Button>
           </div>
           <Text className={styles.empty}>
@@ -262,7 +274,7 @@ export function SwarmBusCard({ swarmBus, nowMs }: SwarmBusCardProps) {
                       appearance="tint"
                       color={msg.status === 'unread' ? 'warning' : 'success'}
                     >
-                      {msg.status}
+                      {msg.status === 'acked' ? 'confirmed' : msg.status}
                     </Badge>
                     <span>{formatRelativeUtc(msg.createdAtUtc, nowMs)}</span>
                   </span>

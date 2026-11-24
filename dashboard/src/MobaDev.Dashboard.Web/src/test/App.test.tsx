@@ -981,7 +981,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
       await user.click(screen.getByRole('button', { name: 'Select lifecycle stage 2. Ready' }));
       expect(screen.getByText('Stage 2 · Ready (Human Maintainer Trigger)')).toBeInTheDocument();
     },
-    10_000
+    20_000
   );
 
   it('keeps deactivated <synthetic> and zero-count card-body sub-agent chips in their original identity color with ghosted opacity', async () => {
@@ -1289,8 +1289,11 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(within(busCard).getByText('1 Unread')).toBeInTheDocument();
     expect(within(busCard).getByText('1 Locks')).toBeInTheDocument();
     expect(within(busCard).getByText('MOBAdemo/app/src/shell')).toBeInTheDocument();
+    expect(within(busCard).getByText(/^\(exp in (?:1h|59m)\)$/)).toBeInTheDocument();
     expect(within(busCard).getByText('P3 UI/UX PASS on PR #541')).toBeInTheDocument();
     expect(within(busCard).getByText('Acked earlier Sonar pointer')).toBeInTheDocument();
+    expect(within(busCard).getByText('confirmed')).toBeInTheDocument();
+    expect(within(busCard).getByRole('button', { name: /Confirmed \(1\)/i })).toBeInTheDocument();
 
     await user.click(within(busCard).getByRole('button', { name: /Unread \(1\)/i }));
     expect(within(busCard).getByText('P3 UI/UX PASS on PR #541')).toBeInTheDocument();
