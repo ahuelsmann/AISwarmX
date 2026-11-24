@@ -402,8 +402,8 @@ const CARD_SUBAGENT_LABELS: Record<string, string> = {
   'Claude Opus 5.5': 'Opus 5.5',
   'Claude Sonnet 5.5': 'Sonnet 5.5',
   'GPT-6.2-sol': 'GPT-6.2 Sol',
-  'Gemini 4 Carbon': 'Gemini 4 Carbon',
-  'Gemini 4 Hydrogen': 'Gemini 4 Hydrogen',
+  'Gemini 4 Carbon': 'Carbon',
+  'Gemini 4 Hydrogen': 'Hydrogen',
   'GPT-OSS 120B': 'GPT-OSS 120B'
 };
 
@@ -422,8 +422,8 @@ function resolveCardSubAgentChips(monitor: MonitorInfo): SubAgentChipDescriptor[
       break;
     default:
       basePool = [
-        { key: 'Gemini 4 Carbon', label: 'Gemini 4 Carbon', profile: 'P3' },
-        { key: 'Gemini 4 Hydrogen', label: 'Gemini 4 Hydrogen', profile: 'P4' },
+        { key: 'Gemini 4 Carbon', label: 'Carbon', profile: 'P3' },
+        { key: 'Gemini 4 Hydrogen', label: 'Hydrogen', profile: 'P4' },
         { key: 'GPT-OSS 120B', label: 'GPT-OSS 120B', profile: 'P2' }
       ];
       break;
@@ -851,7 +851,7 @@ export function MonitorCards({
                                   color: chipStyles.fg,
                                   opacity: chip.count > 0 ? 1 : 0.48
                                 }}
-                                title={`${chip.label} (${chip.profile}): ${chip.count} live/recent sub-agent(s)`}
+                                title={`${chip.key} (${chip.profile}): ${chip.count} live/recent sub-agent(s)`}
                               >
                                 <span
                                   className={styles.subAgentDot}

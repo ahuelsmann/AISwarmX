@@ -5,6 +5,14 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.9.4] - 2026-11-24
+
+### Changed
+- **Single-Line Sub-Agent Chip Labels (`MonitorCards.tsx`):** Shortened `Gemini 4 Carbon` and `Gemini 4 Hydrogen` chip labels to `Carbon` and `Hydrogen` (retaining full names in tooltips and identity tones) so all three chips (`Carbon: 0`, `Hydrogen: 0`, `GPT-OSS 120B: 0`) fit cleanly on a single line inside `MOBAi Antigravity Gemini`.
+- **Streamlined Issue Card Header (`PipelineCard.tsx`):** Combined `Area`, `IssueType`, inline `Locked Areas` pills, optional `Writer` pill (omitted when Round Table participants already exist), and right-aligned relative `Updated` timestamp into a single compact metadata row (reducing the header from 4 rows to 2 rows), while normalizing legacy `Kanban` `Gemini 4 Argon` entries to `Gemini 4 Carbon`.
+
+---
+
 ## [3.9.3] - 2026-11-24
 
 ### Changed
