@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.11.3] - 2026-11-24
+
+### Fixed & Changed
+- **Swarm Bus `Confirmed` Label & Lock Expiry Countdown (`SwarmBusCard.tsx`, `App.test.tsx`):** Replaced `Acked` / `acked` with clearer **`Confirmed`** / **`confirmed`** status wording in the **Communication** tab, and added `formatRemainingUtc` so future cross-tool lock expiries render as remaining time (e.g. `(exp in 1h 59m)`) instead of `(exp 0s ago)`.
+
+---
+
 ## [3.11.2] - 2026-11-24
 
 ### Added & Changed
