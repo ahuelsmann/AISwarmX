@@ -43,14 +43,34 @@ function Test-DashboardHealth {
     }
 }
 
+function Ensure-DashboardBuilt {
+    if ($RebuildFrontend -or -not (Test-Path $WebDistIndex)) {
+        Write-Host 'Baue React-Frontend für Produktion...' -ForegroundColor Cyan
+        if (-not (Test-Path (Join-Path $WebRoot 'node_modules'))) {
+            npm --prefix $WebRoot install
+            if ($LASTEXITCODE -ne 0) { throw 'npm install fehlgeschlagen.' }
+        }
+
+        npm --prefix $WebRoot run build
+        if ($LASTEXITCODE -ne 0) { throw 'Frontend-Build fehlgeschlagen.' }
+    }
+
+    if (-not (Test-Path $ApiExe)) {
+        Write-Host 'Baue MOBAdev Dashboard API (Release)...' -ForegroundColor Cyan
+        dotnet build $ApiProject --configuration Release --nologo
+        if ($LASTEXITCODE -ne 0) { throw 'dotnet build fehlgeschlagen.' }
+    }
+}
+
 if ($RegisterAutoStart) {
-    $argList = "-NoProfile -WindowStyle Hidden -File `"$ScriptPath`" -Background -Port $Port"
-    $action = New-ScheduledTaskAction -Execute 'pwsh.exe' -Argument $argList -WorkingDirectory $DashboardRoot
+    Ensure-DashboardBuilt
+    $action = New-ScheduledTaskAction -Execute $ApiExe -Argument "--urls=$BindUrl" -WorkingDirectory $ApiDir
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
     $settings = New-ScheduledTaskSettingsSet `
         -AllowStartIfOnBatteries `
         -DontStopIfGoingOnBatteries `
         -StartWhenAvailable `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) `
         -RestartCount 3 `
         -RestartInterval (New-TimeSpan -Minutes 1)
     Register-ScheduledTask `
@@ -109,24 +129,38 @@ if ($Background) {
         exit 0
     }
 
-    if ($RebuildFrontend -or -not (Test-Path $WebDistIndex)) {
-        Write-Host 'Baue React-Frontend für Produktion...' -ForegroundColor Cyan
-        if (-not (Test-Path (Join-Path $WebRoot 'node_modules'))) {
-            npm --prefix $WebRoot install
-            if ($LASTEXITCODE -ne 0) { throw 'npm install fehlgeschlagen.' }
+    Ensure-DashboardBuilt
+
+    $launchedVia = 'Start-Process'
+    $task = if ($Port -eq 5179) {
+        Get-ScheduledTask -TaskName $AutoStartTaskName -ErrorAction SilentlyContinue
+    } else {
+        $null
+    }
+
+    if ($null -ne $task) {
+        Start-ScheduledTask -TaskName $AutoStartTaskName
+        $launchedVia = "ScheduledTask:$AutoStartTaskName"
+    }
+    else {
+        try {
+            $cimResult = Invoke-CimMethod `
+                -ClassName Win32_Process `
+                -MethodName Create `
+                -Arguments @{ CommandLine = "`"$ApiExe`" --urls=$BindUrl"; CurrentDirectory = $ApiDir } `
+                -ErrorAction Stop
+            if ($cimResult.ReturnValue -eq 0) {
+                $launchedVia = "Win32_Process(PID=$($cimResult.ProcessId))"
+            }
+            else {
+                Start-Process -FilePath $ApiExe -ArgumentList "--urls=$BindUrl" -WorkingDirectory $ApiDir -WindowStyle Hidden | Out-Null
+            }
         }
-
-        npm --prefix $WebRoot run build
-        if ($LASTEXITCODE -ne 0) { throw 'Frontend-Build fehlgeschlagen.' }
+        catch {
+            Start-Process -FilePath $ApiExe -ArgumentList "--urls=$BindUrl" -WorkingDirectory $ApiDir -WindowStyle Hidden | Out-Null
+        }
     }
 
-    if (-not (Test-Path $ApiExe)) {
-        Write-Host 'Baue MOBAdev Dashboard API (Release)...' -ForegroundColor Cyan
-        dotnet build $ApiProject --configuration Release --nologo
-        if ($LASTEXITCODE -ne 0) { throw 'dotnet build fehlgeschlagen.' }
-    }
-
-    $proc = Start-Process -FilePath $ApiExe -WorkingDirectory $ApiDir -WindowStyle Hidden -PassThru
     $healthy = $false
     for ($i = 0; $i -lt 30; $i++) {
         if (Test-DashboardHealth -ProbeUrl $healthUrl) {
@@ -137,10 +171,10 @@ if ($Background) {
     }
 
     if (-not $healthy) {
-        throw "MOBAdev Dashboard did not become healthy at $healthUrl within 15s (PID $($proc.Id))."
+        throw "MOBAdev Dashboard did not become healthy at $healthUrl within 15s (via $launchedVia)."
     }
 
-    Write-Host "MOBAdev Dashboard started detached (PID $($proc.Id)) at $BindUrl" -ForegroundColor Green
+    Write-Host "MOBAdev Dashboard started detached ($launchedVia) at $BindUrl" -ForegroundColor Green
     if ($OpenBrowser) {
         Start-Process $BindUrl
     }

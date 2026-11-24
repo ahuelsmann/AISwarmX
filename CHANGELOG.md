@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.9.10] - 2026-11-24
+
+### Fixed
+- **Job-Object-Independent Detached Dashboard Auto-Start (`dashboard/Start-Dashboard.ps1`):** Configured `MOBAdev-Dashboard-AutoStart` to invoke `MobaDev.Dashboard.Api.exe` directly with unlimited execution time (`ExecutionTimeLimit = 0`), and updated `-Background` to launch via `Start-ScheduledTask` (with `Win32_Process.Create` fallback) so `:5179` survives Windows Job Object closes when agent shells exit as well as Antigravity server restarts.
+
+---
+
 ## [3.9.9] - 2026-11-24
 
 ### Added
