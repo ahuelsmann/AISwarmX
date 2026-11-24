@@ -36,9 +36,10 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
         subAgentsByModel: [
           { model: 'GPT-6.2-sol', profile: 'P2', count: 1 },
           { model: 'Claude Opus 5.5', profile: 'P1', count: 0 },
-          { model: 'Gemini 4 Argon', profile: 'P3', count: 0 },
+          { model: 'Gemini 4 Carbon', profile: 'P3', count: 0 },
           { model: 'Gemini 4 Hydrogen', profile: 'P4', count: 1 },
-          { model: 'Claude Sonnet 5.5', profile: 'P4', count: 0 }
+          { model: 'Claude Sonnet 5.5', profile: 'P4', count: 0 },
+          { model: 'GPT-OSS 120B', profile: 'P2', count: 0 }
         ]
       },
       monitors: [
@@ -603,19 +604,31 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('Read-Only · 127.0.0.1')).toBeInTheDocument();
 
-    const activeAgentsStrip = screen.getByRole('region', {
-      name: 'Live Active Agents and Sub-Agents Summary'
-    });
-    expect(within(activeAgentsStrip).getByText('3 Busy / Recent')).toBeInTheDocument();
-    expect(within(activeAgentsStrip).getByText(/Standing Monitors: 4\/4 online/)).toBeInTheDocument();
-    expect(within(activeAgentsStrip).getByText('Sub-Agents (Live/Recent): 2')).toBeInTheDocument();
-    expect(within(activeAgentsStrip).getByText(/Pipeline Seats \(GitHub\):/)).toBeInTheDocument();
-    expect(within(activeAgentsStrip).getByText('GPT-6.2-sol:')).toBeInTheDocument();
-    expect(within(activeAgentsStrip).getByText('Claude Opus 5.5:')).toBeInTheDocument();
-    expect(within(activeAgentsStrip).getByText('Gemini 4 Argon:')).toBeInTheDocument();
-    expect(within(activeAgentsStrip).getByText('Gemini 4 Hydrogen:')).toBeInTheDocument();
-    expect(within(activeAgentsStrip).getByText('Claude Sonnet 5.5:')).toBeInTheDocument();
-    expect(within(activeAgentsStrip).queryByText('Antigravity:')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: 'Live Active Agents and Sub-Agents Summary' })
+    ).not.toBeInTheDocument();
+
+    const monitorSectionPreview = screen.getByRole('region', { name: 'Live Monitor Status' });
+    const triadBar = within(monitorSectionPreview).getByLabelText(
+      'Decision and Steering Triad selection panel'
+    );
+    expect(within(triadBar).getByText('3 Busy / Recent')).toBeInTheDocument();
+
+    const codexSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for MOBAi ChatGPT Codex');
+    expect(within(codexSubs).getByText('GPT-6.2 Sol:')).toBeInTheDocument();
+
+    const claudeSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for MOBAi Claude Opus');
+    expect(within(claudeSubs).getByText('Opus 5.5:')).toBeInTheDocument();
+    expect(within(claudeSubs).getByText('Sonnet 5.5:')).toBeInTheDocument();
+
+    const geminiSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for MOBAi Antigravity Gemini');
+    expect(within(geminiSubs).getByText('Gemini 4 Carbon:')).toBeInTheDocument();
+    expect(within(geminiSubs).getByText('Gemini 4 Hydrogen:')).toBeInTheDocument();
+    expect(within(geminiSubs).getByText('GPT-OSS 120B:')).toBeInTheDocument();
+
+    const opusSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for MOBAi Antigravity Opus');
+    expect(within(opusSubs).getByText('Opus 5.5:')).toBeInTheDocument();
+    expect(within(opusSubs).getByText('Sonnet 5.5:')).toBeInTheDocument();
 
     // Interactive Color & Symbol Legend popover mounts cleanly on demand without polluting DOM
     expect(screen.queryByRole('region', { name: 'Color and symbol legend' })).not.toBeInTheDocument();
@@ -939,7 +952,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     10_000
   );
 
-  it('keeps deactivated <synthetic> and Sub-agents: 0 badges in their original identity color with ghosted opacity', async () => {
+  it('keeps deactivated <synthetic> and zero-count card-body sub-agent chips in their original identity color with ghosted opacity', async () => {
     const snap = createSnapshotFixture();
     snap.monitors.monitors[0].model = '<synthetic>';
     snap.monitors.monitors[0].state = 'rate_limited';
@@ -950,9 +963,10 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
 
     const monitorSection = screen.getByRole('region', { name: 'Live Monitor Status' });
-    const subAgentsZero = within(monitorSection).getAllByText('Sub-agents: 0')[0];
-    expect(subAgentsZero.style.opacity).toBe('0.48');
-    expect(subAgentsZero.style.color).not.toBe('');
+    const claudeSubs = within(monitorSection).getByLabelText('Sub-agents for MOBAi Claude Opus');
+    const zeroChip = within(claudeSubs).getByText('Opus 5.5:').parentElement as HTMLElement;
+    expect(zeroChip.style.opacity).toBe('0.48');
+    expect(zeroChip.style.color).not.toBe('');
 
     const syntheticText = within(monitorSection).getByText('<synthetic>');
     const syntheticBadge = syntheticText.parentElement as HTMLElement;
@@ -975,26 +989,39 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(scrollToSpy).toHaveBeenCalledWith(expect.objectContaining({ top: 0 }));
   });
 
-  it('aggregates live/recent sub-agents by model with ghosted zero-count identity chips when summary omits subAgentsByModel', async () => {
+  it('renders per-card body sub-agent counts by model with ghosted zero-count identity chips when summary is omitted', async () => {
     const snap = createSnapshotFixture();
     snap.monitors.summary = null;
     snap.monitors.monitors[1].activeSubAgentsByModel = { 'gpt-6.2-sol': 1 };
-    snap.monitors.monitors[2].activeSubAgentsByModel = { 'gemini-4-hydrogen-xhigh': 2 };
+    snap.monitors.monitors[2].activeSubAgentsByModel = {
+      'gemini-4-hydrogen-xhigh': 2,
+      'gpt-oss-120b': 1
+    };
     snap.monitors.monitors[3].activeSubAgentsByModel = { 'claude-opus-5-5-medium': 1 };
     stubDashboardFetch(snap);
 
     render(<App />);
     await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
 
-    const strip = screen.getByRole('region', { name: 'Live Active Agents and Sub-Agents Summary' });
-    const perModelGroup = within(strip).getByLabelText('Live or recent sub-agents per model');
-    expect(within(perModelGroup).getByText('GPT-6.2-sol:').parentElement?.style.opacity).toBe('1');
-    expect(within(perModelGroup).getByText('Claude Opus 5.5:').parentElement?.style.opacity).toBe('1');
-    expect(within(perModelGroup).getByText('Gemini 4 Hydrogen:').parentElement?.style.opacity).toBe('1');
-    expect(within(perModelGroup).getByText('Gemini 4 Hydrogen:').parentElement).toHaveTextContent('2');
-    const argonChip = within(perModelGroup).getByText('Gemini 4 Argon:').parentElement as HTMLElement;
-    expect(argonChip.style.opacity).toBe('0.48');
-    expect(argonChip.style.color).not.toBe('');
+    const monitorSection = screen.getByRole('region', { name: 'Live Monitor Status' });
+    const codexSubs = within(monitorSection).getByLabelText('Sub-agents for MOBAi ChatGPT Codex');
+    expect(within(codexSubs).getByText('GPT-6.2 Sol:').parentElement?.style.opacity).toBe('1');
+
+    const geminiSubs = within(monitorSection).getByLabelText(
+      'Sub-agents for MOBAi Antigravity Gemini'
+    );
+    const hydrogenChip = within(geminiSubs).getByText('Gemini 4 Hydrogen:').parentElement as HTMLElement;
+    expect(hydrogenChip.style.opacity).toBe('1');
+    expect(hydrogenChip).toHaveTextContent('2');
+    expect(within(geminiSubs).getByText('GPT-OSS 120B:').parentElement?.style.opacity).toBe('1');
+
+    const carbonChip = within(geminiSubs).getByText('Gemini 4 Carbon:').parentElement as HTMLElement;
+    expect(carbonChip.style.opacity).toBe('0.48');
+    expect(carbonChip.style.color).not.toBe('');
+
+    const opusSubs = within(monitorSection).getByLabelText('Sub-agents for MOBAi Antigravity Opus');
+    expect(within(opusSubs).getByText('Opus 5.5:').parentElement?.style.opacity).toBe('1');
+    expect(within(opusSubs).getByText('Sonnet 5.5:').parentElement?.style.opacity).toBe('0.48');
   });
 
   it('renders a 2x3 monitor grid (6 slots), persists free arrangement in cookie, and restores it on reload', async () => {

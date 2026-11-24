@@ -13,6 +13,7 @@ import {
 import {
   ArrowRight16Regular,
   ArrowSwap16Regular,
+  Bot16Regular,
   CheckmarkCircle16Regular,
   Clock16Regular,
   PeopleTeam16Regular,
@@ -27,13 +28,20 @@ import {
   formatRelativeTimeEn
 } from '../api/dashboardClient';
 import { getIdentityStyles, getToneStyles } from '../theme/mobaFluentTheme';
-import type { GovernanceResponse, MonitorInfo, PullRequestInfo } from '../types/dashboard';
+import type {
+  ActiveAgentsSummary,
+  GovernanceResponse,
+  MonitorInfo,
+  PullRequestInfo
+} from '../types/dashboard';
+import { normalizeSubAgentModel } from './ActiveAgentsStrip';
 import { GlossaryTooltip } from './GlossaryTooltip';
 import {
   IconGlyphBox,
   ModelBadge,
   ProfileBadge,
   RoleBadge,
+  resolveModelVisual,
   resolveProfileTone,
   resolveToolTone
 } from './RoleAndModelIcons';
@@ -186,6 +194,35 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: '6px',
     flexWrap: 'wrap'
+  },
+  subAgentsRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    flexWrap: 'wrap',
+    paddingTop: '2px'
+  },
+  subAgentsLabel: {
+    fontSize: tokens.fontSizeBase100,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
+    letterSpacing: '0.03em'
+  },
+  subAgentChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '5px',
+    padding: '2px 7px',
+    borderRadius: tokens.borderRadiusMedium,
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: '16px'
+  },
+  subAgentDot: {
+    width: '6px',
+    height: '6px',
+    borderRadius: '999px',
+    flexShrink: 0
   },
   footerRow: {
     display: 'flex',
@@ -354,8 +391,95 @@ function resolveMonitorMandate(monitor: MonitorInfo): string {
   return monitor.role;
 }
 
+interface SubAgentChipDescriptor {
+  key: string;
+  label: string;
+  profile: string;
+  count: number;
+}
+
+const CARD_SUBAGENT_LABELS: Record<string, string> = {
+  'Claude Opus 5.5': 'Opus 5.5',
+  'Claude Sonnet 5.5': 'Sonnet 5.5',
+  'GPT-6.2-sol': 'GPT-6.2 Sol',
+  'Gemini 4 Carbon': 'Gemini 4 Carbon',
+  'Gemini 4 Hydrogen': 'Gemini 4 Hydrogen',
+  'GPT-OSS 120B': 'GPT-OSS 120B'
+};
+
+function resolveCardSubAgentChips(monitor: MonitorInfo): SubAgentChipDescriptor[] {
+  let basePool: ReadonlyArray<{ key: string; label: string; profile: string }>;
+  switch (monitor.id) {
+    case 'codex-monitor':
+      basePool = [{ key: 'GPT-6.2-sol', label: 'GPT-6.2 Sol', profile: 'P2' }];
+      break;
+    case 'claude-monitor':
+    case 'antigravity-opus-head':
+      basePool = [
+        { key: 'Claude Opus 5.5', label: 'Opus 5.5', profile: 'P1' },
+        { key: 'Claude Sonnet 5.5', label: 'Sonnet 5.5', profile: 'P4' }
+      ];
+      break;
+    default:
+      basePool = [
+        { key: 'Gemini 4 Carbon', label: 'Gemini 4 Carbon', profile: 'P3' },
+        { key: 'Gemini 4 Hydrogen', label: 'Gemini 4 Hydrogen', profile: 'P4' },
+        { key: 'GPT-OSS 120B', label: 'GPT-OSS 120B', profile: 'P2' }
+      ];
+      break;
+  }
+
+  const counts = new Map<string, number>();
+  const profiles = new Map<string, string>();
+  for (const entry of basePool) {
+    counts.set(entry.key, 0);
+    profiles.set(entry.key, entry.profile);
+  }
+
+  let hasMappedEntries = false;
+  if (monitor.activeSubAgentsByModel) {
+    for (const [rawKey, rawCount] of Object.entries(monitor.activeSubAgentsByModel)) {
+      if (!rawCount || rawCount <= 0) {
+        continue;
+      }
+      hasMappedEntries = true;
+      const norm = normalizeSubAgentModel(rawKey, basePool[0].key);
+      counts.set(norm.model, (counts.get(norm.model) ?? 0) + rawCount);
+      if (!profiles.has(norm.model)) {
+        profiles.set(norm.model, norm.profile);
+      }
+    }
+  }
+
+  if (!hasMappedEntries && (monitor.activeSubAgentCount ?? 0) > 0) {
+    counts.set(basePool[0].key, monitor.activeSubAgentCount ?? 0);
+  }
+
+  const chips: SubAgentChipDescriptor[] = basePool.map((entry) => ({
+    key: entry.key,
+    label: entry.label,
+    profile: entry.profile,
+    count: counts.get(entry.key) ?? 0
+  }));
+
+  for (const [modelKey, count] of counts.entries()) {
+    if (count <= 0 || basePool.some((entry) => entry.key === modelKey)) {
+      continue;
+    }
+    chips.push({
+      key: modelKey,
+      label: CARD_SUBAGENT_LABELS[modelKey] ?? modelKey,
+      profile: profiles.get(modelKey) ?? 'P3',
+      count
+    });
+  }
+
+  return chips;
+}
+
 interface MonitorCardsProps {
   monitors: MonitorInfo[];
+  monitorsSummary?: ActiveAgentsSummary | null;
   nowMs: number;
   isDark: boolean;
   governance?: GovernanceResponse;
@@ -365,6 +489,7 @@ interface MonitorCardsProps {
 
 export function MonitorCards({
   monitors,
+  monitorsSummary,
   nowMs,
   isDark,
   governance,
@@ -388,6 +513,10 @@ export function MonitorCards({
   const totalSeats = monitors.length > 0 ? monitors.length : 4;
   const readyCount = monitors.filter((m) => m.state === 'busy' || m.state === 'standby').length;
   const rateLimitedCount = monitors.filter((m) => m.state === 'rate_limited').length;
+  const busyMonitorsCount = monitors.filter((m) => m.state === 'busy').length;
+  const totalSubAgentsCount = monitors.reduce((acc, m) => acc + (m.activeSubAgentCount ?? 0), 0);
+  const totalActiveAgents =
+    monitorsSummary?.totalActiveAgents ?? busyMonitorsCount + totalSubAgentsCount;
 
   const codeSliceCount = pullRequests.filter((p) => p.riskClass !== 'L').length;
   const docSliceCount = pullRequests.filter((p) => p.riskClass === 'L').length;
@@ -454,6 +583,22 @@ export function MonitorCards({
           </div>
 
           <div className={styles.triadControls}>
+            <Badge
+              appearance="tint"
+              color={totalActiveAgents > 0 ? 'warning' : 'subtle'}
+              shape="rounded"
+              title="Standing Busy Monitors plus live/recent runtime Sub-Agents"
+              icon={
+                totalActiveAgents > 0 ? (
+                  <span className="pulse-dot" aria-hidden="true" />
+                ) : (
+                  <Bot16Regular aria-hidden="true" />
+                )
+              }
+            >
+              <span className="tabular">{totalActiveAgents} Busy / Recent</span>
+            </Badge>
+
             {readyCount === totalSeats ? (
               <Badge
                 appearance="tint"
@@ -591,6 +736,7 @@ export function MonitorCards({
                   const identityTone =
                     profileTone !== 'neutral' ? profileTone : resolveToolTone(monitor.tool);
                   const identityStyles = getToneStyles(identityTone, isDark);
+                  const subAgentChips = resolveCardSubAgentChips(monitor);
 
                   return (
                     <Card
@@ -681,44 +827,59 @@ export function MonitorCards({
                             <MessageBarBody>{monitor.source.notice}</MessageBarBody>
                           </MessageBar>
                         )}
+
+                        <div
+                          className={styles.subAgentsRow}
+                          aria-label={`Sub-agents for ${monitor.displayName}`}
+                        >
+                          <span className={styles.subAgentsLabel}>Sub-agents</span>
+                          {subAgentChips.map((chip) => {
+                            const modelVisual = resolveModelVisual(chip.key);
+                            const chipTone =
+                              modelVisual.tone !== 'neutral'
+                                ? modelVisual.tone
+                                : resolveProfileTone(chip.profile);
+                            const chipStyles = getToneStyles(chipTone, isDark);
+
+                            return (
+                              <div
+                                key={chip.key}
+                                className={styles.subAgentChip}
+                                style={{
+                                  backgroundColor: chipStyles.bg,
+                                  border: `1px solid ${chipStyles.border}`,
+                                  color: chipStyles.fg,
+                                  opacity: chip.count > 0 ? 1 : 0.48
+                                }}
+                                title={`${chip.label} (${chip.profile}): ${chip.count} live/recent sub-agent(s)`}
+                              >
+                                <span
+                                  className={styles.subAgentDot}
+                                  style={{ backgroundColor: chipStyles.solid }}
+                                  aria-hidden="true"
+                                />
+                                <span>{chip.label}:</span>
+                                <span className="tabular" style={{ fontWeight: 600 }}>
+                                  {chip.count}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
 
                       <div className={styles.footerRow}>
-                        <div
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 6,
-                            flexWrap: 'wrap'
-                          }}
-                        >
-                          <ModelBadge
-                            model={monitor.model}
-                            isDark={isDark}
-                            mono
-                            identityTone={identityTone}
-                            ghosted={
-                              monitor.state === 'rate_limited' ||
-                              monitor.state === 'offline' ||
-                              /^<?synthetic>?$/i.test((monitor.model ?? '').trim())
-                            }
-                          />
-                          <Badge
-                            appearance="tint"
-                            shape="rounded"
-                            size="small"
-                            className="tabular"
-                            style={{
-                              backgroundColor: identityStyles.bg,
-                              border: `1px solid ${identityStyles.border}`,
-                              color: identityStyles.fg,
-                              opacity: (monitor.activeSubAgentCount ?? 0) > 0 ? 1 : 0.48
-                            }}
-                            title="Active or recently updated sub-agents (Antigravity: RUNNING state; Codex: 3m window; Claude: busy sessions + 2m mtime)"
-                          >
-                            Sub-agents: {monitor.activeSubAgentCount ?? 0}
-                          </Badge>
-                        </div>
+                        <ModelBadge
+                          model={monitor.model}
+                          isDark={isDark}
+                          mono
+                          identityTone={identityTone}
+                          ghosted={
+                            monitor.state === 'rate_limited' ||
+                            monitor.state === 'offline' ||
+                            /^<?synthetic>?$/i.test((monitor.model ?? '').trim())
+                          }
+                        />
 
                         <span
                           className={styles.activityWrap}

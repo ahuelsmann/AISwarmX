@@ -5,6 +5,14 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.9.3] - 2026-11-24
+
+### Changed
+- **Variant A Card-Body Sub-Agent Counters & Unified Triad Summary (`MonitorCards.tsx`, `ActiveAgentsStrip.tsx`, `App.tsx`, `DashboardContracts.cs`):** Dissolved the standalone top `<ActiveAgentsStrip />` bar, moved the compact `{N} Busy / Recent` badge into the `Decision & Steering Triad` header row, relocated per-model sub-agent counter chips (`GPT-6.2 Sol`, `Opus 5.5`, `Sonnet 5.5`, `Gemini 4 Carbon`, `Gemini 4 Hydrogen`, `GPT-OSS 120B`) directly inside each Master Session card body tailored to that tool's allowed model pool from `docs/allowed-models.md`, and removed the redundant generic `Sub-agents: N` footer badge.
+- **Exact Antigravity Sub-Agent Parent Attribution & `GPT-OSS 120B` Recognition (`AntigravityMonitorProvider.cs`, `MonitorProvidersTests.cs`):** Inspects `invoke_subagent` `conversationId` references in each Antigravity Root Head's transcript tail so spawned sub-agents credit the exact parent session (`MOBAi Antigravity Gemini` vs. `MOBAi Antigravity Opus`), and recognizes `gpt-oss-120b` (`GPT-OSS 120B`) in both transcript formatting and `SubAgentModelCatalog`.
+
+---
+
 ## [3.9.2] - 2026-11-24
 
 ### Changed

@@ -107,7 +107,14 @@ public sealed partial class AntigravityMonitorProvider
             if (mobaDesktopConversations.Count == 0)
             {
                 var scopedRunning = runningConversationIds.Where(id => !foreignRootIds.Contains(id)).ToList();
-                var (emptyArgonByModel, _) = ClassifyAntigravitySubAgents(paths.AntigravityHomePath, scopedRunning, hasArgonHead: true, hasOpusHead: false);
+                var emptySet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var (emptyArgonByModel, _) = ClassifyAntigravitySubAgents(
+                    paths.AntigravityHomePath,
+                    scopedRunning,
+                    hasArgonHead: true,
+                    hasOpusHead: false,
+                    emptySet,
+                    emptySet);
                 IReadOnlyList<MonitorInfo> empty =
                 [
                     Unavailable(ArgonMonitorId, ArgonDisplayName, ArgonRole, ArgonProfile, now, "ok", $"No {ArgonDisplayName} session found.", scopedRunning.Count, activeSubAgentsByModel: emptyArgonByModel),
@@ -137,12 +144,16 @@ public sealed partial class AntigravityMonitorProvider
                 rootIds.Add(opusSelected.Id);
             }
 
+            var argonSpawnedIds = ExtractSpawnedSubAgentIds(paths.AntigravityHomePath, argonSelected?.Id);
+            var opusSpawnedIds = ExtractSpawnedSubAgentIds(paths.AntigravityHomePath, opusSelected?.Id);
             var subAgentIds = runningConversationIds.Where(id => !rootIds.Contains(id)).ToList();
             var (argonSubAgentsByModel, opusSubAgentsByModel) = ClassifyAntigravitySubAgents(
                 paths.AntigravityHomePath,
                 subAgentIds,
                 hasArgonHead: argonSelected is not null,
-                hasOpusHead: opusSelected is not null);
+                hasOpusHead: opusSelected is not null,
+                argonSpawnedIds,
+                opusSpawnedIds);
             var argonSubAgentCount = argonSubAgentsByModel.Values.Sum();
             var opusSubAgentCount = opusSubAgentsByModel.Values.Sum();
 
@@ -241,7 +252,9 @@ public sealed partial class AntigravityMonitorProvider
         string antigravityHomePath,
         IReadOnlyList<string> subAgentIds,
         bool hasArgonHead,
-        bool hasOpusHead)
+        bool hasOpusHead,
+        IReadOnlySet<string> argonSpawnedIds,
+        IReadOnlySet<string> opusSpawnedIds)
     {
         var argonCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var opusCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -250,7 +263,21 @@ public sealed partial class AntigravityMonitorProvider
         {
             var rawModel = InspectConversationModel(antigravityHomePath, subId, DefaultArgonModel);
             var (canonicalModel, _) = SubAgentModelCatalog.Normalize(rawModel, DefaultArgonModel);
-            var assignToOpus = hasOpusHead && (SubAgentModelCatalog.IsClaudeModel(canonicalModel) || !hasArgonHead);
+
+            bool assignToOpus;
+            if (opusSpawnedIds.Contains(subId) && !argonSpawnedIds.Contains(subId))
+            {
+                assignToOpus = true;
+            }
+            else if (argonSpawnedIds.Contains(subId))
+            {
+                assignToOpus = false;
+            }
+            else
+            {
+                assignToOpus = hasOpusHead && (SubAgentModelCatalog.IsClaudeModel(canonicalModel) || !hasArgonHead);
+            }
+
             var target = assignToOpus ? opusCounts : argonCounts;
             target[canonicalModel] = target.GetValueOrDefault(canonicalModel) + 1;
         }
@@ -300,11 +327,65 @@ public sealed partial class AntigravityMonitorProvider
             ActiveSubAgentsByModel: activeSubAgentsByModel);
     }
 
+    private static HashSet<string> ExtractSpawnedSubAgentIds(string antigravityHomePath, string? rootConversationId)
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var tail = ReadTranscriptTailText(antigravityHomePath, rootConversationId);
+        if (string.IsNullOrEmpty(tail))
+        {
+            return ids;
+        }
+
+        foreach (Match match in SpawnedConversationIdRegex().Matches(tail))
+        {
+            var id = match.Groups["id"].Value;
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                ids.Add(id);
+            }
+        }
+
+        return ids;
+    }
+
     internal static string InspectConversationModel(string antigravityHomePath, string conversationId, string fallbackModel)
+    {
+        var tail = ReadTranscriptTailText(antigravityHomePath, conversationId);
+        if (string.IsNullOrEmpty(tail))
+        {
+            return fallbackModel;
+        }
+
+        string? primaryModel = null;
+        string? lastAnyModel = null;
+        foreach (Match match in ModelFieldRegex().Matches(tail))
+        {
+            var candidate = match.Groups["m"].Value;
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                continue;
+            }
+
+            lastAnyModel = candidate;
+            // Antigravity Orchestrator runs planning turns on the chosen Head model (e.g. Carbon/Argon or Opus)
+            // and inner execution steps on gemini-4-hydrogen-xhigh; prefer the primary Head model.
+            if (!candidate.Contains("hydrogen", StringComparison.OrdinalIgnoreCase))
+            {
+                primaryModel = candidate;
+            }
+        }
+
+        var selectedModel = primaryModel ?? lastAnyModel;
+        return string.IsNullOrWhiteSpace(selectedModel)
+            ? fallbackModel
+            : FormatAntigravityModel(selectedModel, fallbackModel);
+    }
+
+    private static string? ReadTranscriptTailText(string antigravityHomePath, string? conversationId)
     {
         if (string.IsNullOrWhiteSpace(antigravityHomePath) || string.IsNullOrWhiteSpace(conversationId))
         {
-            return fallbackModel;
+            return null;
         }
 
         var transcriptPath = Path.Combine(
@@ -317,7 +398,7 @@ public sealed partial class AntigravityMonitorProvider
 
         if (!File.Exists(transcriptPath) || !PathWhitelistGuard.IsAllowedFilePath(transcriptPath))
         {
-            return fallbackModel;
+            return null;
         }
 
         try
@@ -339,40 +420,23 @@ public sealed partial class AntigravityMonitorProvider
                 totalRead += read;
             }
 
-            var tail = Encoding.UTF8.GetString(buffer, 0, totalRead);
-            string? primaryModel = null;
-            string? lastAnyModel = null;
-            foreach (Match match in ModelFieldRegex().Matches(tail))
-            {
-                var candidate = match.Groups["m"].Value;
-                if (string.IsNullOrWhiteSpace(candidate))
-                {
-                    continue;
-                }
-
-                lastAnyModel = candidate;
-                // Antigravity Orchestrator runs planning turns on the chosen Head model (e.g. Argon or Opus)
-                // and inner execution steps on gemini-4-hydrogen-xhigh; prefer the primary Head model.
-                if (!candidate.Contains("hydrogen", StringComparison.OrdinalIgnoreCase))
-                {
-                    primaryModel = candidate;
-                }
-            }
-
-            var selectedModel = primaryModel ?? lastAnyModel;
-            return string.IsNullOrWhiteSpace(selectedModel)
-                ? fallbackModel
-                : FormatAntigravityModel(selectedModel, fallbackModel);
+            return Encoding.UTF8.GetString(buffer, 0, totalRead);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return fallbackModel;
+            return null;
         }
     }
 
     internal static string FormatAntigravityModel(string rawModel, string fallbackModel)
     {
         var normalized = rawModel.Trim().ToLowerInvariant();
+        if (normalized.Contains("gpt-oss", StringComparison.Ordinal) ||
+            normalized.Contains("120b", StringComparison.Ordinal))
+        {
+            return "GPT-OSS 120B";
+        }
+
         if (normalized.Contains("opus", StringComparison.Ordinal))
         {
             return "Orchestrator · Claude Opus 5.5";
@@ -512,6 +576,9 @@ public sealed partial class AntigravityMonitorProvider
 
     [GeneratedRegex("\"model\"\\s*:\\s*\"(?<m>[^\"]+)\"", RegexOptions.CultureInvariant)]
     private static partial Regex ModelFieldRegex();
+
+    [GeneratedRegex(@"\\?""conversationId\\?""\s*:\s*\\?""(?<id>[A-Za-z0-9\-_]+)\\?""", RegexOptions.CultureInvariant)]
+    private static partial Regex SpawnedConversationIdRegex();
 
     private sealed record AntigravityConversationRecord(
         string Id,

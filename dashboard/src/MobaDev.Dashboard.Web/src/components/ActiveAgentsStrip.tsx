@@ -55,12 +55,16 @@ const useStyles = makeStyles({
 const CANONICAL_SUBAGENT_MODELS: ReadonlyArray<{ model: string; profile: string }> = [
   { model: 'GPT-6.2-sol', profile: 'P2' },
   { model: 'Claude Opus 5.5', profile: 'P1' },
-  { model: 'Gemini 4 Argon', profile: 'P3' },
+  { model: 'Gemini 4 Carbon', profile: 'P3' },
   { model: 'Gemini 4 Hydrogen', profile: 'P4' },
-  { model: 'Claude Sonnet 5.5', profile: 'P4' }
+  { model: 'Claude Sonnet 5.5', profile: 'P4' },
+  { model: 'GPT-OSS 120B', profile: 'P2' }
 ];
 
-function normalizeSubAgentModel(rawModel: string | null | undefined, fallbackModel = 'Gemini 4 Argon'): { model: string; profile: string } {
+export function normalizeSubAgentModel(
+  rawModel: string | null | undefined,
+  fallbackModel = 'Gemini 4 Carbon'
+): { model: string; profile: string } {
   const trimmed = (rawModel ?? '').trim();
   const candidate =
     trimmed === '' ||
@@ -84,11 +88,15 @@ function normalizeSubAgentModel(rawModel: string | null | undefined, fallbackMod
   }
   if (
     lower.includes('argon') ||
+    lower.includes('carbon') ||
     lower.includes('neon') ||
     lower.includes('gemini') ||
     lower.includes('antigravity')
   ) {
-    return { model: 'Gemini 4 Argon', profile: 'P3' };
+    return { model: 'Gemini 4 Carbon', profile: 'P3' };
+  }
+  if (lower.includes('gpt-oss') || lower.includes('120b')) {
+    return { model: 'GPT-OSS 120B', profile: 'P2' };
   }
   if (lower.includes('astra')) {
     return { model: 'GPT-6.2-astra', profile: 'P2' };
@@ -120,7 +128,7 @@ export function deriveSubAgentsByModel(monitorsResponse: MonitorsResponse): SubA
         if (!rawVal || rawVal <= 0) {
           continue;
         }
-        const norm = normalizeSubAgentModel(rawKey, monitor.model ?? 'Gemini 4 Argon');
+        const norm = normalizeSubAgentModel(rawKey, monitor.model ?? 'Gemini 4 Carbon');
         counts.set(norm.model, (counts.get(norm.model) ?? 0) + rawVal);
         if (!profiles.has(norm.model)) {
           profiles.set(norm.model, norm.profile);
@@ -131,7 +139,7 @@ export function deriveSubAgentsByModel(monitorsResponse: MonitorsResponse): SubA
         ? 'GPT-6.2-sol'
         : /claude/i.test(monitor.tool)
           ? 'Claude Opus 5.5'
-          : 'Gemini 4 Argon';
+          : 'Gemini 4 Carbon';
       const norm = normalizeSubAgentModel(monitor.model, fallback);
       counts.set(norm.model, (counts.get(norm.model) ?? 0) + (monitor.activeSubAgentCount ?? 0));
       if (!profiles.has(norm.model)) {

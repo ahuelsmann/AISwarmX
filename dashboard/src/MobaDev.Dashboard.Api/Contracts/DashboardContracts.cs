@@ -52,12 +52,13 @@ public static class SubAgentModelCatalog
     [
         ("GPT-6.2-sol", "P2"),
         ("Claude Opus 5.5", "P1"),
-        ("Gemini 4 Argon", "P3"),
+        ("Gemini 4 Carbon", "P3"),
         ("Gemini 4 Hydrogen", "P4"),
-        ("Claude Sonnet 5.5", "P4")
+        ("Claude Sonnet 5.5", "P4"),
+        ("GPT-OSS 120B", "P2")
     ];
 
-    public static (string Model, string Profile) Normalize(string? rawModel, string fallbackModel = "Gemini 4 Argon")
+    public static (string Model, string Profile) Normalize(string? rawModel, string fallbackModel = "Gemini 4 Carbon")
     {
         var trimmed = rawModel?.Trim() ?? string.Empty;
         var candidate = string.IsNullOrWhiteSpace(trimmed) ||
@@ -94,7 +95,13 @@ public static class SubAgentModelCatalog
             lower.Contains("gemini", StringComparison.Ordinal) ||
             lower.Contains("antigravity", StringComparison.Ordinal))
         {
-            return ("Gemini 4 Argon", "P3");
+            return ("Gemini 4 Carbon", "P3");
+        }
+
+        if (lower.Contains("gpt-oss", StringComparison.Ordinal) ||
+            lower.Contains("120b", StringComparison.Ordinal))
+        {
+            return ("GPT-OSS 120B", "P2");
         }
 
         if (lower.Contains("astra", StringComparison.Ordinal))
@@ -147,7 +154,7 @@ public static class SubAgentModelCatalog
                         continue;
                     }
 
-                    var (normModel, normProfile) = Normalize(kvp.Key, monitor.Model ?? "Gemini 4 Argon");
+                    var (normModel, normProfile) = Normalize(kvp.Key, monitor.Model ?? "Gemini 4 Carbon");
                     counts[normModel] = counts.GetValueOrDefault(normModel) + kvp.Value;
                     profiles.TryAdd(normModel, normProfile);
                 }
@@ -158,7 +165,7 @@ public static class SubAgentModelCatalog
                     ? "GPT-6.2-sol"
                     : monitor.Tool.Contains("Claude", StringComparison.OrdinalIgnoreCase)
                         ? "Claude Opus 5.5"
-                        : "Gemini 4 Argon";
+                        : "Gemini 4 Carbon";
                 var (normModel, normProfile) = Normalize(monitor.Model, fallback);
                 counts[normModel] = counts.GetValueOrDefault(normModel) + monitor.ActiveSubAgentCount;
                 profiles.TryAdd(normModel, normProfile);

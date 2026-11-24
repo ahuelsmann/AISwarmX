@@ -11,7 +11,6 @@ import {
 } from '@fluentui/react-components';
 import { ArrowUp16Regular } from '@fluentui/react-icons';
 import { fetchSnapshot } from './api/dashboardClient';
-import { ActiveAgentsStrip, countPipelineSeats } from './components/ActiveAgentsStrip';
 import { ArchitectureDiagramsView } from './components/ArchitectureDiagramsView';
 import { ConfigDocsView } from './components/ConfigDocsView';
 import { GovernanceMatrixView } from './components/GovernanceMatrixView';
@@ -289,14 +288,9 @@ export function App() {
 
           {snapshot && activeTab === 'live' && (
             <>
-              <ActiveAgentsStrip
-                monitorsResponse={snapshot.monitors}
-                isDark={isDark}
-                pipelineSeatCount={countPipelineSeats(snapshot.pipeline)}
-              />
-
               <MonitorCards
                 monitors={snapshot.monitors.monitors}
+                monitorsSummary={snapshot.monitors.summary}
                 nowMs={nowMs}
                 isDark={isDark}
                 governance={snapshot.governance}
