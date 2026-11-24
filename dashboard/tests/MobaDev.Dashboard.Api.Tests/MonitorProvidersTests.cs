@@ -401,4 +401,58 @@ public sealed class MonitorProvidersTests
         Assert.Equal(0, antigravityHeads[1].ActiveSubAgentCount);
         Assert.Null(antigravityHeads[1].Source.Notice);
     }
+
+    [Fact]
+    public async Task AntigravityMonitorProvider_AttributesSubAgentsByParentTranscriptAndRecognizesGptOss120B()
+    {
+        using var fx = new TempDashboardFixture();
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
+            fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
+
+        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.AntigravityHomePath, "conversation_summaries.db"), """
+            CREATE TABLE conversation_summaries (
+                conversation_id TEXT PRIMARY KEY,
+                title TEXT,
+                status TEXT,
+                last_modified_time TEXT,
+                source TEXT
+            );
+            INSERT INTO conversation_summaries VALUES ('gem-root', 'MOBAi Antigravity Gemini', 'CASCADE_RUN_STATUS_RUNNING', '2026-11-24T16:00:00Z', '');
+            INSERT INTO conversation_summaries VALUES ('opus-root', 'MOBAi Antigravity Opus', 'CASCADE_RUN_STATUS_IDLE', '2026-11-24T15:59:00Z', '');
+            INSERT INTO conversation_summaries VALUES ('sub-opus', 'Sub Opus Worker', 'CASCADE_RUN_STATUS_RUNNING', '2026-11-24T16:01:00Z', 'CORTEX_TRAJECTORY_SOURCE_CLI');
+            INSERT INTO conversation_summaries VALUES ('sub-oss', 'Sub Oss Verifier', 'CASCADE_RUN_STATUS_RUNNING', '2026-11-24T16:01:05Z', 'CORTEX_TRAJECTORY_SOURCE_CLI');
+            """);
+
+        var gemLogs = Path.Combine(fx.AntigravityHomePath, "brain", "gem-root", ".system_generated", "logs");
+        var opusLogs = Path.Combine(fx.AntigravityHomePath, "brain", "opus-root", ".system_generated", "logs");
+        var subOpusLogs = Path.Combine(fx.AntigravityHomePath, "brain", "sub-opus", ".system_generated", "logs");
+        var subOssLogs = Path.Combine(fx.AntigravityHomePath, "brain", "sub-oss", ".system_generated", "logs");
+        Directory.CreateDirectory(gemLogs);
+        Directory.CreateDirectory(opusLogs);
+        Directory.CreateDirectory(subOpusLogs);
+        Directory.CreateDirectory(subOssLogs);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(gemLogs, "transcript.jsonl"),
+            "{\"model\":\"gemini-4-carbon-medium\"}\n" +
+            "{\"tool\":\"invoke_subagent\",\"content\":\"{\\\"conversationId\\\": \\\"sub-opus\\\"}\"}\n" +
+            "{\"tool\":\"invoke_subagent\",\"content\":\"{\\\"conversationId\\\": \\\"sub-oss\\\"}\"}\n");
+        await File.WriteAllTextAsync(Path.Combine(opusLogs, "transcript.jsonl"), "{\"model\":\"claude-opus-5-5-medium\"}\n");
+        await File.WriteAllTextAsync(Path.Combine(subOpusLogs, "transcript.jsonl"), "{\"model\":\"claude-opus-5-5-medium\"}\n");
+        await File.WriteAllTextAsync(Path.Combine(subOssLogs, "transcript.jsonl"), "{\"model\":\"gpt-oss-120b\"}\n");
+
+        var heads = await new AntigravityMonitorProvider().GetMonitorsAsync(paths, CancellationToken.None);
+
+        Assert.Equal(2, heads.Count);
+        Assert.Equal("MOBAi Antigravity Gemini", heads[0].DisplayName);
+        Assert.Equal("Orchestrator · Gemini 4 Carbon", heads[0].Model);
+        Assert.Equal(2, heads[0].ActiveSubAgentCount);
+        Assert.NotNull(heads[0].ActiveSubAgentsByModel);
+        Assert.Equal(1, heads[0].ActiveSubAgentsByModel!["Claude Opus 5.5"]);
+        Assert.Equal(1, heads[0].ActiveSubAgentsByModel!["GPT-OSS 120B"]);
+
+        Assert.Equal("MOBAi Antigravity Opus", heads[1].DisplayName);
+        Assert.Equal(0, heads[1].ActiveSubAgentCount);
+    }
 }
