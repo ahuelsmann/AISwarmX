@@ -378,6 +378,47 @@ function slotsEqual(left: (string | null)[], right: (string | null)[]): boolean 
   );
 }
 
+export function formatQuotaPauseSuffix(monitors: MonitorInfo[]): string {
+  const isReady = (id: string) =>
+    monitors.some((m) => m.id === id && (m.state === 'busy' || m.state === 'standby'));
+
+  const claudeReady = isReady('claude-monitor');
+  const codexReady = isReady('codex-monitor');
+  const geminiReady = isReady('antigravity-monitor');
+  const agOpusReady = isReady('antigravity-opus-head');
+
+  if (claudeReady && codexReady && geminiReady && !agOpusReady) {
+    return '(Claude + Codex + Gemini Active)';
+  }
+
+  if (!claudeReady && codexReady && (geminiReady || agOpusReady)) {
+    if (geminiReady && agOpusReady) {
+      return '(Antigravity + Codex Failover)';
+    }
+
+    return geminiReady
+      ? '(Codex + Gemini Failover)'
+      : '(Antigravity Opus + Codex Failover)';
+  }
+
+  if (claudeReady && !codexReady && geminiReady && agOpusReady) {
+    return '(Claude + Antigravity Active)';
+  }
+
+  const labelById: Record<string, string> = {
+    'claude-monitor': 'Claude',
+    'codex-monitor': 'Codex',
+    'antigravity-monitor': 'Gemini',
+    'antigravity-opus-head': 'Antigravity Opus'
+  };
+
+  const activeNames = monitors
+    .filter((m) => m.state === 'busy' || m.state === 'standby')
+    .map((m) => labelById[m.id] ?? m.displayName);
+
+  return activeNames.length > 0 ? `(${activeNames.join(' + ')} Active)` : '(No Active Quorum)';
+}
+
 function resolveMonitorMandate(monitor: MonitorInfo): string {
   if (monitor.id === 'antigravity-opus-head' || /antigravity opus|opus head/i.test(monitor.displayName)) {
     return 'MOBAi Antigravity Opus (P1 Opus 5.5) · Acting COO & Sub-Agent Swarm Spawner';
@@ -627,7 +668,8 @@ export function MonitorCards({
             ) : rateLimitedCount > 0 ? (
               <Badge appearance="tint" color="warning" shape="rounded" icon={<Timer16Regular />}>
                 <span className="tabular">
-                  Quorum {readyCount} / {totalSeats} · {rateLimitedCount} Quota Pause (Antigravity + Codex Failover)
+                  Quorum {readyCount} / {totalSeats} · {rateLimitedCount} Quota Pause{' '}
+                  {formatQuotaPauseSuffix(monitors)}
                 </span>
               </Badge>
             ) : (

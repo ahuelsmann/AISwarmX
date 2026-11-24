@@ -9,6 +9,7 @@ import {
 import { getIdentityStyles, getStatusStyles } from '../theme/mobaFluentTheme';
 import type { GovernanceResponse, MonitorInfo, PullRequestInfo } from '../types/dashboard';
 import { GlossaryTooltip } from './GlossaryTooltip';
+import { formatQuotaPauseSuffix } from './MonitorCards';
 import { IconGlyphBox, ModelBadge, ProfileBadge, RoleBadge, resolveProfileTone } from './RoleAndModelIcons';
 
 const useStyles = makeStyles({
@@ -195,7 +196,8 @@ export function DecisionTriadCard({
           ) : rateLimitedCount > 0 ? (
             <Badge appearance="tint" color="warning" shape="rounded" icon={<Timer16Regular />}>
               <span className="tabular">
-                Quorum {readyCount} / {totalSeats} · {rateLimitedCount} Quota Pause (Antigravity + Codex Failover)
+                Quorum {readyCount} / {totalSeats} · {rateLimitedCount} Quota Pause{' '}
+                {formatQuotaPauseSuffix(monitors)}
               </span>
             </Badge>
           ) : (
