@@ -5,6 +5,14 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.10.0] - 2026-11-24
+
+### Added
+- **Event-Driven Zero-Token Swarm Watchdog (`scripts/Invoke-SwarmWatchdog.ps1`, `docs/hygiene-and-automation.md`):** Added deduplicated event detection & dispatch (`-DispatchEvents`, `-ResetEventState`, `-IntervalMinutes 10`) persisted locally in `%LOCALAPPDATA%\MOBAdev\watchdog-state.json` (24h retention) and `%LOCALAPPDATA%\MOBAdev\watchdog-alerts.log`, routing `CiOrSonarFailed` and `AllChecksGreenReady` events automatically to `codex.exe queue` for `codex/*` PRs and logging Claude/Antigravity alerts without burning LLM tokens.
+- **3-World Parallel Execution & Plan-Slice Fast-Start (`manifest.md`, `docs/delivery-workflow.md`, `docs/claude-ready-intake-task.md`, `agents/antigravity/rules/mobaflow-agent-network.md`):** Established the **GitHub-as-Mailbox Rule** (no stranded local-chat handoffs), **Pre-Approved Plan-Slice Fast-Start (`Class M`)** (direct Draft PR TDD from approved Spec Kit plans), and **Multi-Tool Parallel Intake** across `Claude`, `Codex`, and `Antigravity` on disjoint paths (keeping `~/.gemini/config/rules/` at `0` drift).
+
+---
+
 ## [3.9.10] - 2026-11-24
 
 ### Fixed
