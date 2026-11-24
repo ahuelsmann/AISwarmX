@@ -1072,8 +1072,8 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
         name: 'MOBAi Antigravity Opus'
       })
     ).toBeInTheDocument();
-    expect(within(monitorSection).getByTestId('monitor-slot-4')).toHaveTextContent(/Empty slot/i);
-    expect(within(monitorSection).getByTestId('monitor-slot-5')).toHaveTextContent(/Empty slot/i);
+    expect(within(monitorSection).getByTestId('monitor-slot-4')).toBeEmptyDOMElement();
+    expect(within(monitorSection).getByTestId('monitor-slot-5')).toBeEmptyDOMElement();
 
     // Move MOBAi Antigravity Opus (slot 3) to empty slot 5 via click-move button
     await user.click(
@@ -1086,7 +1086,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
         name: 'MOBAi Antigravity Opus'
       })
     ).toBeInTheDocument();
-    expect(within(monitorSection).getByTestId('monitor-slot-3')).toHaveTextContent(/Empty slot/i);
+    expect(within(monitorSection).getByTestId('monitor-slot-3')).toBeEmptyDOMElement();
     expect(document.cookie).toContain(`${MONITOR_GRID_COOKIE}=`);
     expect(readMonitorGridCookie()).toEqual([
       'codex-monitor',

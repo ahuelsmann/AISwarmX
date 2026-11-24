@@ -125,6 +125,11 @@ const useStyles = makeStyles({
   slotMoveReady: {
     cursor: 'pointer'
   },
+  slotIdleEmpty: {
+    '@media (max-width: 799px)': {
+      minHeight: '0'
+    }
+  },
   card: {
     flex: '1 1 auto',
     padding: '10px 14px',
@@ -148,13 +153,11 @@ const useStyles = makeStyles({
     padding: '10px 14px',
     borderRadius: tokens.borderRadiusMedium,
     border: `1px dashed ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground1,
-    opacity: 0.72,
+    backgroundColor: 'transparent',
     color: tokens.colorNeutralForeground3,
     textAlign: 'center'
   },
   emptySlotActive: {
-    opacity: 1,
     border: `1px dashed ${tokens.colorBrandStroke1}`,
     color: tokens.colorNeutralForeground1
   },
@@ -693,6 +696,8 @@ export function MonitorCards({
             draggedSlotIndex !== slotIndex;
           const isMoveTarget = movingSlotIndex !== null && movingSlotIndex !== slotIndex;
 
+          const isEmptyIdle = !monitor && !isMoveTarget && draggedSlotIndex === null;
+
           return (
             <div
               key={`slot-${slotIndex}`}
@@ -700,6 +705,7 @@ export function MonitorCards({
               aria-label={`Grid slot ${slotIndex + 1} (Row ${row}, Column ${col})`}
               className={mergeClasses(
                 styles.slotWrapper,
+                isEmptyIdle && styles.slotIdleEmpty,
                 (isDropHovered || movingSlotIndex === slotIndex) && styles.slotDropTarget,
                 isMoveTarget && styles.slotMoveReady
               )}
@@ -905,22 +911,14 @@ export function MonitorCards({
                     </Card>
                   );
                 })()
-              ) : (
+              ) : !isMoveTarget && draggedSlotIndex === null ? null : (
                 <div
                   className={mergeClasses(
                     styles.emptySlot,
                     (isDropHovered || isMoveTarget) && styles.emptySlotActive
                   )}
                 >
-                  <Text size={200} weight="semibold">
-                    Empty slot · Row {row}, Col {col}
-                  </Text>
-                  <Text size={100}>
-                    {isMoveTarget || draggedSlotIndex !== null
-                      ? 'Drop or click to place tile here'
-                      : 'Free 2×3 slot'}
-                  </Text>
-                  {isMoveTarget && (
+                  {isMoveTarget ? (
                     <Button
                       appearance="subtle"
                       size="small"
@@ -934,6 +932,8 @@ export function MonitorCards({
                     >
                       Place here
                     </Button>
+                  ) : (
+                    <Text size={100}>Drop here</Text>
                   )}
                 </div>
               )}
