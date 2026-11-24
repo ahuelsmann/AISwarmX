@@ -266,7 +266,12 @@ public sealed class MonitorProvidersTests
         var summary = MobaDev.Dashboard.Api.Contracts.SubAgentModelCatalog.BuildSummaryList([gpt, claude, .. antigravityHeads]);
         Assert.Contains(summary, x => x.Model == "Gemini 4 Hydrogen" && x.Profile == "P4" && x.Count == 1);
         Assert.Contains(summary, x => x.Model == "GPT-6.2-sol" && x.Profile == "P2" && x.Count == 0);
+        Assert.Contains(summary, x => x.Model == "GPT-6.2-astra" && x.Profile == "P2" && x.Count == 0);
         Assert.Contains(summary, x => x.Model == "Claude Opus 5.5" && x.Profile == "P1" && x.Count == 0);
+        Assert.Contains(summary, x => x.Model == "Claude Haiku 4.5" && x.Profile == "P4" && x.Count == 0);
+        Assert.Equal(("GPT-6.2-astra", "P2"), MobaDev.Dashboard.Api.Contracts.SubAgentModelCatalog.Normalize("gpt-6.2-astra"));
+        Assert.Equal(("Claude Haiku 4.5", "P4"), MobaDev.Dashboard.Api.Contracts.SubAgentModelCatalog.Normalize("claude-haiku-4-5-20251001"));
+        Assert.Equal(8, summary.Count);
     }
 
     [Fact]

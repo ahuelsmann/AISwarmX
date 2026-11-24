@@ -51,10 +51,12 @@ public static class SubAgentModelCatalog
     public static readonly IReadOnlyList<(string Model, string Profile)> CanonicalModels =
     [
         ("GPT-6.2-sol", "P2"),
+        ("GPT-6.2-astra", "P2"),
         ("Claude Opus 5.5", "P1"),
         ("Gemini 4 Carbon", "P3"),
         ("Gemini 4 Hydrogen", "P4"),
         ("Claude Sonnet 5.5", "P4"),
+        ("Claude Haiku 4.5", "P4"),
         ("GPT-OSS 120B", "P2")
     ];
 
@@ -77,6 +79,11 @@ public static class SubAgentModelCatalog
         if (lower.Contains("sonnet", StringComparison.Ordinal) || lower.Contains("fable", StringComparison.Ordinal))
         {
             return ("Claude Sonnet 5.5", "P4");
+        }
+
+        if (lower.Contains("haiku", StringComparison.Ordinal))
+        {
+            return ("Claude Haiku 4.5", "P4");
         }
 
         if (lower.Contains("claude", StringComparison.Ordinal))
@@ -129,7 +136,8 @@ public static class SubAgentModelCatalog
         var lower = model.ToLowerInvariant();
         return lower.Contains("claude", StringComparison.Ordinal) ||
                lower.Contains("opus", StringComparison.Ordinal) ||
-               lower.Contains("sonnet", StringComparison.Ordinal);
+               lower.Contains("sonnet", StringComparison.Ordinal) ||
+               lower.Contains("haiku", StringComparison.Ordinal);
     }
 
     public static IReadOnlyList<SubAgentModelCount> BuildSummaryList(IReadOnlyList<MonitorInfo> monitors)

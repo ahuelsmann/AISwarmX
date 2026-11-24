@@ -40,7 +40,7 @@ export function resolveToolTone(tool: string | null | undefined): AccentTone {
   if (/chatgpt|\bgpt|codex|openai/.test(normalized)) {
     return IDENTITY_TONES.p2;
   }
-  if (/claude|anthropic|opus|sonnet|fable/.test(normalized)) {
+  if (/claude|anthropic|opus|sonnet|haiku|fable/.test(normalized)) {
     return IDENTITY_TONES.p1;
   }
   if (/antigravity|gemini|google/.test(normalized)) {
@@ -59,6 +59,7 @@ export function resolveModelVisual(model: string | null | undefined): ResolvedVi
   // P4 fast delivery: pink + Flash glyph (never gold/amber). Claude Sonnet 5.5 replaces banned Fable 5.2.
   if (
     normalized.includes('sonnet') ||
+    normalized.includes('haiku') ||
     normalized.includes('hydrogen') ||
     normalized.includes('fable')
   ) {
