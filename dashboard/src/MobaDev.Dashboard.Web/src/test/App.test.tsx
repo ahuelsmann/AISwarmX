@@ -1233,7 +1233,8 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(formatQuotaPauseSuffix(dualOpusPaused)).toBe('(Codex + Gemini Failover)');
   });
 
-  it('renders SwarmBusCard messages and active cross-tool path locks on live view', async () => {
+  it('renders Swarm Bus Cross-Tool MCP Feed on dedicated Communication tab with filters and active locks', async () => {
+    const user = userEvent.setup();
     const customPayload = createSnapshotFixture({
       swarmBus: {
         generatedAtUtc: new Date().toISOString(),
@@ -1261,6 +1262,17 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
             prNumber: 541,
             priority: 'high',
             status: 'unread'
+          },
+          {
+            id: 6,
+            createdAtUtc: new Date().toISOString(),
+            sender: 'watchdog',
+            recipient: 'claude-opus',
+            topic: 'sonar-finding',
+            body: 'Acked earlier Sonar pointer',
+            prNumber: 537,
+            priority: 'normal',
+            status: 'acked'
           }
         ]
       }
@@ -1268,11 +1280,21 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     stubDashboardFetch(customPayload);
 
     render(<App />);
+    const commTab = await screen.findByRole('tab', { name: /Communication/i });
+    expect(within(commTab).getAllByText('1').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByLabelText('Swarm Bus Cross-Tool MCP Feed')).not.toBeInTheDocument();
+
+    await user.click(commTab);
     const busCard = await screen.findByLabelText('Swarm Bus Cross-Tool MCP Feed');
     expect(within(busCard).getByText('1 Unread')).toBeInTheDocument();
     expect(within(busCard).getByText('1 Locks')).toBeInTheDocument();
     expect(within(busCard).getByText('MOBAdemo/app/src/shell')).toBeInTheDocument();
     expect(within(busCard).getByText('P3 UI/UX PASS on PR #541')).toBeInTheDocument();
+    expect(within(busCard).getByText('Acked earlier Sonar pointer')).toBeInTheDocument();
+
+    await user.click(within(busCard).getByRole('button', { name: /Unread \(1\)/i }));
+    expect(within(busCard).getByText('P3 UI/UX PASS on PR #541')).toBeInTheDocument();
+    expect(within(busCard).queryByText('Acked earlier Sonar pointer')).not.toBeInTheDocument();
   });
 
   it('degrades gracefully when backend is unreachable', async () => {

@@ -122,6 +122,7 @@ interface StatusHeaderProps {
   activeTab: DashboardTab;
   onTabChange: (tab: DashboardTab) => void;
   driftBadgeCount: number;
+  communicationUnreadCount?: number;
   isDark: boolean;
 }
 
@@ -141,6 +142,7 @@ export function StatusHeader({
   activeTab,
   onTabChange,
   driftBadgeCount,
+  communicationUnreadCount = 0,
   isDark
 }: StatusHeaderProps) {
   const styles = useStyles();
@@ -388,6 +390,14 @@ export function StatusHeader({
             onTabSelect={(_, data) => onTabChange(data.value as DashboardTab)}
           >
             <Tab value="live">Live Operations</Tab>
+            <Tab value="communication">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span>Communication</span>
+                {communicationUnreadCount > 0 && (
+                  <CounterBadge count={communicationUnreadCount} color="informative" size="small" />
+                )}
+              </span>
+            </Tab>
             <Tab value="architecture">Architecture</Tab>
             <Tab value="matrix">
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>

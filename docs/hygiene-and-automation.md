@@ -104,4 +104,5 @@ pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\scripts\Invoke-ClaudeEphemeralW
 Local WAL-mode SQLite MCP stdio server (`%LOCALAPPDATA%\MOBAdev\swarm-bus.db`) plus zero-token `--cli` interface connecting **Claude Code / Desktop**, **ChatGPT Codex**, **Antigravity**, and `Invoke-SwarmWatchdog.ps1`:
 
 - **MCP Tools (`mobai-swarm-bus`):** `bus_send` (with optional `wake: true` -> `codex.exe queue`), `bus_inbox`, `bus_ack` (threaded replies), `bus_locks` (cross-tool prefix-overlap path lock detection & TTL expiry), and `bus_status`.
-- **Dashboard Live Feed:** Exposed read-only at `GET /api/bus` and included in `GET /api/snapshot` + the **Swarm Bus · Cross-Tool MCP** card on `http://127.0.0.1:5179`.
+- **Claude Code Hook (`bus/claude-swarm-bus-hook.mjs`):** Configured on `SessionStart` and `UserPromptSubmit` in `~/.claude/settings.json`; injects unread `claude-opus`/`all` Swarm Bus messages and active foreign path locks cleanly into Claude's turn context (emitting 0 output when nothing is pending).
+- **Dashboard Live Feed (`Communication` Tab):** Exposed read-only at `GET /api/bus` and rendered in the dedicated **Communication** tab (`SwarmBusCard.tsx`, with status filters and unread header counter) on `http://127.0.0.1:5179`.
