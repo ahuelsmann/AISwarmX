@@ -1157,6 +1157,53 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     ).toBeInTheDocument();
   });
 
+  it('renders Dirty · Preserved badge and Copy Safe Prune Cmd action in Hygiene panel', async () => {
+    const user = userEvent.setup();
+    const customPayload = createSnapshotFixture();
+    customPayload.hygiene.staleWorktreeCount = 1;
+    customPayload.hygiene.worktrees = [
+      {
+        folderName: 'artifacts/worktrees/clean-merged',
+        branch: 'codex/clean-merged',
+        headShort: 'a12e6061',
+        isMain: false,
+        status: 'stale',
+        linkedPrNumber: null,
+        isDirty: false
+      },
+      {
+        folderName: 'artifacts/worktrees/issue-398-fluent-design-accents',
+        branch: 'codex/issue-398-fluent-design-accents',
+        headShort: 'b45e9012',
+        isMain: false,
+        status: 'stale',
+        linkedPrNumber: null,
+        isDirty: true
+      },
+      {
+        folderName: 'MOBAflow (main)',
+        branch: 'main',
+        headShort: '72a78bd0',
+        isMain: true,
+        status: 'main',
+        linkedPrNumber: null,
+        isDirty: false
+      }
+    ];
+    stubDashboardFetch(customPayload);
+
+    render(<App />);
+    const worktreesCard = await screen.findByLabelText('Git Worktrees MOBAflow');
+    expect(within(worktreesCard).getByText('1 Stale')).toBeInTheDocument();
+    expect(within(worktreesCard).getByText('Stale / Merged')).toBeInTheDocument();
+    expect(within(worktreesCard).getByText('Dirty · Preserved')).toBeInTheDocument();
+    expect(within(worktreesCard).getByText('codex/issue-398-fluent-design-accents')).toBeInTheDocument();
+
+    const copyBtn = within(worktreesCard).getByRole('button', { name: 'Copy Safe Prune Cmd' });
+    await user.click(copyBtn);
+    expect(within(worktreesCard).getByRole('button', { name: 'Copied!' })).toBeInTheDocument();
+  });
+
   it('degrades gracefully when backend is unreachable', async () => {
     vi.stubGlobal(
       'fetch',

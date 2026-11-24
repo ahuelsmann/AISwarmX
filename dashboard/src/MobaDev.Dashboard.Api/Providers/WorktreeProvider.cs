@@ -45,17 +45,62 @@ public sealed class WorktreeProvider
             .ToDictionary(g => g.Key, g => g.First().Number, StringComparer.OrdinalIgnoreCase);
 
         var parsed = ParsePorcelain(result.StdOut, paths.MobaFlowRepoPath, openPrByBranch);
-        var sorted = parsed
+        var checkedWorktrees = await PopulateDirtyFlagsAsync(parsed, cancellationToken).ConfigureAwait(false);
+        var sorted = checkedWorktrees
             .OrderBy(w => w.Status switch
             {
-                "stale" => 0,
-                "active" => 1,
-                _ => 2
+                "stale" when !w.IsDirty => 0,
+                "stale" => 1,
+                "active" => 2,
+                _ => 3
             })
             .ThenBy(w => w.FolderName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         return (sorted, new SourceHealth("ok", now));
+    }
+
+    private async Task<List<WorktreeInfo>> PopulateDirtyFlagsAsync(
+        IReadOnlyList<ParsedWorktree> parsed,
+        CancellationToken cancellationToken)
+    {
+        using var gate = new SemaphoreSlim(6, 6);
+        var tasks = parsed.Select(async entry =>
+        {
+            if (entry.Info.IsMain || !Directory.Exists(entry.FullPath))
+            {
+                return entry.Info;
+            }
+
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var statusResult = await _commandRunner.RunAsync(
+                    "git",
+                    ["-C", entry.FullPath, "status", "--porcelain"],
+                    workingDirectory: null,
+                    timeout: TimeSpan.FromSeconds(4),
+                    cancellationToken).ConfigureAwait(false);
+
+                var isDirty = statusResult.Succeeded && !string.IsNullOrWhiteSpace(statusResult.StdOut);
+                return entry.Info with { IsDirty = isDirty };
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException)
+            {
+                if (ex is OperationCanceledException)
+                {
+                    throw;
+                }
+
+                return entry.Info;
+            }
+            finally
+            {
+                gate.Release();
+            }
+        });
+
+        return [.. await Task.WhenAll(tasks).ConfigureAwait(false)];
     }
 
     public async Task<(IReadOnlyList<BranchHygieneInfo> Branches, int StaleLocalCount, int StaleRemoteCount)> GetBranchHygieneAsync(
@@ -222,12 +267,12 @@ public sealed class WorktreeProvider
         return ("stale", null);
     }
 
-    private static List<WorktreeInfo> ParsePorcelain(
+    private static List<ParsedWorktree> ParsePorcelain(
         string stdOut,
         string mobaFlowRepoPath,
         IReadOnlyDictionary<string, int> openPrByBranch)
     {
-        var list = new List<WorktreeInfo>();
+        var list = new List<ParsedWorktree>();
         var normalizedRoot = NormalizeSlashes(mobaFlowRepoPath).TrimEnd('/');
 
         string? currentPath = null;
@@ -241,7 +286,8 @@ public sealed class WorktreeProvider
                 return;
             }
 
-            var normalizedPath = NormalizeSlashes(currentPath).TrimEnd('/');
+            var fullPath = currentPath.Trim();
+            var normalizedPath = NormalizeSlashes(fullPath).TrimEnd('/');
             var isMain = string.Equals(normalizedPath, normalizedRoot, StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(currentBranch, "main", StringComparison.OrdinalIgnoreCase);
 
@@ -268,13 +314,15 @@ public sealed class WorktreeProvider
                 status = "stale";
             }
 
-            list.Add(new WorktreeInfo(
+            var info = new WorktreeInfo(
                 FolderName: folderName,
                 Branch: currentBranch,
                 HeadShort: currentHead.Length > 8 ? currentHead[..8] : currentHead,
                 IsMain: isMain,
                 Status: status,
-                LinkedPrNumber: linkedPr));
+                LinkedPrNumber: linkedPr);
+
+            list.Add(new ParsedWorktree(info, fullPath));
 
             currentPath = null;
             currentHead = string.Empty;
@@ -329,4 +377,6 @@ public sealed class WorktreeProvider
     }
 
     private static string NormalizeSlashes(string path) => path.Replace('\\', '/');
+
+    private sealed record ParsedWorktree(WorktreeInfo Info, string FullPath);
 }

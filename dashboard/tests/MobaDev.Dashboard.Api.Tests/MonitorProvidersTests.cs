@@ -460,4 +460,80 @@ public sealed class MonitorProvidersTests
         Assert.Equal("MOBAi Antigravity Opus", heads[1].DisplayName);
         Assert.Equal(0, heads[1].ActiveSubAgentCount);
     }
+
+    [Fact]
+    public async Task AntigravityMonitorProvider_DetectsPartnerQuotaExhaustionFromTranscriptAndConversationDb()
+    {
+        using var fx = new TempDashboardFixture();
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
+            fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
+
+        var nowIso = DateTimeOffset.UtcNow.AddMinutes(-2).ToString("O");
+        var futureResetUtc = DateTimeOffset.UtcNow.AddDays(3);
+        var futureResetIso = futureResetUtc.ToString("O");
+        var expectedLocal = futureResetUtc.ToLocalTime();
+        var expectedResetLabel = expectedLocal.Date == DateTimeOffset.UtcNow.ToLocalTime().Date
+            ? $"{expectedLocal.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)} · quota exhausted"
+            : $"{expectedLocal.ToString("MMM d, HH:mm", System.Globalization.CultureInfo.InvariantCulture)} · quota exhausted";
+
+        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.AntigravityHomePath, "conversation_summaries.db"), $"""
+            CREATE TABLE conversation_summaries (
+                conversation_id TEXT PRIMARY KEY,
+                title TEXT,
+                status TEXT,
+                last_modified_time TEXT,
+                source TEXT
+            );
+            INSERT INTO conversation_summaries VALUES ('gem-root', 'MOBAi Antigravity Gemini', 'CASCADE_RUN_STATUS_RUNNING', '{nowIso}', '');
+            INSERT INTO conversation_summaries VALUES ('opus-root', 'MOBAi Antigravity Opus', 'CASCADE_RUN_STATUS_IDLE', '{nowIso}', '');
+            """);
+
+        var gemLogs = Path.Combine(fx.AntigravityHomePath, "brain", "gem-root", ".system_generated", "logs");
+        var opusLogs = Path.Combine(fx.AntigravityHomePath, "brain", "opus-root", ".system_generated", "logs");
+        Directory.CreateDirectory(gemLogs);
+        Directory.CreateDirectory(opusLogs);
+
+        await File.WriteAllTextAsync(Path.Combine(gemLogs, "transcript.jsonl"), "{\"model\":\"gemini-4-carbon-medium\"}\n");
+        await File.WriteAllTextAsync(Path.Combine(opusLogs, "transcript.jsonl"), "{\"model\":\"claude-opus-5-5-medium\"}\n");
+
+        // Signal 1: escaped swarm models quota JSON in transcript_full.jsonl
+        await File.WriteAllTextAsync(
+            Path.Combine(gemLogs, "transcript_full.jsonl"),
+            "{\"step\":1,\"content\":\"{\\\"claude-opus-5-5-medium\\\":{\\\"quota_remaining\\\":\\\"0%\\\",\\\"quota_resets\\\":\\\"" +
+            futureResetIso +
+            "\\\"},\\\"gemini-4-carbon-medium\\\":{\\\"quota_remaining\\\":\\\"93%\\\",\\\"quota_resets\\\":\\\"" +
+            futureResetIso +
+            "\\\"}}\"}\n");
+
+        var provider = new AntigravityMonitorProvider();
+        var signal1Heads = await provider.GetMonitorsAsync(paths, CancellationToken.None);
+
+        Assert.Equal(2, signal1Heads.Count);
+        Assert.Equal("busy", signal1Heads[0].State);
+        Assert.Null(signal1Heads[0].RateLimitResetLabel);
+        Assert.Equal("rate_limited", signal1Heads[1].State);
+        Assert.Equal(expectedResetLabel, signal1Heads[1].RateLimitResetLabel);
+
+        // Signal 2 fallback: transcript_full.jsonl has no quota_remaining snapshot; conversations/<opusId>.db has HTTP 429 BLOB
+        File.Delete(Path.Combine(gemLogs, "transcript_full.jsonl"));
+        const string secretUserText = "TOP_SECRET_USER_TEXT_MUST_NEVER_LEAK";
+        var convDbPath = Path.Combine(fx.AntigravityHomePath, "conversations", "opus-root.db");
+        TempDashboardFixture.CreateSqliteDb(convDbPath, $"""
+            CREATE TABLE steps (
+                idx INTEGER PRIMARY KEY,
+                step_type INTEGER,
+                step_payload BLOB
+            );
+            INSERT INTO steps VALUES (0, 14, '{secretUserText}');
+            INSERT INTO steps VALUES (1, 15, X'7B7D');
+            INSERT INTO steps VALUES (2, 17, CAST('RESOURCE_EXHAUSTED (code 429) INSUFFICIENT_G1_CREDITS_BALANCE' AS BLOB));
+            """);
+
+        var signal2Heads = await provider.GetMonitorsAsync(paths, CancellationToken.None);
+
+        Assert.Equal("rate_limited", signal2Heads[1].State);
+        Assert.Equal("Quota exhausted (HTTP 429)", signal2Heads[1].RateLimitResetLabel);
+        Assert.DoesNotContain(secretUserText, signal2Heads[1].Source.Notice ?? string.Empty);
+    }
 }

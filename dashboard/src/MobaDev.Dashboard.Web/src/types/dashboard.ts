@@ -245,6 +245,7 @@ export interface WorktreeInfo {
   isMain: boolean;
   status: 'main' | 'active' | 'stale' | string;
   linkedPrNumber?: number | null;
+  isDirty?: boolean;
 }
 
 export interface BranchHygieneInfo {

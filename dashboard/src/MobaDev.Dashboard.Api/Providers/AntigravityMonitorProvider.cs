@@ -162,12 +162,22 @@ public sealed partial class AntigravityMonitorProvider
                 ? $"{mobaDesktopConversations.Count} MOBAi Antigravity sessions found in summaries (target: 2: {ArgonDisplayName} + {OpusDisplayName})."
                 : null;
 
+            var candidateIds = BuildCandidateRootIds(argonSelected?.Id, opusSelected?.Id);
+
             MonitorInfo argonInfo;
             if (argonSelected is not null)
             {
                 var legacyMatched = string.Equals(argonSelected.Title.Trim(), LegacyDisplayName, StringComparison.OrdinalIgnoreCase);
                 var fallbackModel = legacyMatched ? LegacyDesktopModel : DefaultArgonModel;
                 var model = InspectConversationModel(paths.AntigravityHomePath, argonSelected.Id, fallbackModel);
+                var argonLastActivityUtc = ParseLastActivityUtc(argonSelected.LastModifiedRaw);
+                var rateLimitResetLabel = DetectAntigravityRateLimit(
+                    paths.AntigravityHomePath,
+                    argonSelected.Id,
+                    model,
+                    argonLastActivityUtc,
+                    candidateIds,
+                    now);
                 argonInfo = BuildMonitorInfo(
                     ArgonMonitorId,
                     ArgonDisplayName,
@@ -175,6 +185,8 @@ public sealed partial class AntigravityMonitorProvider
                     ArgonProfile,
                     argonSelected,
                     model,
+                    argonLastActivityUtc,
+                    rateLimitResetLabel,
                     activeSessionCount: 1 + extraSessionCount,
                     argonSubAgentCount,
                     argonSubAgentsByModel,
@@ -198,6 +210,14 @@ public sealed partial class AntigravityMonitorProvider
             if (opusSelected is not null)
             {
                 var model = InspectConversationModel(paths.AntigravityHomePath, opusSelected.Id, DefaultOpusModel);
+                var opusLastActivityUtc = ParseLastActivityUtc(opusSelected.LastModifiedRaw);
+                var rateLimitResetLabel = DetectAntigravityRateLimit(
+                    paths.AntigravityHomePath,
+                    opusSelected.Id,
+                    model,
+                    opusLastActivityUtc,
+                    candidateIds,
+                    now);
                 opusInfo = BuildMonitorInfo(
                     OpusMonitorId,
                     OpusDisplayName,
@@ -205,6 +225,8 @@ public sealed partial class AntigravityMonitorProvider
                     OpusProfile,
                     opusSelected,
                     model,
+                    opusLastActivityUtc,
+                    rateLimitResetLabel,
                     activeSessionCount: 1,
                     activeSubAgentCount: opusSubAgentCount,
                     activeSubAgentsByModel: opusSubAgentsByModel,
@@ -292,23 +314,20 @@ public sealed partial class AntigravityMonitorProvider
         string profile,
         AntigravityConversationRecord selected,
         string model,
+        DateTimeOffset? lastActivityUtc,
+        string? rateLimitResetLabel,
         int activeSessionCount,
         int activeSubAgentCount,
         IReadOnlyDictionary<string, int> activeSubAgentsByModel,
         DateTimeOffset now,
         string? notice)
     {
-        DateTimeOffset? lastActivityUtc = DateTimeOffset.TryParse(
-            selected.LastModifiedRaw,
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
-            out var parsedTime)
-            ? parsedTime
-            : null;
-
-        var state = string.Equals(selected.Status, "CASCADE_RUN_STATUS_RUNNING", StringComparison.OrdinalIgnoreCase)
+        var isRunning = string.Equals(selected.Status, "CASCADE_RUN_STATUS_RUNNING", StringComparison.OrdinalIgnoreCase);
+        var state = isRunning
             ? "busy"
-            : "standby";
+            : !string.IsNullOrEmpty(rateLimitResetLabel)
+                ? "rate_limited"
+                : "standby";
 
         return new MonitorInfo(
             Id: id,
@@ -319,12 +338,233 @@ public sealed partial class AntigravityMonitorProvider
             State: state,
             Model: model,
             LastActivityUtc: lastActivityUtc,
-            RateLimitResetLabel: null,
+            RateLimitResetLabel: isRunning ? null : rateLimitResetLabel,
             ActiveSessionCount: activeSessionCount,
             AutomationStatus: null,
             Source: new SourceHealth("ok", now, notice),
             ActiveSubAgentCount: activeSubAgentCount,
             ActiveSubAgentsByModel: activeSubAgentsByModel);
+    }
+
+    private static DateTimeOffset? ParseLastActivityUtc(string? lastModifiedRaw)
+    {
+        return DateTimeOffset.TryParse(
+            lastModifiedRaw,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var parsedTime)
+            ? parsedTime
+            : null;
+    }
+
+    private static IReadOnlyList<string> BuildCandidateRootIds(params string?[] ids)
+    {
+        var list = new List<string>(ids.Length);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var id in ids)
+        {
+            if (!string.IsNullOrWhiteSpace(id) && seen.Add(id))
+            {
+                list.Add(id);
+            }
+        }
+
+        return list;
+    }
+
+    internal static string? DetectAntigravityRateLimit(
+        string antigravityHomePath,
+        string conversationId,
+        string monitorModel,
+        DateTimeOffset? lastActivityUtc,
+        IReadOnlyList<string> transcriptCandidateIds,
+        DateTimeOffset now)
+    {
+        var quotaPrefix = GetModelQuotaKeyPrefix(monitorModel);
+        var hasPositiveQuotaSnapshot = false;
+        DateTimeOffset? positiveSnapshotUtc = null;
+        DateTimeOffset? latestExpiredResetUtc = null;
+
+        if (!string.IsNullOrWhiteSpace(quotaPrefix) && transcriptCandidateIds.Count > 0)
+        {
+            var snapshots = new List<(DateTimeOffset LastWriteUtc, string Text)>();
+            foreach (var candidateId in transcriptCandidateIds)
+            {
+                var (text, lastWriteUtc) = ReadBestTranscriptTailText(antigravityHomePath, candidateId);
+                if (!string.IsNullOrEmpty(text))
+                {
+                    snapshots.Add((lastWriteUtc ?? DateTimeOffset.MinValue, text));
+                }
+            }
+
+            foreach (var (lastWriteUtc, text) in snapshots.OrderByDescending(s => s.LastWriteUtc))
+            {
+                Match? lastMatchingEntry = null;
+                foreach (Match match in AntigravityQuotaEntryRegex().Matches(text))
+                {
+                    var entryModel = match.Groups["model"].Value;
+                    if (entryModel.StartsWith(quotaPrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        lastMatchingEntry = match;
+                    }
+                }
+
+                if (lastMatchingEntry is null)
+                {
+                    continue;
+                }
+
+                var remainingRaw = lastMatchingEntry.Groups["rem"].Value;
+                var resetRaw = lastMatchingEntry.Groups["reset"].Value;
+                if (int.TryParse(remainingRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var remainingPct) &&
+                    remainingPct > 0)
+                {
+                    hasPositiveQuotaSnapshot = true;
+                    positiveSnapshotUtc = lastWriteUtc;
+                    break;
+                }
+
+                if (remainingPct == 0 &&
+                    DateTimeOffset.TryParse(resetRaw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var resetUtc))
+                {
+                    if (resetUtc > now)
+                    {
+                        return FormatAntigravityResetLabel(resetUtc, now);
+                    }
+
+                    latestExpiredResetUtc = resetUtc;
+                }
+
+                break;
+            }
+        }
+
+        var positiveBeatsActivity = hasPositiveQuotaSnapshot &&
+            (!lastActivityUtc.HasValue || !positiveSnapshotUtc.HasValue || lastActivityUtc.Value <= positiveSnapshotUtc.Value);
+        if (positiveBeatsActivity)
+        {
+            return null;
+        }
+
+        if (latestExpiredResetUtc.HasValue &&
+            (!lastActivityUtc.HasValue || lastActivityUtc.Value <= latestExpiredResetUtc.Value))
+        {
+            return null;
+        }
+
+        if (lastActivityUtc.HasValue && (now - lastActivityUtc.Value) > TimeSpan.FromDays(7))
+        {
+            return null;
+        }
+
+        return InspectConversationDbRateLimit(antigravityHomePath, conversationId);
+    }
+
+    private static string? InspectConversationDbRateLimit(string antigravityHomePath, string conversationId)
+    {
+        if (string.IsNullOrWhiteSpace(antigravityHomePath) || string.IsNullOrWhiteSpace(conversationId))
+        {
+            return null;
+        }
+
+        var convDbPath = Path.Combine(antigravityHomePath, "conversations", $"{conversationId}.db");
+        if (!File.Exists(convDbPath) || !PathWhitelistGuard.IsAllowedFilePath(convDbPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var connection = SqliteReadOnlyHelper.OpenReadOnly(convDbPath);
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT step_type, step_payload FROM steps WHERE step_type IN (15, 17) ORDER BY idx DESC LIMIT 1";
+            using var reader = command.ExecuteReader();
+            if (!reader.Read() || reader.IsDBNull(0))
+            {
+                return null;
+            }
+
+            var stepType = Convert.ToInt64(reader.GetValue(0), CultureInfo.InvariantCulture);
+            if (stepType != 17 || reader.IsDBNull(1))
+            {
+                return null;
+            }
+
+            var payloadText = reader.GetValue(1) switch
+            {
+                byte[] bytes => Encoding.UTF8.GetString(bytes),
+                string str => str,
+                _ => string.Empty
+            };
+
+            if (payloadText.Contains("RESOURCE_EXHAUSTED", StringComparison.OrdinalIgnoreCase) ||
+                payloadText.Contains("INSUFFICIENT_G1_CREDITS_BALANCE", StringComparison.OrdinalIgnoreCase) ||
+                payloadText.Contains("credits balance is too low", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Quota exhausted (HTTP 429)";
+            }
+
+            return null;
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static string FormatAntigravityResetLabel(DateTimeOffset resetUtc, DateTimeOffset nowUtc)
+    {
+        var resetLocal = resetUtc.ToLocalTime();
+        var nowLocal = nowUtc.ToLocalTime();
+        return resetLocal.Date == nowLocal.Date
+            ? $"{resetLocal.ToString("HH:mm", CultureInfo.InvariantCulture)} · quota exhausted"
+            : $"{resetLocal.ToString("MMM d, HH:mm", CultureInfo.InvariantCulture)} · quota exhausted";
+    }
+
+    private static string? GetModelQuotaKeyPrefix(string? model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return null;
+        }
+
+        if (model.Contains("Opus", StringComparison.OrdinalIgnoreCase))
+        {
+            return "claude-opus-5-5";
+        }
+
+        if (model.Contains("Sonnet", StringComparison.OrdinalIgnoreCase))
+        {
+            return "claude-sonnet-5-5";
+        }
+
+        if (model.Contains("GPT-OSS", StringComparison.OrdinalIgnoreCase) ||
+            model.Contains("120B", StringComparison.OrdinalIgnoreCase))
+        {
+            return "gpt-oss-120b";
+        }
+
+        if (model.Contains("Carbon", StringComparison.OrdinalIgnoreCase))
+        {
+            return "gemini-4-carbon";
+        }
+
+        if (model.Contains("Argon", StringComparison.OrdinalIgnoreCase))
+        {
+            return "gemini-4-argon";
+        }
+
+        if (model.Contains("Hydrogen", StringComparison.OrdinalIgnoreCase))
+        {
+            return "gemini-4-hydrogen";
+        }
+
+        if (model.Contains("Neon", StringComparison.OrdinalIgnoreCase))
+        {
+            return "gemini-4-neon";
+        }
+
+        return null;
     }
 
     private static HashSet<string> ExtractSpawnedSubAgentIds(string antigravityHomePath, string? rootConversationId)
@@ -396,14 +636,56 @@ public sealed partial class AntigravityMonitorProvider
             "logs",
             "transcript.jsonl");
 
-        if (!File.Exists(transcriptPath) || !PathWhitelistGuard.IsAllowedFilePath(transcriptPath))
+        return ReadFileTailText(transcriptPath);
+    }
+
+    private static (string? Text, DateTimeOffset? LastWriteUtc) ReadBestTranscriptTailText(
+        string antigravityHomePath,
+        string? conversationId)
+    {
+        if (string.IsNullOrWhiteSpace(antigravityHomePath) || string.IsNullOrWhiteSpace(conversationId))
+        {
+            return (null, null);
+        }
+
+        var logsDir = Path.Combine(antigravityHomePath, "brain", conversationId, ".system_generated", "logs");
+        var fullPath = Path.Combine(logsDir, "transcript_full.jsonl");
+        var compactPath = Path.Combine(logsDir, "transcript.jsonl");
+
+        var chosenPath = File.Exists(fullPath) && PathWhitelistGuard.IsAllowedFilePath(fullPath)
+            ? fullPath
+            : File.Exists(compactPath) && PathWhitelistGuard.IsAllowedFilePath(compactPath)
+                ? compactPath
+                : null;
+
+        if (chosenPath is null)
+        {
+            return (null, null);
+        }
+
+        DateTimeOffset? lastWriteUtc = null;
+        try
+        {
+            lastWriteUtc = new DateTimeOffset(File.GetLastWriteTimeUtc(chosenPath), TimeSpan.Zero);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Continue with null timestamp if file metadata is transiently inaccessible.
+        }
+
+        return (ReadFileTailText(chosenPath), lastWriteUtc);
+    }
+
+    private static string? ReadFileTailText(string filePath)
+    {
+        if (!File.Exists(filePath) || !PathWhitelistGuard.IsAllowedFilePath(filePath))
         {
             return null;
         }
 
         try
         {
-            using var stream = new FileStream(transcriptPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             var length = stream.Length;
             var offset = Math.Max(0, length - TailReadBytes);
             stream.Seek(offset, SeekOrigin.Begin);
@@ -579,6 +861,9 @@ public sealed partial class AntigravityMonitorProvider
 
     [GeneratedRegex(@"\\?""conversationId\\?""\s*:\s*\\?""(?<id>[A-Za-z0-9\-_]+)\\?""", RegexOptions.CultureInvariant)]
     private static partial Regex SpawnedConversationIdRegex();
+
+    [GeneratedRegex(@"(?:\\)*""(?<model>[a-z0-9.\-]+)(?:\\)*""\s*:\s*\{\s*(?:\\)*""quota_remaining(?:\\)*""\s*:\s*(?:\\)*""(?<rem>\d+)%(?:\\)*""\s*,\s*(?:\\)*""quota_resets(?:\\)*""\s*:\s*(?:\\)*""(?<reset>[^""\\]+)(?:\\)*""\s*\}", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex AntigravityQuotaEntryRegex();
 
     private sealed record AntigravityConversationRecord(
         string Id,

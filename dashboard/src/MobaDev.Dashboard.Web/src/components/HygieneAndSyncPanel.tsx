@@ -124,6 +124,8 @@ interface HygieneAndSyncPanelProps {
 
 const MAX_COLLAPSED_STALE_WORKTREES = 3;
 const MAX_COLLAPSED_STALE_BRANCHES = 4;
+const SAFE_PRUNE_COMMAND =
+  'pwsh -NoProfile -File C:/Repo/ahuelsmann/MOBAdev/scripts/Invoke-RepoHygiene.ps1';
 const TOOL_DISPLAY_ORDER = ['ChatGPT Codex', 'Claude Code', 'Antigravity'];
 
 function sortSessions<T extends { tool: string }>(sessions: readonly T[]): T[] {
@@ -144,17 +146,29 @@ export function HygieneAndSyncPanel({
   const styles = useStyles();
   const [showAllStale, setShowAllStale] = useState(false);
   const [showAllBranches, setShowAllBranches] = useState(false);
+  const [copiedPruneCmd, setCopiedPruneCmd] = useState(false);
+
+  const handleCopyPruneCommand = () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(SAFE_PRUNE_COMMAND);
+    }
+    setCopiedPruneCmd(true);
+    window.setTimeout(() => setCopiedPruneCmd(false), 2000);
+  };
 
   const driftTotal = governance.driftCount + governance.missingCount;
 
-  const staleWorktrees = hygiene.worktrees.filter((w) => w.status === 'stale');
+  const staleWorktrees = hygiene.worktrees.filter((w) => w.status === 'stale' && !w.isDirty);
+  const dirtyPreservedWorktrees = hygiene.worktrees.filter(
+    (w) => w.status === 'stale' && Boolean(w.isDirty)
+  );
   const otherWorktrees = hygiene.worktrees.filter((w) => w.status !== 'stale');
   const canCollapseStale = staleWorktrees.length > MAX_COLLAPSED_STALE_WORKTREES;
   const visibleStaleWorktrees =
     canCollapseStale && !showAllStale
       ? staleWorktrees.slice(0, MAX_COLLAPSED_STALE_WORKTREES)
       : staleWorktrees;
-  const visibleWorktrees = [...visibleStaleWorktrees, ...otherWorktrees];
+  const visibleWorktrees = [...visibleStaleWorktrees, ...dirtyPreservedWorktrees, ...otherWorktrees];
 
   const allBranches = hygiene.branches ?? [];
   const staleBranches = allBranches.filter((b) => b.status === 'stale');
@@ -337,7 +351,12 @@ export function HygieneAndSyncPanel({
                 </span>
               </div>
 
-              {wt.status === 'stale' && (
+              {wt.status === 'stale' && wt.isDirty && (
+                <Badge appearance="tint" color="informative" shape="rounded">
+                  Dirty · Preserved
+                </Badge>
+              )}
+              {wt.status === 'stale' && !wt.isDirty && (
                 <Badge appearance="tint" color="warning" shape="rounded" icon={<Warning16Regular />}>
                   Stale / Merged
                 </Badge>
@@ -358,19 +377,36 @@ export function HygieneAndSyncPanel({
           ))}
         </div>
 
-        {canCollapseStale && (
-          <Button
-            size="small"
-            appearance="subtle"
-            icon={showAllStale ? <ChevronUp16Regular /> : <ChevronDown16Regular />}
-            iconPosition="after"
-            onClick={() => setShowAllStale((prev) => !prev)}
-            style={{ justifyContent: 'space-between' }}
-          >
-            {showAllStale
-              ? 'Show fewer stale worktrees'
-              : `Show all ${staleWorktrees.length} stale worktrees`}
-          </Button>
+        {(canCollapseStale || hygiene.staleWorktreeCount > 0 || staleBranchTotal > 0) && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {canCollapseStale && (
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={showAllStale ? <ChevronUp16Regular /> : <ChevronDown16Regular />}
+                iconPosition="after"
+                onClick={() => setShowAllStale((prev) => !prev)}
+                style={{ justifyContent: 'space-between' }}
+              >
+                {showAllStale
+                  ? 'Show fewer stale worktrees'
+                  : `Show all ${staleWorktrees.length} stale worktrees`}
+              </Button>
+            )}
+            {(hygiene.staleWorktreeCount > 0 || staleBranchTotal > 0) && (
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={copiedPruneCmd ? <CheckmarkCircle16Regular /> : <ArrowRight16Regular />}
+                iconPosition="after"
+                onClick={handleCopyPruneCommand}
+                title={SAFE_PRUNE_COMMAND}
+                style={{ justifyContent: 'space-between' }}
+              >
+                {copiedPruneCmd ? 'Copied!' : 'Copy Safe Prune Cmd'}
+              </Button>
+            )}
+          </div>
         )}
       </Card>
 

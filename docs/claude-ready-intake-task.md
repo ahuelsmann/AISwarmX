@@ -77,9 +77,9 @@ Read the selected issue (`gh issue view <number> --repo ahuelsmann/MOBAflow`), `
 - Trigger the circuit breaker and escalate to the maintainer if the same finding fails twice or an exchange exceeds 10 agent messages on one topic.
 ````
 
-## Why Manual Ping Instead of a Background Scheduled Task
+## Why Manual Ping Instead of a Background LLM Task (Plus Zero-Token Watchdog)
 
-- **Zero idle tokens & zero background scripts:** Nothing polls on an empty `Ready` column and no Windows Task Scheduler wrapper has to be maintained unless high-frequency unattended pickup is wanted later.
+- **Zero idle LLM tokens:** Nothing burns LLM quota on an empty `Ready` column. For unattended repo cleanup and Kanban drift self-healing with **zero LLM tokens**, run `pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\scripts\Invoke-SwarmWatchdog.ps1 -AutoHealBoard` (or register its optional Windows Scheduled Task; see [Hygiene & Zero-Token Automation](hygiene-and-automation.md)).
 - **Guaranteed local execution:** Pinging the standing local **`Claude Monitor`** session ensures full access to the authenticated local `gh` CLI (`project` scope), private `MOBAdev` governance, local Git worktrees, `codex.exe`, `agy.exe`, and `sonar.exe`.
 - **Why Claude Desktop `GitHub-Ereignis` triggers were rejected:** Dragging an issue from `Planned` to `Ready` on GitHub Project #1 emits a Project v2 event (`projects_v2_item`), not a repository `issues` webhook (`Alle Issue-Ereignisse`), unfiltered issue triggers burn Opus quota on every bot/issue comment, and event-triggered routines run in cloud sandboxes without local CLI tools or worktree access.
 
@@ -87,4 +87,5 @@ Read the selected issue (`gh issue view <number> --repo ahuelsmann/MOBAflow`), `
 
 - [MOBAdev Manifesto](../manifest.md) (`Planned` → `Ready` maintainer trigger rule)
 - [Delivery Workflow](delivery-workflow.md) (Issue pull lifecycle & Triad coordination)
+- [Hygiene & Zero-Token Automation](hygiene-and-automation.md) (`Invoke-RepoHygiene.ps1` & `Invoke-SwarmWatchdog.ps1`)
 - [AI Strategy & Pilots](ai-strategy-and-pilots.md) (Quota hygiene & deferred background automation notes)
