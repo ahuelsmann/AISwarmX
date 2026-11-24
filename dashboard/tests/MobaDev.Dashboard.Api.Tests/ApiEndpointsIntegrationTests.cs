@@ -96,7 +96,7 @@ public sealed class ApiEndpointsIntegrationTests
             ["codex-monitor", "claude-monitor", "antigravity-monitor", "antigravity-opus-head"],
             snapshot.Monitors.Monitors.Select(m => m.Id));
         Assert.Equal(
-            ["GPT Head", "Claude Head", "Argon Head", "Opus Head"],
+            ["MOBAi ChatGPT Codex", "MOBAi Claude Opus", "MOBAi Antigravity Gemini", "MOBAi Antigravity Opus"],
             snapshot.Monitors.Monitors.Select(m => m.DisplayName));
         Assert.NotNull(snapshot.Monitors.Summary);
         Assert.Equal(4, snapshot.Monitors.Summary.StandingMonitorsTotal);

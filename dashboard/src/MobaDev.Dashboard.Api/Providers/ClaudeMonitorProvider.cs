@@ -8,16 +8,19 @@ using MobaDev.Dashboard.Api.Security;
 namespace MobaDev.Dashboard.Api.Providers;
 
 /// <summary>
-/// Reads standing Claude Head (formerly Claude Monitor) metadata from ~/.claude/sessions/*.json and only model/rate-limit metadata
-/// from the tail of the active session transcript without ever exposing chat text.
+/// Reads standing MOBAi Claude Opus (formerly Claude Head / Claude Monitor) metadata from ~/.claude/sessions/*.json
+/// and only model/rate-limit metadata from the tail of the active session transcript without ever exposing chat text.
 /// </summary>
 public sealed partial class ClaudeMonitorProvider
 {
     private const int TailReadBytes = 64 * 1024;
     private static readonly TimeSpan SubAgentActiveWindow = TimeSpan.FromMinutes(2);
     private const string MonitorId = "claude-monitor";
-    private const string DisplayName = "Claude Head";
-    private const string LegacyDisplayName = "Claude Monitor";
+    private const string DisplayName = "MOBAi Claude Opus";
+    private const string LegacyHeadDisplayName = "Claude Head";
+    private const string LegacyMonitorDisplayName = "Claude Monitor";
+    private const string MobaNamespacePrefix = "MOBAi ";
+    private const string MobaAltPrefix = "MOBA ";
     private const string Role = "Chief Operating Officer (COO)";
     private const string Profile = "P1";
     private const string Tool = "Claude Code";
@@ -29,9 +32,10 @@ public sealed partial class ClaudeMonitorProvider
 
         var activeSubagentModels = CollectActiveSubagentFileModels(paths.ClaudeHomePath, now);
         var sessionsDir = Path.Combine(paths.ClaudeHomePath, "sessions");
-        var sessions = Directory.Exists(sessionsDir)
+        var rawSessions = Directory.Exists(sessionsDir)
             ? LoadSessionRecords(sessionsDir)
             : [];
+        var sessions = FilterMobaSessions(rawSessions, paths);
 
         if (sessions.Count == 0)
         {
@@ -42,15 +46,13 @@ public sealed partial class ClaudeMonitorProvider
             }
 
             var noticeText = Directory.Exists(sessionsDir)
-                ? "No active Claude session detected."
+                ? $"No active {DisplayName} session detected."
                 : "Claude sessions directory not found.";
             return Task.FromResult(Offline(now, noticeText, activeSubagentModels.Count, offlineByModel));
         }
 
         var selected = sessions
-            .OrderByDescending(s =>
-                string.Equals(s.Name, DisplayName, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(s.Name, LegacyDisplayName, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(s => GetStandingPriorityRank(s.Name))
             .ThenByDescending(s => s.UpdatedAtMs)
             .First();
 
@@ -94,7 +96,7 @@ public sealed partial class ClaudeMonitorProvider
         }
 
         var notice = sessions.Count > 1
-            ? $"{sessions.Count} active Claude sessions detected (target: 1)."
+            ? $"{sessions.Count} active MOBAi Claude sessions detected (target: 1)."
             : null;
 
         return Task.FromResult(new MonitorInfo(
@@ -517,6 +519,96 @@ public sealed partial class ClaudeMonitorProvider
         }
 
         return false;
+    }
+
+    private static List<ClaudeSessionRecord> FilterMobaSessions(
+        IReadOnlyList<ClaudeSessionRecord> rawSessions,
+        ResolvedDashboardPaths paths)
+    {
+        var filtered = new List<ClaudeSessionRecord>(rawSessions.Count);
+        foreach (var session in rawSessions)
+        {
+            var trimmedName = session.Name?.Trim();
+            if (!string.IsNullOrEmpty(trimmedName))
+            {
+                if (IsMobaSessionName(trimmedName))
+                {
+                    filtered.Add(session);
+                }
+
+                continue;
+            }
+
+            // Unnamed sessions belong to MOBA only when cwd is empty (legacy/tests) or inside a MOBA repo/worktree.
+            if (string.IsNullOrWhiteSpace(session.Cwd) ||
+                IsPathUnder(session.Cwd, paths.MobaFlowRepoPath) ||
+                IsPathUnder(session.Cwd, paths.MobaDevRepoPath))
+            {
+                filtered.Add(session);
+            }
+        }
+
+        return filtered;
+    }
+
+    private static bool IsMobaSessionName(string trimmedName)
+    {
+        return trimmedName.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
+               trimmedName.StartsWith(MobaAltPrefix, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(trimmedName, LegacyHeadDisplayName, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(trimmedName, LegacyMonitorDisplayName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int GetStandingPriorityRank(string? name)
+    {
+        var trimmed = name?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return 0;
+        }
+
+        if (string.Equals(trimmed, DisplayName, StringComparison.OrdinalIgnoreCase))
+        {
+            return 5;
+        }
+
+        if (trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed.Contains("Claude", StringComparison.OrdinalIgnoreCase) ? 4 : 3;
+        }
+
+        if (trimmed.StartsWith(MobaAltPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return 2;
+        }
+
+        if (string.Equals(trimmed, LegacyHeadDisplayName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, LegacyMonitorDisplayName, StringComparison.OrdinalIgnoreCase))
+        {
+            return 1;
+        }
+
+        return 0;
+    }
+
+    private static bool IsPathUnder(string candidatePath, string? rootPath)
+    {
+        if (string.IsNullOrWhiteSpace(candidatePath) || string.IsNullOrWhiteSpace(rootPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var normalizedCandidate = Path.GetFullPath(candidatePath.Trim()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var normalizedRoot = Path.GetFullPath(rootPath.Trim()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return string.Equals(normalizedCandidate, normalizedRoot, StringComparison.OrdinalIgnoreCase) ||
+                   normalizedCandidate.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static string? GetString(JsonElement obj, string propertyName)

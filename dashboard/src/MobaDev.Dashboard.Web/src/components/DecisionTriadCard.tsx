@@ -87,7 +87,7 @@ const COUNCIL_SEATS: SeatDefinition[] = [
     roleMatch: 'Technical Director & CPM',
     tool: 'ChatGPT Codex',
     fallbackModel: 'Sol 6.2',
-    mandate: 'GPT Head: prioritizes backlog, validates build graph & holds scope/lock veto'
+    mandate: 'MOBAi ChatGPT Codex: prioritizes backlog, validates build graph & holds scope/lock veto'
   },
   {
     monitorId: 'claude-monitor',
@@ -96,7 +96,7 @@ const COUNCIL_SEATS: SeatDefinition[] = [
     roleMatch: 'Chief Operating Officer (COO)',
     tool: 'Claude Code',
     fallbackModel: 'Claude Opus 5.5',
-    mandate: 'Claude Head: cuts slices, assigns teams, grants Design Go & arms Auto-Merge'
+    mandate: 'MOBAi Claude Opus: cuts slices, assigns teams, grants Design Go & arms Auto-Merge'
   },
   {
     monitorId: 'antigravity-opus-head',
@@ -105,7 +105,7 @@ const COUNCIL_SEATS: SeatDefinition[] = [
     roleMatch: 'Acting COO & Opus Orchestrator',
     tool: 'Antigravity',
     fallbackModel: 'Orchestrator · Claude Opus 5.5',
-    mandate: 'Opus Head: P1 Acting COO & Fresh Final Reviewer orchestrating Opus/Sonnet/GPT-OSS swarms'
+    mandate: 'MOBAi Antigravity Opus: P1 Acting COO & Fresh Final Reviewer orchestrating Opus/Sonnet/GPT-OSS swarms'
   },
   {
     monitorId: 'antigravity-monitor',
@@ -114,7 +114,7 @@ const COUNCIL_SEATS: SeatDefinition[] = [
     roleMatch: 'Head of AI Strategy',
     tool: 'Antigravity',
     fallbackModel: 'Orchestrator · Gemini 4 Argon',
-    mandate: 'Argon Head: multi-model failover hub, AI Strategy & UI/UX swarm orchestrator'
+    mandate: 'MOBAi Antigravity Gemini: multi-model failover hub, AI Strategy & UI/UX swarm orchestrator'
   }
 ];
 

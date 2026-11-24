@@ -89,6 +89,7 @@ public static class SubAgentModelCatalog
         }
 
         if (lower.Contains("argon", StringComparison.Ordinal) ||
+            lower.Contains("carbon", StringComparison.Ordinal) ||
             lower.Contains("neon", StringComparison.Ordinal) ||
             lower.Contains("gemini", StringComparison.Ordinal) ||
             lower.Contains("antigravity", StringComparison.Ordinal))

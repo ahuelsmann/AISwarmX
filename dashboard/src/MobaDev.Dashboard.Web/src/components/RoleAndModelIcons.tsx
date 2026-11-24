@@ -83,6 +83,7 @@ export function resolveModelVisual(model: string | null | undefined): ResolvedVi
   }
   if (
     normalized.includes('argon') ||
+    normalized.includes('carbon') ||
     normalized.includes('gemini') ||
     normalized.includes('antigravity')
   ) {
