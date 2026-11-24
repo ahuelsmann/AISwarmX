@@ -5,6 +5,15 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.11.0] - 2026-11-24
+
+### Added
+- **Cross-Tool `MOBAi Swarm Bus` (`bus/mobai-swarm-bus.mjs`, `bus/mobai-swarm-bus.test.mjs`):** Added a local WAL-mode SQLite MCP stdio server & zero-token CLI (`bus_send`, `bus_inbox`, `bus_ack`, `bus_locks`, `bus_status`) shared across Claude Code/Desktop, ChatGPT Codex (`codex.exe queue` wake support), Antigravity, and `Invoke-SwarmWatchdog.ps1`, enabling cross-tool messaging, threaded acknowledgments, and overlapping path-lock collision prevention.
+- **Ephemeral Claude CLI Worker — Option A (`scripts/Invoke-ClaudeEphemeralWorker.ps1`):** Added `claude.exe --print --no-session-persistence` wrapper with `Review` (`plan` read-only) and `ScopedFix` (worktree-only + busy-Desktop guard) modes, strict allowed-model enforcement, and audit logging to `%LOCALAPPDATA%\MOBAdev\claude-workers.log`.
+- **Dashboard Read-Only Swarm Bus Feed (`GET /api/bus`, `SwarmBusProvider.cs`, `SwarmBusCard.tsx`):** Added read-only SQLite bus/lock inspection to `MobaDev.Dashboard.Api` (`v3.11.0`) and a live **Swarm Bus · Cross-Tool MCP** card to the Dashboard Live view.
+
+---
+
 ## [3.10.0] - 2026-11-24
 
 ### Added

@@ -276,6 +276,39 @@ export interface WarningBreakdown {
   quotaPauses: number;
 }
 
+export interface SwarmBusMessageInfo {
+  id: number;
+  createdAtUtc: string;
+  sender: string;
+  recipient: string;
+  topic: string;
+  body: string;
+  prNumber?: number | null;
+  issueNumber?: number | null;
+  priority: string;
+  replyToId?: number | null;
+  status: 'unread' | 'acked' | string;
+  ackedBy?: string | null;
+}
+
+export interface SwarmBusLockInfo {
+  id: number;
+  agent: string;
+  pathPattern: string;
+  prNumber?: number | null;
+  claimedAtUtc: string;
+  expiresAtUtc: string;
+}
+
+export interface SwarmBusResponse {
+  generatedAtUtc: string;
+  unreadCount: number;
+  activeLockCount: number;
+  recentMessages: SwarmBusMessageInfo[];
+  activeLocks: SwarmBusLockInfo[];
+  source: SourceHealth;
+}
+
 export interface DashboardSnapshot {
   generatedAtUtc: string;
   readOnly: boolean;
@@ -287,6 +320,7 @@ export interface DashboardSnapshot {
   pipeline: PipelineResponse;
   hygiene: HygieneResponse;
   changelogVersion?: string | null;
+  swarmBus?: SwarmBusResponse | null;
 }
 
 export type ThemePreference = 'system' | 'light' | 'dark';

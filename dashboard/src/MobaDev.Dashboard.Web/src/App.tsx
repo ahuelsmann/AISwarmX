@@ -18,6 +18,7 @@ import { HygieneAndSyncPanel } from './components/HygieneAndSyncPanel';
 import { MonitorCards } from './components/MonitorCards';
 import { PipelineCard } from './components/PipelineCard';
 import { StatusHeader, type WarningTarget } from './components/StatusHeader';
+import { SwarmBusCard } from './components/SwarmBusCard';
 import { mobaDarkTheme, mobaLightTheme } from './theme/mobaFluentTheme';
 import type {
   ConfigDocsScope,
@@ -306,6 +307,8 @@ export function App() {
                   onOpenMatrixSync={handleOpenMatrixSync}
                 />
               </div>
+
+              <SwarmBusCard swarmBus={snapshot.swarmBus} nowMs={nowMs} />
 
               <div className={styles.liveFooter}>
                 <Link

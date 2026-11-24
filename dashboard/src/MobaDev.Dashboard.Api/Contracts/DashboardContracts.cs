@@ -407,6 +407,36 @@ public sealed record HygieneResponse(
     int StaleLocalBranchCount = 0,
     int StaleRemoteBranchCount = 0);
 
+public sealed record SwarmBusMessageInfo(
+    long Id,
+    DateTimeOffset CreatedAtUtc,
+    string Sender,
+    string Recipient,
+    string Topic,
+    string Body,
+    int? PrNumber,
+    int? IssueNumber,
+    string Priority,
+    long? ReplyToId,
+    string Status,
+    string? AckedBy);
+
+public sealed record SwarmBusLockInfo(
+    long Id,
+    string Agent,
+    string PathPattern,
+    int? PrNumber,
+    DateTimeOffset ClaimedAtUtc,
+    DateTimeOffset ExpiresAtUtc);
+
+public sealed record SwarmBusResponse(
+    DateTimeOffset GeneratedAtUtc,
+    int UnreadCount,
+    int ActiveLockCount,
+    IReadOnlyList<SwarmBusMessageInfo> RecentMessages,
+    IReadOnlyList<SwarmBusLockInfo> ActiveLocks,
+    SourceHealth Source);
+
 public sealed record DashboardSnapshot(
     DateTimeOffset GeneratedAtUtc,
     bool ReadOnly,
@@ -417,4 +447,5 @@ public sealed record DashboardSnapshot(
     GovernanceResponse Governance,
     PipelineResponse Pipeline,
     HygieneResponse Hygiene,
-    string? ChangelogVersion = null);
+    string? ChangelogVersion = null,
+    SwarmBusResponse? SwarmBus = null);
