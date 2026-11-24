@@ -5,6 +5,15 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.9.6] - 2026-11-24
+
+### Added
+- **Zero-Token Hygiene & Swarm Watchdog Scripts (`scripts/Invoke-RepoHygiene.ps1`, `scripts/Invoke-SwarmWatchdog.ps1`, `docs/hygiene-and-automation.md`):** Added lossless Git worktree/local-branch cleanup (with hard dirty guard + PR/ancestor/squash-diff verification) and a zero-token `gh`/Dashboard watchdog with `-DryRun`, `-AutoHealBoard` Kanban self-healing, `QuietWindowOpenForRf30` & `FastPathOrReviewCandidates` detection, and optional `-RegisterScheduledTask`.
+- **Antigravity Partner Quota Pause Detection (`AntigravityMonitorProvider.cs`):** Added dual-signal read-only quota detection for Antigravity Root Heads (`transcript_full.jsonl` / `transcript.jsonl` `swarm` model quota snapshots + `conversations/<id>.db` `steps` HTTP `429` `RESOURCE_EXHAUSTED` fallback), surfacing `rate_limited` (`Quota Pause`) and local reset timestamps directly on `MOBAi Antigravity Opus` when partner credits are `0%` while `Gemini 4 Carbon`/`Hydrogen` remain active.
+- **Dirty-Aware Worktree Preservation & Quick Prune Command (`WorktreeProvider.cs`, `DashboardSnapshotService.cs`, `DashboardContracts.cs`, `HygieneAndSyncPanel.tsx`):** Detects uncommitted worktrees (`IsDirty`) via bounded `git status --porcelain`, badges them `Dirty · Preserved` in the Dashboard UI, excludes intentionally preserved dirty prototype worktrees from `StaleWorktreeCount`/`WarningCount`, and adds a read-only `Copy Safe Prune Cmd` clipboard action when stale worktrees or branches remain.
+
+---
+
 ## [3.9.5] - 2026-11-24
 
 ### Changed

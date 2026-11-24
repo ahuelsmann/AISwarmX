@@ -782,6 +782,118 @@ public sealed class PipelineAndWorktreeProviderTests
         Assert.Equal("stale", branches[0].Status);
     }
 
+    [Fact]
+    public async Task WorktreeProvider_DetectsDirtyPreservedWorktreeAndExcludesFromStaleCount()
+    {
+        using var fx = new TempDashboardFixture();
+        var cleanWtPath = Path.Combine(fx.MobaFlowPath, "artifacts", "worktrees", "clean-old");
+        var dirtyWtPath = Path.Combine(fx.MobaFlowPath, "artifacts", "worktrees", "issue-398-dirty");
+        Directory.CreateDirectory(cleanWtPath);
+        Directory.CreateDirectory(dirtyWtPath);
+
+        var porcelain = $"""
+            worktree {fx.MobaFlowPath.Replace('\\', '/')}
+            HEAD 72a78bd01ae219358776e665444550a1353ea2b2
+            branch refs/heads/main
+
+            worktree {dirtyWtPath.Replace('\\', '/')}
+            HEAD b45e901211111111111111111111111111111111
+            branch refs/heads/codex/issue-398-dirty
+
+            worktree {cleanWtPath.Replace('\\', '/')}
+            HEAD a12e606311111111111111111111111111111111
+            branch refs/heads/codex/clean-old
+            """;
+
+        var runner = new FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("open"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("merged"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("issue"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && (args.Contains("project") || args.Contains("graphql")))
+            {
+                return new CommandResult(1, string.Empty, "missing scope");
+            }
+
+            if (fileName == "git" && args.Contains("worktree"))
+            {
+                return new CommandResult(0, porcelain, string.Empty);
+            }
+
+            if (fileName == "git" && args.Contains("for-each-ref"))
+            {
+                return new CommandResult(0, string.Empty, string.Empty);
+            }
+
+            if (fileName == "git" && args.Contains("status") && args.Contains("--porcelain"))
+            {
+                var targetDir = args.Count > 1 ? args[1] : string.Empty;
+                var normalizedTarget = targetDir.Replace('\\', '/');
+                if (string.Equals(normalizedTarget, dirtyWtPath.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase))
+                {
+                    return new CommandResult(0, " M src/DirtyFile.cs\n?? src/NewSketch.cs\n", string.Empty);
+                }
+
+                return new CommandResult(0, string.Empty, string.Empty);
+            }
+
+            return new CommandResult(1, string.Empty, "unexpected");
+        });
+
+        var options = new DashboardOptions
+        {
+            MobaDevRepoPath = fx.MobaDevPath,
+            MobaFlowRepoPath = fx.MobaFlowPath,
+            ClaudeHomePath = fx.ClaudeHomePath,
+            CodexHomePath = fx.CodexHomePath,
+            AntigravityHomePath = fx.AntigravityHomePath,
+            GeminiConfigPath = fx.GeminiConfigPath
+        };
+        var provider = new WorktreeProvider(runner);
+        var paths = options.ResolvePaths();
+        var (worktrees, _) = await provider.GetWorktreesAsync(paths, [], CancellationToken.None);
+
+        Assert.Equal(3, worktrees.Count);
+        Assert.Equal("codex/clean-old", worktrees[0].Branch);
+        Assert.False(worktrees[0].IsDirty);
+        Assert.Equal("codex/issue-398-dirty", worktrees[1].Branch);
+        Assert.True(worktrees[1].IsDirty);
+        Assert.Equal("main", worktrees[2].Branch);
+
+        var snapshotService = new MobaDev.Dashboard.Api.Services.DashboardSnapshotService(
+            new StaticOptionsMonitor<DashboardOptions>(options),
+            new ClaudeMonitorProvider(),
+            new CodexMonitorProvider(),
+            new AntigravityMonitorProvider(),
+            new GovernanceProvider(),
+            new ConfigDocsProvider(),
+            new PipelineProvider(runner),
+            provider);
+
+        var snapshot = await snapshotService.GetSnapshotAsync(forceRefresh: true, CancellationToken.None);
+        Assert.Equal(1, snapshot.Hygiene.StaleWorktreeCount);
+        Assert.Equal(1, snapshot.WarningCount);
+    }
+
+    private sealed class StaticOptionsMonitor<T>(T value) : Microsoft.Extensions.Options.IOptionsMonitor<T>
+    {
+        public T CurrentValue => value;
+        public T Get(string? name) => value;
+        public IDisposable? OnChange(Action<T, string?> listener) => null;
+    }
+
     internal sealed class FakeCommandRunner : ICommandRunner
     {
         private readonly Func<string, IReadOnlyList<string>, CommandResult> _handler;

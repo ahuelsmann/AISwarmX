@@ -179,7 +179,7 @@ public sealed partial class DashboardSnapshotService
                 var (worktrees, worktreeSource) = worktreeTask.Result;
                 var (branches, staleLocalBranches, staleRemoteBranches) = branchTask.Result;
                 var sessions = BuildSessionHygieneList(monitorList);
-                var staleCount = worktrees.Count(w => w.Status == "stale");
+                var staleCount = worktrees.Count(w => w.Status == "stale" && !w.IsDirty);
                 hygiene = new HygieneResponse(
                     now,
                     sessions,

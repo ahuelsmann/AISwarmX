@@ -386,7 +386,8 @@ public sealed record WorktreeInfo(
     string HeadShort,
     bool IsMain,
     string Status,
-    int? LinkedPrNumber);
+    int? LinkedPrNumber,
+    bool IsDirty = false);
 
 public sealed record BranchHygieneInfo(
     string Repository,
