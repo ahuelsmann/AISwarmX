@@ -5,6 +5,14 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.9.2] - 2026-11-24
+
+### Changed
+- **Disjoint `main`-Sync Fast-Path & Default `Opus 5.5` Quota-Splitting (`manifest.md`, `docs/delivery-workflow.md`, `docs/ai-strategy-and-pilots.md`, `docs/allowed-models.md`):** Eliminated redundant LLM re-reviews after pure `origin/main` merges when `LockedAreas` and slice diffs are untouched (`0` conflict edits in slice files), defaulted `Fresh Independent P1 Final Reviews` to Antigravity's separate `Opus 5.5` quota pool (Google AI plan) so `MOBAi Claude Opus` stays shielded for COO steering, aligned docs to the 4 `MOBAi` Root Heads, and standardized a focused `2–3` slice `Ready` queue.
+- **Open PR Deduplication in `Task & PR Pipeline -> Open Issues` (`PipelineProvider.cs`, `PipelineAndWorktreeProviderTests.cs`):** Excluded non-drifting `OPEN` `PullRequest` cards from `ActiveIssues` (while keeping `MERGED`/`CLOSED` PRs on the Kanban board surfaced with `BoardDriftReason`) so `Open Issues` reflects actual issues rather than duplicating `Open PRs`.
+
+---
+
 ## [3.9.1] - 2026-11-24
 
 ### Added

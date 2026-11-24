@@ -413,6 +413,17 @@ public sealed partial class PipelineProvider
 
                 if (string.Equals(item.ItemKind, "PullRequest", StringComparison.OrdinalIgnoreCase))
                 {
+                    var driftReason = item.GitHubState is "MERGED" or "CLOSED"
+                        ? "Merged/Closed on GitHub — move to Done on Kanban"
+                        : null;
+
+                    // Open PRs already have their dedicated Open PRs section and appear as linked chips on issues;
+                    // keep PullRequest cards in ActiveIssues only when they are already merged/closed (board drift).
+                    if (driftReason is null)
+                    {
+                        continue;
+                    }
+
                     var matchingOpenPr = openPullRequests.FirstOrDefault(p => p.Number == item.Number);
                     var matchingMergedPr = recentlyMerged.FirstOrDefault(p => p.Number == item.Number);
                     var matchedPr = matchingOpenPr ?? matchingMergedPr;
@@ -434,9 +445,6 @@ public sealed partial class PipelineProvider
                     var kanbanPrParticipants = PrParticipantExtractor.ParseKanbanParticipants(writer);
                     var participants = MergePrAndKanbanParticipants(prParticipants, kanbanPrParticipants);
                     var linkedIssues = matchedPr?.LinkedIssues ?? [];
-                    var driftReason = item.GitHubState is "MERGED" or "CLOSED"
-                        ? "Merged/Closed on GitHub — move to Done on Kanban"
-                        : null;
 
                     results.Add((matchingOpenPr is not null, new ActiveIssueInfo(
                         Number: item.Number,
