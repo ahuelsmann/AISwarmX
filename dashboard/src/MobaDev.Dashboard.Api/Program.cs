@@ -44,6 +44,7 @@ builder.Services.AddSingleton<GovernanceProvider>();
 builder.Services.AddSingleton<ConfigDocsProvider>();
 builder.Services.AddSingleton<PipelineProvider>();
 builder.Services.AddSingleton<WorktreeProvider>();
+builder.Services.AddSingleton<SwarmBusProvider>();
 builder.Services.AddSingleton<DashboardSnapshotService>();
 
 var app = builder.Build();
@@ -128,6 +129,9 @@ api.MapGet("/pipeline", async (DashboardSnapshotService service, bool? refresh, 
 
 api.MapGet("/hygiene", async (DashboardSnapshotService service, bool? refresh, CancellationToken ct) =>
     Results.Ok(await service.GetHygieneAsync(refresh ?? false, ct)));
+
+api.MapGet("/bus", async (DashboardSnapshotService service, bool? refresh, CancellationToken ct) =>
+    Results.Ok(await service.GetSwarmBusAsync(refresh ?? false, ct)));
 
 app.Run();
 

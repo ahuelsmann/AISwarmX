@@ -859,7 +859,8 @@ public sealed class PipelineAndWorktreeProviderTests
             ClaudeHomePath = fx.ClaudeHomePath,
             CodexHomePath = fx.CodexHomePath,
             AntigravityHomePath = fx.AntigravityHomePath,
-            GeminiConfigPath = fx.GeminiConfigPath
+            GeminiConfigPath = fx.GeminiConfigPath,
+            SwarmBusDbPath = Path.Combine(fx.RootPath, "swarm-bus.db")
         };
         var provider = new WorktreeProvider(runner);
         var paths = options.ResolvePaths();
@@ -880,7 +881,8 @@ public sealed class PipelineAndWorktreeProviderTests
             new GovernanceProvider(),
             new ConfigDocsProvider(),
             new PipelineProvider(runner),
-            provider);
+            provider,
+            new SwarmBusProvider());
 
         var snapshot = await snapshotService.GetSnapshotAsync(forceRefresh: true, CancellationToken.None);
         Assert.Equal(1, snapshot.Hygiene.StaleWorktreeCount);

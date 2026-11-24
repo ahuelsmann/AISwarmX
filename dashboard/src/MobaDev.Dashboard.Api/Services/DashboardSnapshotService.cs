@@ -21,6 +21,7 @@ public sealed partial class DashboardSnapshotService
     private readonly Providers.ConfigDocsProvider _configDocsProvider;
     private readonly Providers.PipelineProvider _pipelineProvider;
     private readonly Providers.WorktreeProvider _worktreeProvider;
+    private readonly Providers.SwarmBusProvider _swarmBusProvider;
 
     private readonly SemaphoreSlim _localLock = new(1, 1);
     private readonly SemaphoreSlim _pipelineLock = new(1, 1);
@@ -28,6 +29,7 @@ public sealed partial class DashboardSnapshotService
     private MonitorsResponse? _cachedMonitors;
     private GovernanceResponse? _cachedGovernance;
     private HygieneResponse? _cachedHygiene;
+    private SwarmBusResponse? _cachedSwarmBus;
     private string? _cachedChangelogVersion;
     private DateTimeOffset _localCacheExpiresAt = DateTimeOffset.MinValue;
 
@@ -42,7 +44,8 @@ public sealed partial class DashboardSnapshotService
         Providers.GovernanceProvider governanceProvider,
         Providers.ConfigDocsProvider configDocsProvider,
         Providers.PipelineProvider pipelineProvider,
-        Providers.WorktreeProvider worktreeProvider)
+        Providers.WorktreeProvider worktreeProvider,
+        Providers.SwarmBusProvider swarmBusProvider)
     {
         _optionsMonitor = optionsMonitor;
         _claudeProvider = claudeProvider;
@@ -52,6 +55,7 @@ public sealed partial class DashboardSnapshotService
         _configDocsProvider = configDocsProvider;
         _pipelineProvider = pipelineProvider;
         _worktreeProvider = worktreeProvider;
+        _swarmBusProvider = swarmBusProvider;
     }
 
     public async Task<HealthResponse> GetHealthAsync(CancellationToken cancellationToken)
@@ -64,6 +68,10 @@ public sealed partial class DashboardSnapshotService
             ["pipeline"] = snapshot.Pipeline.Source,
             ["hygiene"] = snapshot.Hygiene.Source
         };
+        if (snapshot.SwarmBus is not null)
+        {
+            sources["swarmBus"] = snapshot.SwarmBus.Source;
+        }
 
         return new HealthResponse(
             Status: snapshot.OverallStatus,
@@ -125,6 +133,12 @@ public sealed partial class DashboardSnapshotService
         return snapshot.Hygiene;
     }
 
+    public async Task<SwarmBusResponse> GetSwarmBusAsync(bool forceRefresh, CancellationToken cancellationToken)
+    {
+        var snapshot = await GetSnapshotAsync(forceRefresh, cancellationToken).ConfigureAwait(false);
+        return snapshot.SwarmBus ?? await _swarmBusProvider.GetSwarmBusAsync(_optionsMonitor.CurrentValue.ResolvePaths(), cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<DashboardSnapshot> GetSnapshotAsync(bool forceRefresh, CancellationToken cancellationToken)
     {
         var options = _optionsMonitor.CurrentValue;
@@ -136,6 +150,7 @@ public sealed partial class DashboardSnapshotService
         MonitorsResponse monitors;
         GovernanceResponse governance;
         HygieneResponse hygiene;
+        SwarmBusResponse swarmBus;
         string? changelogVersion;
 
         await _localLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -145,11 +160,13 @@ public sealed partial class DashboardSnapshotService
                 _cachedMonitors is not null &&
                 _cachedGovernance is not null &&
                 _cachedHygiene is not null &&
+                _cachedSwarmBus is not null &&
                 now < _localCacheExpiresAt)
             {
                 monitors = _cachedMonitors;
                 governance = _cachedGovernance;
                 hygiene = _cachedHygiene;
+                swarmBus = _cachedSwarmBus;
                 changelogVersion = _cachedChangelogVersion;
             }
             else
@@ -160,8 +177,9 @@ public sealed partial class DashboardSnapshotService
                 var governanceTask = _governanceProvider.GetGovernanceAsync(paths, cancellationToken);
                 var worktreeTask = _worktreeProvider.GetWorktreesAsync(paths, pipeline.PullRequests, cancellationToken);
                 var branchTask = _worktreeProvider.GetBranchHygieneAsync(paths, pipeline.PullRequests, cancellationToken);
+                var busTask = _swarmBusProvider.GetSwarmBusAsync(paths, cancellationToken);
 
-                await Task.WhenAll(claudeTask, codexTask, antigravityTask, governanceTask, worktreeTask, branchTask).ConfigureAwait(false);
+                await Task.WhenAll(claudeTask, codexTask, antigravityTask, governanceTask, worktreeTask, branchTask, busTask).ConfigureAwait(false);
 
                 var monitorList = new List<MonitorInfo>(2 + antigravityTask.Result.Count)
                 {
@@ -189,11 +207,13 @@ public sealed partial class DashboardSnapshotService
                     Branches: branches,
                     StaleLocalBranchCount: staleLocalBranches,
                     StaleRemoteBranchCount: staleRemoteBranches);
+                swarmBus = busTask.Result;
                 changelogVersion = ReadLatestChangelogVersion(paths.MobaDevRepoPath);
 
                 _cachedMonitors = monitors;
                 _cachedGovernance = governance;
                 _cachedHygiene = hygiene;
+                _cachedSwarmBus = swarmBus;
                 _cachedChangelogVersion = changelogVersion;
 
                 var ttl = Math.Max(1, options.LocalCacheTtlSeconds);
@@ -217,7 +237,8 @@ public sealed partial class DashboardSnapshotService
             Governance: governance,
             Pipeline: pipeline,
             Hygiene: hygiene,
-            ChangelogVersion: changelogVersion);
+            ChangelogVersion: changelogVersion,
+            SwarmBus: swarmBus);
     }
 
     private async Task<PipelineResponse> GetPipelineCachedAsync(

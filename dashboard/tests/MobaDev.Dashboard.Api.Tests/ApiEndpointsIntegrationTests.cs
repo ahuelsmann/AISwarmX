@@ -106,6 +106,7 @@ public sealed class ApiEndpointsIntegrationTests
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/governance")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/pipeline")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/hygiene")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/bus")).StatusCode);
 
         var diffRes = await client.GetAsync("/api/governance/diff?tool=Antigravity&kind=agent&fileName=head-of-ai-strategy.md");
         Assert.Equal(HttpStatusCode.OK, diffRes.StatusCode);

@@ -1233,6 +1233,48 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(formatQuotaPauseSuffix(dualOpusPaused)).toBe('(Codex + Gemini Failover)');
   });
 
+  it('renders SwarmBusCard messages and active cross-tool path locks on live view', async () => {
+    const customPayload = createSnapshotFixture({
+      swarmBus: {
+        generatedAtUtc: new Date().toISOString(),
+        unreadCount: 1,
+        activeLockCount: 1,
+        source: { status: 'ok', updatedAtUtc: new Date().toISOString(), fromCache: false },
+        activeLocks: [
+          {
+            id: 1,
+            agent: 'codex',
+            pathPattern: 'MOBAdemo/app/src/shell',
+            prNumber: 541,
+            claimedAtUtc: new Date().toISOString(),
+            expiresAtUtc: new Date(Date.now() + 3600_000).toISOString()
+          }
+        ],
+        recentMessages: [
+          {
+            id: 7,
+            createdAtUtc: new Date().toISOString(),
+            sender: 'antigravity-gemini',
+            recipient: 'codex',
+            topic: 'review-pass',
+            body: 'P3 UI/UX PASS on PR #541',
+            prNumber: 541,
+            priority: 'high',
+            status: 'unread'
+          }
+        ]
+      }
+    });
+    stubDashboardFetch(customPayload);
+
+    render(<App />);
+    const busCard = await screen.findByLabelText('Swarm Bus Cross-Tool MCP Feed');
+    expect(within(busCard).getByText('1 Unread')).toBeInTheDocument();
+    expect(within(busCard).getByText('1 Locks')).toBeInTheDocument();
+    expect(within(busCard).getByText('MOBAdemo/app/src/shell')).toBeInTheDocument();
+    expect(within(busCard).getByText('P3 UI/UX PASS on PR #541')).toBeInTheDocument();
+  });
+
   it('degrades gracefully when backend is unreachable', async () => {
     vi.stubGlobal(
       'fetch',

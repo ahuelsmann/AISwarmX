@@ -20,6 +20,7 @@ public sealed class DashboardOptions
     public int LocalCacheTtlSeconds { get; set; } = 8;
     public int GitHubCacheTtlSeconds { get; set; } = 45;
     public string StaticWebRootPath { get; set; } = string.Empty;
+    public string SwarmBusDbPath { get; set; } = string.Empty;
 
     /// <summary>
     /// Resolves effective repository and local tool paths without hardcoding user-specific paths in code.
@@ -27,6 +28,7 @@ public sealed class DashboardOptions
     public ResolvedDashboardPaths ResolvePaths()
     {
         var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var mobaDevPath = ResolveMobaDevRepoPath(MobaDevRepoPath);
 
         var mobaFlowPath = !string.IsNullOrWhiteSpace(MobaFlowRepoPath)
@@ -42,6 +44,9 @@ public sealed class DashboardOptions
             string.IsNullOrEmpty(mobaDevPath)
                 ? string.Empty
                 : Path.Combine(mobaDevPath, "dashboard", "src", "MobaDev.Dashboard.Web", "dist"));
+        var swarmBusDbPath = ResolveOrDefault(
+            SwarmBusDbPath,
+            Path.Combine(localAppData, "MOBAdev", "swarm-bus.db"));
 
         return new ResolvedDashboardPaths(
             mobaDevPath,
@@ -50,7 +55,8 @@ public sealed class DashboardOptions
             codexHome,
             antigravityHome,
             geminiConfig,
-            staticWebRoot);
+            staticWebRoot,
+            swarmBusDbPath);
     }
 
     private static string ResolveOrDefault(string configuredPath, string fallbackPath)
@@ -125,4 +131,5 @@ public sealed record ResolvedDashboardPaths(
     string CodexHomePath,
     string AntigravityHomePath,
     string GeminiConfigPath,
-    string StaticWebRootPath);
+    string StaticWebRootPath,
+    string SwarmBusDbPath = "");

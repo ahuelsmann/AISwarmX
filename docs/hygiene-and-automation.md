@@ -79,3 +79,29 @@ pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\dashboard\Start-Dashboard.ps1 -
 # Remove Windows logon task
 pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\dashboard\Start-Dashboard.ps1 -UnregisterAutoStart
 ```
+
+---
+
+## 4. Ephemeral Claude CLI Worker (Option A — `scripts/Invoke-ClaudeEphemeralWorker.ps1`)
+
+Invokes `claude.exe --print --no-session-persistence` for bounded, one-shot `P1`/`P4` reviews (`-Mode Review`, read-only `--permission-mode plan`) or isolated worktree fixes (`-Mode ScopedFix`, `--permission-mode acceptEdits`, refusing `MOBAflow` root and guarding against concurrent `busy` Desktop COO runs unless `-Force` is passed).
+
+- **No session forks:** Uses `--no-session-persistence` rather than `--resume` against the running Claude Desktop session so `MOBAi Claude Opus` stays intact as the single standing session.
+- **Audit trail:** Appends every run (UTC timestamp, `TargetLabel`, `Mode`, `Model`, exit code, duration, output preview) to `%LOCALAPPDATA%\MOBAdev\claude-workers.log`.
+
+```powershell
+# Run an independent read-only P1 review inside an isolated PR worktree
+pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\scripts\Invoke-ClaudeEphemeralWorker.ps1 `
+  -Mode Review -Model claude-opus-5-5 `
+  -WorkingDirectory C:\Repo\ahuelsmann\MOBAflow\artifacts\worktrees\issue-510-helptopics-s1 `
+  -TargetLabel "PR#540-P1-Review" -Json -Prompt "Perform P1 review..."
+```
+
+---
+
+## 5. Cross-Tool `MOBAi Swarm Bus` (`bus/mobai-swarm-bus.mjs`)
+
+Local WAL-mode SQLite MCP stdio server (`%LOCALAPPDATA%\MOBAdev\swarm-bus.db`) plus zero-token `--cli` interface connecting **Claude Code / Desktop**, **ChatGPT Codex**, **Antigravity**, and `Invoke-SwarmWatchdog.ps1`:
+
+- **MCP Tools (`mobai-swarm-bus`):** `bus_send` (with optional `wake: true` -> `codex.exe queue`), `bus_inbox`, `bus_ack` (threaded replies), `bus_locks` (cross-tool prefix-overlap path lock detection & TTL expiry), and `bus_status`.
+- **Dashboard Live Feed:** Exposed read-only at `GET /api/bus` and included in `GET /api/snapshot` + the **Swarm Bus · Cross-Tool MCP** card on `http://127.0.0.1:5179`.

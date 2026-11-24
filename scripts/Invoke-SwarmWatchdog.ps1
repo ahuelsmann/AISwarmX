@@ -216,6 +216,8 @@ if ($DispatchEvents) {
     }
 
     $codexExe = Join-Path $env:USERPROFILE ".codex\.sandbox-bin\codex.exe"
+    $busScript = Join-Path $RepoDevRoot "bus\mobai-swarm-bus.mjs"
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
     foreach ($ev in $detectedEvents) {
         if ($dispatchedKeys.ContainsKey($ev.EventKey)) {
             continue
@@ -227,6 +229,21 @@ if ($DispatchEvents) {
                 & $codexExe queue --thread $CodexThreadId --message $ev.Message 2>$null | Out-Null
                 if ($LASTEXITCODE -eq 0) {
                     $routedTo = "CodexQueue+AlertLog"
+                }
+            }
+            catch { }
+        }
+
+        if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
+            try {
+                $busRecipient = switch ($ev.TargetOwner) {
+                    "Codex" { "codex" }
+                    "Antigravity" { "antigravity-gemini" }
+                    default { "claude-opus" }
+                }
+                & $nodeCmd.Source --no-warnings $busScript --cli send --from "watchdog" --to $busRecipient --topic $ev.EventType --pr "$($ev.PrNumber)" --priority "high" --body $ev.Message 2>$null | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    $routedTo = "SwarmBus+$routedTo"
                 }
             }
             catch { }
