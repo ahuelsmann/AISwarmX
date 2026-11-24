@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.9.9] - 2026-11-24
+
+### Added
+- **Detached Dashboard Auto-Start (`dashboard/Start-Dashboard.ps1`, `agents/antigravity/rules/mobaflow-agent-network.md`):** Added `-Background` (idempotent detached launch with `/api/health` readiness probe so Antigravity server restarts do not terminate `:5179`), `-RegisterAutoStart`, and `-UnregisterAutoStart` (`MOBAdev-Dashboard-AutoStart` `AtLogOn` Windows Scheduled Task), plus synced Antigravity startup rule and documentation ([docs/hygiene-and-automation.md](docs/hygiene-and-automation.md), [README.md](README.md), [dashboard/DESIGN.md](dashboard/DESIGN.md)).
+
+---
+
 ## [3.9.8] - 2026-11-24
 
 ### Changed

@@ -57,3 +57,20 @@ pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\scripts\Invoke-SwarmWatchdog.ps
 # Optional: remove the Scheduled Task
 pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\scripts\Invoke-SwarmWatchdog.ps1 -UnregisterScheduledTask
 ```
+
+---
+
+## 3. Detached Dashboard & Auto-Start (`dashboard/Start-Dashboard.ps1`)
+
+Keeps the read-only local Dashboard (`http://127.0.0.1:5179`) alive independently of Antigravity server restarts and starts it automatically on Windows logon as well as on Antigravity session startup (`agents/antigravity/rules/mobaflow-agent-network.md`).
+
+```powershell
+# Launch detached if not already running (idempotent, 0 LLM tokens)
+pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\dashboard\Start-Dashboard.ps1 -Background
+
+# Register per-user Windows logon task (MOBAdev-Dashboard-AutoStart)
+pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\dashboard\Start-Dashboard.ps1 -RegisterAutoStart
+
+# Remove Windows logon task
+pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\dashboard\Start-Dashboard.ps1 -UnregisterAutoStart
+```

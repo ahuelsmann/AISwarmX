@@ -25,7 +25,7 @@ Das **MOBAdev Agent Network Dashboard** macht das Multi-Model-Agentennetzwerk ü
 MOBAdev/
 └── dashboard/
     ├── DESIGN.md                           # Dieses Konzept (Slice 1)
-    ├── Start-Dashboard.ps1                 # Manuelles lokales Startskript (Slice 3; kein Autostart)
+    ├── Start-Dashboard.ps1                 # Lokales Startskript (inkl. -Background & -RegisterAutoStart)
     ├── MobaDev.Dashboard.slnx              # Eigenständige Solution (entkoppelt von MOBAflow)
     ├── src/
     │   ├── MobaDev.Dashboard.Api/          # ASP.NET Core Minimal API (net10.0)

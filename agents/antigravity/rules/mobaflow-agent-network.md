@@ -20,5 +20,5 @@ In the MOBAflow ecosystem (`C:\Repo\ahuelsmann\MOBAflow` and `C:\Repo\ahuelsmann
 - **Cross-Tool CLI Channels & Hygiene:**
   - To Codex threads (`GPT Head` / `CPM` / `TD`): `~/.codex/.sandbox-bin/codex.exe queue --thread <id> --message <text>`
   - To Claude CLI (`P1`): `claude.exe --print --model claude-opus-5-5`
-  - Live Cockpit (Read-Only): `http://127.0.0.1:5179` (`C:\Repo\ahuelsmann\MOBAdev`)
+  - **Dashboard Auto-Start (`http://127.0.0.1:5179`):** On every standing `MOBAi` session start or after an Antigravity server restart, check `http://127.0.0.1:5179/api/health`; if unreachable, launch `pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\dashboard\Start-Dashboard.ps1 -Background` (detached) so the cockpit is immediately available.
   - Remove slice worktrees and delete merged local/remote feature branches immediately after merge (`--delete-branch` + `git fetch --prune`), keeping only `main` and active open-slice branches.
