@@ -401,7 +401,9 @@ interface SubAgentChipDescriptor {
 const CARD_SUBAGENT_LABELS: Record<string, string> = {
   'Claude Opus 5.5': 'Opus 5.5',
   'Claude Sonnet 5.5': 'Sonnet 5.5',
+  'Claude Haiku 4.5': 'Haiku 4.5',
   'GPT-6.2-sol': 'GPT-6.2 Sol',
+  'GPT-6.2-astra': 'GPT-6.2 Astra',
   'Gemini 4 Carbon': 'Carbon',
   'Gemini 4 Hydrogen': 'Hydrogen',
   'GPT-OSS 120B': 'GPT-OSS 120B'
@@ -411,9 +413,18 @@ function resolveCardSubAgentChips(monitor: MonitorInfo): SubAgentChipDescriptor[
   let basePool: ReadonlyArray<{ key: string; label: string; profile: string }>;
   switch (monitor.id) {
     case 'codex-monitor':
-      basePool = [{ key: 'GPT-6.2-sol', label: 'GPT-6.2 Sol', profile: 'P2' }];
+      basePool = [
+        { key: 'GPT-6.2-sol', label: 'GPT-6.2 Sol', profile: 'P2' },
+        { key: 'GPT-6.2-astra', label: 'GPT-6.2 Astra', profile: 'P2' }
+      ];
       break;
     case 'claude-monitor':
+      basePool = [
+        { key: 'Claude Opus 5.5', label: 'Opus 5.5', profile: 'P1' },
+        { key: 'Claude Sonnet 5.5', label: 'Sonnet 5.5', profile: 'P4' },
+        { key: 'Claude Haiku 4.5', label: 'Haiku 4.5', profile: 'P4' }
+      ];
+      break;
     case 'antigravity-opus-head':
       basePool = [
         { key: 'Claude Opus 5.5', label: 'Opus 5.5', profile: 'P1' },

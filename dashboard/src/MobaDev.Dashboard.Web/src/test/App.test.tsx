@@ -616,10 +616,12 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
 
     const codexSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for MOBAi ChatGPT Codex');
     expect(within(codexSubs).getByText('GPT-6.2 Sol:')).toBeInTheDocument();
+    expect(within(codexSubs).getByText('GPT-6.2 Astra:')).toBeInTheDocument();
 
     const claudeSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for MOBAi Claude Opus');
     expect(within(claudeSubs).getByText('Opus 5.5:')).toBeInTheDocument();
     expect(within(claudeSubs).getByText('Sonnet 5.5:')).toBeInTheDocument();
+    expect(within(claudeSubs).getByText('Haiku 4.5:')).toBeInTheDocument();
 
     const geminiSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for MOBAi Antigravity Gemini');
     expect(within(geminiSubs).getByText('Carbon:')).toBeInTheDocument();
@@ -629,6 +631,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     const opusSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for MOBAi Antigravity Opus');
     expect(within(opusSubs).getByText('Opus 5.5:')).toBeInTheDocument();
     expect(within(opusSubs).getByText('Sonnet 5.5:')).toBeInTheDocument();
+    expect(within(opusSubs).queryByText('Haiku 4.5:')).not.toBeInTheDocument();
 
     // Interactive Color & Symbol Legend popover mounts cleanly on demand without polluting DOM
     expect(screen.queryByRole('region', { name: 'Color and symbol legend' })).not.toBeInTheDocument();

@@ -54,10 +54,12 @@ const useStyles = makeStyles({
 
 const CANONICAL_SUBAGENT_MODELS: ReadonlyArray<{ model: string; profile: string }> = [
   { model: 'GPT-6.2-sol', profile: 'P2' },
+  { model: 'GPT-6.2-astra', profile: 'P2' },
   { model: 'Claude Opus 5.5', profile: 'P1' },
   { model: 'Gemini 4 Carbon', profile: 'P3' },
   { model: 'Gemini 4 Hydrogen', profile: 'P4' },
   { model: 'Claude Sonnet 5.5', profile: 'P4' },
+  { model: 'Claude Haiku 4.5', profile: 'P4' },
   { model: 'GPT-OSS 120B', profile: 'P2' }
 ];
 
@@ -79,6 +81,9 @@ export function normalizeSubAgentModel(
   }
   if (lower.includes('sonnet') || lower.includes('fable')) {
     return { model: 'Claude Sonnet 5.5', profile: 'P4' };
+  }
+  if (lower.includes('haiku')) {
+    return { model: 'Claude Haiku 4.5', profile: 'P4' };
   }
   if (lower.includes('claude')) {
     return { model: 'Claude Opus 5.5', profile: 'P1' };

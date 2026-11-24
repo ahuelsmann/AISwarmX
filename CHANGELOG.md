@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.9.5] - 2026-11-24
+
+### Changed
+- **Expand Allowlist to 8 Approved Models (`docs/allowed-models.md`, `manifest.md`, `docs/delivery-workflow.md`, `DashboardContracts.cs`, `ActiveAgentsStrip.tsx`, `RoleAndModelIcons.tsx`, `MonitorCards.tsx`):** Added **`GPT-6.2 Astra`** (`gpt-6.2-astra`) as Codex's quota-efficient workhorse sub-agent alongside `GPT-6.2 Sol` (noting `codex-auto-review` as Codex's internal Guardian model) and **`Claude Haiku 4.5`** (`claude-haiku-4-5`) strictly for read-only repository search / `Explore` triage in `MOBAi Claude Opus` (and excluded from `MOBAi Antigravity Opus`), plus bidirectional `Opus 5.5` quota-failover guidance between Claude Code and Antigravity.
+
+---
+
 ## [3.9.4] - 2026-11-24
 
 ### Changed

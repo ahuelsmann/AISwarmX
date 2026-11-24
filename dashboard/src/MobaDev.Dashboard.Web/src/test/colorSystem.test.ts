@@ -136,7 +136,9 @@ describe('MOBAdev 2-Axis Color System & Accessibility Gates', () => {
     // P4 fast-delivery models resolve to pink (never gold/amber)
     expect(resolveProfileTone('P4')).toBe('pink');
     expect(resolveModelVisual('Claude Sonnet 5.5').tone).toBe('pink');
+    expect(resolveModelVisual('Claude Haiku 4.5').tone).toBe('pink');
     expect(resolveModelVisual('Gemini 4 Hydrogen').tone).toBe('pink');
+    expect(resolveModelVisual('GPT-6.2-astra').tone).toBe('teal');
 
     // Tool identity families
     expect(resolveToolTone('ChatGPT Codex')).toBe('teal');
