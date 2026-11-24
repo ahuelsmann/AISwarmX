@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import test from 'node:test';
+import { DatabaseSync } from 'node:sqlite';
 
 const BUS_SCRIPT = path.resolve(import.meta.dirname, 'mobai-swarm-bus.mjs');
+const HOOK_SCRIPT = path.resolve(import.meta.dirname, 'claude-swarm-bus-hook.mjs');
 
 function createTempDbPath() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobai-bus-test-'));
@@ -124,6 +126,71 @@ test('MOBAi Swarm Bus handles full MCP JSON-RPC stdio round-trip', async () => {
         resolve();
       });
     });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Claude Swarm Bus hook emits nothing when empty and injects unread messages + foreign locks when present', () => {
+  const { dir, dbPath } = createTempDbPath();
+  try {
+    const emptyRes = spawnSync(process.execPath, ['--no-warnings', HOOK_SCRIPT], {
+      env: { ...process.env, MOBADEV_SWARM_BUS_DB: dbPath },
+      input: JSON.stringify({ hook_event_name: 'UserPromptSubmit' }),
+      encoding: 'utf8'
+    });
+    assert.equal(emptyRes.status, 0);
+    assert.equal(emptyRes.stdout.trim(), '');
+
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at_utc TEXT NOT NULL,
+        sender TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        topic TEXT NOT NULL,
+        body TEXT NOT NULL,
+        pr_number INTEGER,
+        issue_number INTEGER,
+        priority TEXT NOT NULL DEFAULT 'normal',
+        reply_to_id INTEGER,
+        status TEXT NOT NULL DEFAULT 'unread',
+        acked_by TEXT,
+        acked_at_utc TEXT
+      );
+      CREATE TABLE locks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent TEXT NOT NULL,
+        path_pattern TEXT NOT NULL UNIQUE,
+        pr_number INTEGER,
+        claimed_at_utc TEXT NOT NULL,
+        expires_at_utc TEXT NOT NULL
+      );
+    `);
+    const nowIso = new Date().toISOString();
+    const futureIso = new Date(Date.now() + 3600_000).toISOString();
+    db.prepare(`
+      INSERT INTO messages (created_at_utc, sender, recipient, topic, body, pr_number, priority, status)
+      VALUES (?, 'antigravity-gemini', 'claude-opus', 'sonar-finding', 'Fix githubactions:S6505 at quality.yml:765', 537, 'high', 'unread')
+    `).run(nowIso);
+    db.prepare(`
+      INSERT INTO locks (agent, path_pattern, pr_number, claimed_at_utc, expires_at_utc)
+      VALUES ('codex', 'MOBAdemo/app/src/shell', 541, ?, ?)
+    `).run(nowIso, futureIso);
+    db.close();
+
+    const populatedRes = spawnSync(process.execPath, ['--no-warnings', HOOK_SCRIPT], {
+      env: { ...process.env, MOBADEV_SWARM_BUS_DB: dbPath },
+      input: JSON.stringify({ hook_event_name: 'UserPromptSubmit' }),
+      encoding: 'utf8'
+    });
+    assert.equal(populatedRes.status, 0);
+    const parsed = JSON.parse(populatedRes.stdout.trim());
+    assert.equal(parsed.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+    assert.match(parsed.hookSpecificOutput.additionalContext, /sonar-finding/);
+    assert.match(parsed.hookSpecificOutput.additionalContext, /PR #537/);
+    assert.match(parsed.hookSpecificOutput.additionalContext, /MOBAdemo\/app\/src\/shell/);
+  } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

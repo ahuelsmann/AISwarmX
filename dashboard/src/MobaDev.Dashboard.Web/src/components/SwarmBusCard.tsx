@@ -1,4 +1,5 @@
-import { Badge, Card, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { useState } from 'react';
+import { Badge, Button, Card, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { Chat16Regular, LockClosed16Regular } from '@fluentui/react-icons';
 import type { SwarmBusResponse } from '../types/dashboard';
 
@@ -7,10 +8,17 @@ interface SwarmBusCardProps {
   nowMs: number;
 }
 
+type StatusFilter = 'all' | 'unread' | 'acked';
+
 const useStyles = makeStyles({
+  page: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '14px'
+  },
   card: {
-    padding: '14px 16px',
-    gap: '10px',
+    padding: '16px 18px',
+    gap: '12px',
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`
   },
@@ -18,7 +26,7 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: '8px',
+    gap: '10px',
     flexWrap: 'wrap'
   },
   titleGroup: {
@@ -39,11 +47,23 @@ const useStyles = makeStyles({
     gap: '6px',
     flexWrap: 'wrap'
   },
+  filterBar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px',
+    flexWrap: 'wrap'
+  },
+  filterButtons: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px'
+  },
   locksStrip: {
     display: 'flex',
     flexWrap: 'wrap',
     gap: '6px',
-    padding: '6px 8px',
+    padding: '8px 10px',
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground2,
     border: `1px solid ${tokens.colorNeutralStroke2}`
@@ -52,7 +72,7 @@ const useStyles = makeStyles({
     display: 'inline-flex',
     alignItems: 'center',
     gap: '5px',
-    padding: '2px 8px',
+    padding: '3px 8px',
     borderRadius: tokens.borderRadiusSmall,
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -61,13 +81,13 @@ const useStyles = makeStyles({
   feed: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '6px'
+    gap: '8px'
   },
   row: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '3px',
-    padding: '8px 10px',
+    gap: '4px',
+    padding: '10px 12px',
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground2,
     border: `1px solid ${tokens.colorNeutralStroke2}`
@@ -119,89 +139,140 @@ function formatRelativeUtc(iso: string, nowMs: number): string {
 
 export function SwarmBusCard({ swarmBus, nowMs }: SwarmBusCardProps) {
   const styles = useStyles();
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
   if (!swarmBus) {
     return null;
   }
 
-  const recent = swarmBus.recentMessages.slice(0, 6);
+  const unreadTotal = swarmBus.unreadCount;
+  const ackedTotal = swarmBus.recentMessages.filter((m) => m.status === 'acked').length;
+  const filteredMessages = swarmBus.recentMessages.filter((m) => {
+    if (statusFilter === 'unread') return m.status === 'unread';
+    if (statusFilter === 'acked') return m.status === 'acked';
+    return true;
+  });
 
   return (
-    <Card className={styles.card} aria-label="Swarm Bus Cross-Tool MCP Feed">
-      <div className={styles.header}>
-        <div className={styles.titleGroup}>
-          <Chat16Regular aria-hidden="true" />
-          <h3 className={styles.title}>Swarm Bus · Cross-Tool MCP</h3>
-          <Badge appearance="tint" color="informative">
-            Read-Only Feed
-          </Badge>
+    <section className={styles.page} aria-label="Swarm Bus Cross-Tool MCP Feed">
+      <Card className={styles.card}>
+        <div className={styles.header}>
+          <div className={styles.titleGroup}>
+            <Chat16Regular aria-hidden="true" />
+            <h2 className={styles.title}>Swarm Bus · Cross-Tool MCP</h2>
+            <Badge appearance="tint" color="informative">
+              Read-Only Feed
+            </Badge>
+          </div>
+          <div className={styles.badges}>
+            <Badge
+              appearance="tint"
+              color={swarmBus.unreadCount > 0 ? 'warning' : 'success'}
+            >
+              {swarmBus.unreadCount} Unread
+            </Badge>
+            <Badge
+              appearance="tint"
+              color={swarmBus.activeLockCount > 0 ? 'informative' : 'subtle'}
+            >
+              {swarmBus.activeLockCount} Locks
+            </Badge>
+          </div>
         </div>
-        <div className={styles.badges}>
-          <Badge
-            appearance="tint"
-            color={swarmBus.unreadCount > 0 ? 'warning' : 'success'}
-          >
-            {swarmBus.unreadCount} Unread
-          </Badge>
-          <Badge
-            appearance="tint"
-            color={swarmBus.activeLockCount > 0 ? 'informative' : 'subtle'}
-          >
-            {swarmBus.activeLockCount} Locks
-          </Badge>
-        </div>
-      </div>
 
-      {swarmBus.activeLocks.length > 0 && (
         <div className={styles.locksStrip} aria-label="Active Cross-Tool Locks">
-          {swarmBus.activeLocks.map((lock) => (
-            <span key={lock.id} className={styles.lockChip}>
-              <LockClosed16Regular aria-hidden="true" />
-              <strong>{lock.agent}</strong>
-              <span>{lock.pathPattern}</span>
-              {lock.prNumber ? <span>PR #{lock.prNumber}</span> : null}
-            </span>
-          ))}
+          {swarmBus.activeLocks.length === 0 ? (
+            <Text className={styles.empty}>No active cross-tool path locks.</Text>
+          ) : (
+            swarmBus.activeLocks.map((lock) => (
+              <span key={lock.id} className={styles.lockChip}>
+                <LockClosed16Regular aria-hidden="true" />
+                <strong>{lock.agent}</strong>
+                <span>{lock.pathPattern}</span>
+                {lock.prNumber ? <span>PR #{lock.prNumber}</span> : null}
+                <span>(exp {formatRelativeUtc(lock.expiresAtUtc, nowMs) || 'active'})</span>
+              </span>
+            ))
+          )}
         </div>
-      )}
 
-      {recent.length === 0 ? (
-        <Text className={styles.empty}>
-          {swarmBus.source.notice ?? 'No cross-tool bus messages recorded yet.'}
-        </Text>
-      ) : (
-        <div className={styles.feed}>
-          {recent.map((msg) => (
-            <div key={msg.id} className={styles.row}>
-              <div className={styles.rowTop}>
-                <span className={styles.route}>
-                  <span>
-                    {msg.sender} → {msg.recipient}
-                  </span>
-                  <Badge appearance="outline" color="informative">
-                    {msg.topic}
-                  </Badge>
-                  {msg.prNumber ? (
-                    <Badge appearance="tint" color="subtle">
-                      PR #{msg.prNumber}
-                    </Badge>
-                  ) : null}
-                </span>
-                <span className={styles.meta}>
-                  <Badge
-                    appearance="tint"
-                    color={msg.status === 'unread' ? 'warning' : 'success'}
-                  >
-                    {msg.status}
-                  </Badge>
-                  <span>{formatRelativeUtc(msg.createdAtUtc, nowMs)}</span>
-                </span>
-              </div>
-              <Text className={styles.body}>{msg.body}</Text>
-            </div>
-          ))}
+        <div className={styles.filterBar}>
+          <div className={styles.filterButtons} role="group" aria-label="Filter Swarm Bus messages">
+            <Button
+              size="small"
+              appearance={statusFilter === 'all' ? 'primary' : 'subtle'}
+              onClick={() => setStatusFilter('all')}
+            >
+              All ({swarmBus.recentMessages.length})
+            </Button>
+            <Button
+              size="small"
+              appearance={statusFilter === 'unread' ? 'primary' : 'subtle'}
+              onClick={() => setStatusFilter('unread')}
+            >
+              Unread ({unreadTotal})
+            </Button>
+            <Button
+              size="small"
+              appearance={statusFilter === 'acked' ? 'primary' : 'subtle'}
+              onClick={() => setStatusFilter('acked')}
+            >
+              Acked ({ackedTotal})
+            </Button>
+          </div>
+          <Text className={styles.empty}>
+            Shared SQLite MCP channel across Claude Code, ChatGPT Codex &amp; Antigravity
+          </Text>
         </div>
-      )}
-    </Card>
+
+        {filteredMessages.length === 0 ? (
+          <Text className={styles.empty}>
+            {swarmBus.source.notice ?? 'No matching cross-tool bus messages.'}
+          </Text>
+        ) : (
+          <div className={styles.feed}>
+            {filteredMessages.map((msg) => (
+              <div key={msg.id} className={styles.row}>
+                <div className={styles.rowTop}>
+                  <span className={styles.route}>
+                    <span>
+                      #{msg.id} · {msg.sender} → {msg.recipient}
+                    </span>
+                    <Badge appearance="outline" color="informative">
+                      {msg.topic}
+                    </Badge>
+                    {msg.priority === 'high' || msg.priority === 'urgent' ? (
+                      <Badge appearance="tint" color="warning">
+                        {msg.priority}
+                      </Badge>
+                    ) : null}
+                    {msg.prNumber ? (
+                      <Badge appearance="tint" color="subtle">
+                        PR #{msg.prNumber}
+                      </Badge>
+                    ) : null}
+                    {msg.issueNumber ? (
+                      <Badge appearance="tint" color="subtle">
+                        #{msg.issueNumber}
+                      </Badge>
+                    ) : null}
+                  </span>
+                  <span className={styles.meta}>
+                    <Badge
+                      appearance="tint"
+                      color={msg.status === 'unread' ? 'warning' : 'success'}
+                    >
+                      {msg.status}
+                    </Badge>
+                    <span>{formatRelativeUtc(msg.createdAtUtc, nowMs)}</span>
+                  </span>
+                </div>
+                <Text className={styles.body}>{msg.body}</Text>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </section>
   );
 }

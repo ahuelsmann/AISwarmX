@@ -5,6 +5,16 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.11.1] - 2026-11-24
+
+### Added
+- **Claude Code Swarm Bus Hook (`bus/claude-swarm-bus-hook.mjs`, `~/.claude/settings.json`):** Added a read-only `SessionStart` and `UserPromptSubmit` hook that automatically surfaces unread `MOBAi Swarm Bus` messages (`claude-opus`/`all`) and active foreign path locks into Claude's prompt context while emitting zero tokens when idle, plus pre-approved `mcp__mobai-swarm-bus__*` permissions.
+
+### Changed
+- **Dedicated `Communication` Dashboard Tab (`StatusHeader.tsx`, `SwarmBusCard.tsx`, `App.tsx`):** Moved **Swarm Bus · Cross-Tool MCP** out of `Live Operations` onto its own dedicated **`Communication`** tab page with an unread counter badge in the header, status filters (`All` / `Unread` / `Acked`), full message list, and active cross-tool path locks strip.
+
+---
+
 ## [3.11.0] - 2026-11-24
 
 ### Added

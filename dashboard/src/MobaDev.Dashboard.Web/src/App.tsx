@@ -271,6 +271,7 @@ export function App() {
           activeTab={activeTab}
           onTabChange={setActiveTab}
           driftBadgeCount={driftBadgeCount}
+          communicationUnreadCount={snapshot?.swarmBus?.unreadCount ?? 0}
           isDark={isDark}
         />
 
@@ -283,7 +284,10 @@ export function App() {
 
           {loading &&
             !snapshot &&
-            (activeTab === 'live' || activeTab === 'architecture' || activeTab === 'matrix') && (
+            (activeTab === 'live' ||
+              activeTab === 'communication' ||
+              activeTab === 'architecture' ||
+              activeTab === 'matrix') && (
               <LoadingSkeleton styles={styles} />
             )}
 
@@ -308,8 +312,6 @@ export function App() {
                 />
               </div>
 
-              <SwarmBusCard swarmBus={snapshot.swarmBus} nowMs={nowMs} />
-
               <div className={styles.liveFooter}>
                 <Link
                   href="#live-top"
@@ -324,6 +326,10 @@ export function App() {
                 </Link>
               </div>
             </>
+          )}
+
+          {snapshot && activeTab === 'communication' && (
+            <SwarmBusCard swarmBus={snapshot.swarmBus} nowMs={nowMs} />
           )}
 
           {snapshot && activeTab === 'architecture' && (
