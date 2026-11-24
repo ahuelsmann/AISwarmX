@@ -184,31 +184,31 @@ export function ArchitectureDiagramsView({
       title: 'Decision & Steering Triad (4 Standing Master / Root Heads)',
       badge: `4/4 Root Heads · Code WIP ${openPrCount}/3`,
       tone: openPrCount > 3 ? 'danger' : 'ok',
-      body: 'Standing coordination layer across GPT Head (P2 Technical Director & CPM), Claude Head (P1 COO), Opus Head (P1 Acting COO & Opus Orchestrator), and Argon Head (P3 Head of AI Strategy & UI/UX). All 4 Root Heads can spawn and steer arbitrary multi-model sub-agent swarms.'
+      body: 'Standing coordination layer across MOBAi ChatGPT Codex (P2 Technical Director & CPM), MOBAi Claude Opus (P1 COO), MOBAi Antigravity Opus (P1 Acting COO & Opus Orchestrator), and MOBAi Antigravity Gemini (P3 Head of AI Strategy & UI/UX). All 4 Root Heads can spawn and steer arbitrary multi-model sub-agent swarms.'
     },
     'codex-monitor': {
-      title: `GPT Head · P2 (${codexMon?.model ?? 'gpt-6.2-sol'})`,
+      title: `MOBAi ChatGPT Codex · P2 (${codexMon?.model ?? 'gpt-6.2-sol'})`,
       badge: `${stateLabelShort(codexMon?.state ?? 'offline')} · Sub-agents: ${codexMon?.activeSubAgentCount ?? 0}`,
       tone: stateToStatusKey(codexMon?.state ?? 'offline'),
       body: 'Master/Root ChatGPT Codex session running as Technical Director & CPM. Tracks Kanban slices, dispatches Codex Writer / Reviewer sub-agents in isolated worktrees, and runs read-only P2 cross-family reviews.'
     },
     'claude-monitor': {
-      title: `Claude Head · P1 (${claudeMon?.model ?? 'Claude Opus 5.5'})`,
+      title: `MOBAi Claude Opus · P1 (${claudeMon?.model ?? 'Claude Opus 5.5'})`,
       badge: `${stateLabelShort(claudeMon?.state ?? 'offline')} · Sub-agents: ${claudeMon?.activeSubAgentCount ?? 0}`,
       tone: stateToStatusKey(claudeMon?.state ?? 'offline'),
       body: 'Master/Root Claude Code session acting as Chief Operating Officer (COO) & Kanban single-writer. Spawns fresh P1 sub-agents for deep architectural implementation and clean-context Final Reviews.'
     },
     'antigravity-opus-head': {
-      title: `Opus Head · P1 (${opusMon?.model ?? 'Orchestrator · Claude Opus 5.5'})`,
+      title: `MOBAi Antigravity Opus · P1 (${opusMon?.model ?? 'Orchestrator · Claude Opus 5.5'})`,
       badge: `${stateLabelShort(opusMon?.state ?? 'offline')} · Sub-agents: ${opusMon?.activeSubAgentCount ?? 0}`,
       tone: stateToStatusKey(opusMon?.state ?? 'offline'),
-      body: 'Master/Root Antigravity Orchestrator running Claude Opus 5.5 Medium under Google AI Ultra. Acts as P1 Acting COO / Architecture Lead & Fresh P1 Final Reviewer with full sub-agent swarm spawning.'
+      body: 'Master/Root Antigravity Orchestrator running Claude Opus under Google AI Ultra. Acts as P1 Acting COO / Architecture Lead & Fresh P1 Final Reviewer with full sub-agent swarm spawning.'
     },
     'antigravity-monitor': {
-      title: `Argon Head · P3 (${agMon?.model ?? 'Orchestrator · Gemini 4 Argon'})`,
+      title: `MOBAi Antigravity Gemini · P3 (${agMon?.model ?? 'Orchestrator · Gemini 4 Argon'})`,
       badge: `${stateLabelShort(agMon?.state ?? 'offline')} · Sub-agents: ${agMon?.activeSubAgentCount ?? 0}`,
       tone: stateToStatusKey(agMon?.state ?? 'offline'),
-      body: 'Master/Root Antigravity Orchestrator running Gemini 4 Argon Medium. Acts as Head of AI Strategy, UI/UX Architecture Lead (WinUI 3, MAUI, MOBAdev cockpit), and multi-model sub-agent swarm coordinator.'
+      body: 'Master/Root Antigravity Orchestrator running Gemini (Carbon/Neon/Argon). Acts as Head of AI Strategy, UI/UX Architecture Lead (WinUI 3, MAUI, MOBAdev cockpit), and multi-model sub-agent swarm coordinator.'
     },
     subagents: {
       title: 'Ephemeral Runtime Sub-Agents (Spawned per Task / PR)',
@@ -283,7 +283,7 @@ export function ArchitectureDiagramsView({
       id: 'codex-monitor',
       x: 22,
       cx: 124,
-      title: 'GPT Head',
+      title: 'MOBAi ChatGPT Codex',
       subtitle: 'Technical Director & CPM',
       profile: 'P2 · ChatGPT Codex',
       identityColors: p2Colors,
@@ -293,7 +293,7 @@ export function ArchitectureDiagramsView({
       id: 'claude-monitor',
       x: 246,
       cx: 348,
-      title: 'Claude Head',
+      title: 'MOBAi Claude Opus',
       subtitle: 'Chief Operating Officer',
       profile: 'P1 · Claude Code',
       identityColors: p1Colors,
@@ -303,7 +303,7 @@ export function ArchitectureDiagramsView({
       id: 'antigravity-opus-head',
       x: 470,
       cx: 572,
-      title: 'Opus Head',
+      title: 'MOBAi Antigravity Opus',
       subtitle: 'Acting COO · Opus Root',
       profile: 'P1 · Antigravity Opus',
       identityColors: p1Colors,
@@ -313,9 +313,9 @@ export function ArchitectureDiagramsView({
       id: 'antigravity-monitor',
       x: 694,
       cx: 796,
-      title: 'Argon Head',
+      title: 'MOBAi Antigravity Gemini',
       subtitle: 'AI Strategy & UI/UX',
-      profile: 'P3 · Antigravity Argon',
+      profile: 'P3 · Antigravity Gemini',
       identityColors: p3Colors,
       monitor: agMon
     }
@@ -688,48 +688,39 @@ export function ArchitectureDiagramsView({
                   />
                   <text
                     x={box.x + 10}
-                    y="139"
+                    y="136"
                     fill={box.identityColors.fg}
-                    fontSize="12"
+                    fontSize="11"
                     fontWeight="700"
                   >
                     {box.title}
                   </text>
                   <text
                     x={box.x + 10}
-                    y="154"
+                    y="151"
                     fill={tokens.colorNeutralForeground2}
                     fontSize="9.5"
                   >
-                    {box.subtitle}
-                  </text>
-                  <text
-                    x={box.x + 10}
-                    y="175"
-                    fill={box.identityColors.fg}
-                    fontSize="9.5"
-                    fontWeight="600"
-                  >
-                    {box.profile}
+                    {box.profile.split(' · ')[0]} · {box.subtitle}
                   </text>
 
                   {/* Status Pill inside Root Head Card */}
                   <rect
-                    x={box.x + 114}
-                    y="127"
-                    width="82"
+                    x={box.x + 10}
+                    y="162"
+                    width="88"
                     height="18"
                     rx="9"
                     fill={stColors.bg}
                     stroke={stColors.border}
                     strokeWidth="1"
                   />
-                  <circle cx={box.x + 123} cy="136" r="3" fill={stColors.solid} />
+                  <circle cx={box.x + 19} cy="171" r="3" fill={stColors.solid} />
                   <text
-                    x={box.x + 130}
-                    y="139.5"
+                    x={box.x + 26}
+                    y="174.5"
                     fill={stColors.fg}
-                    fontSize="9.5"
+                    fontSize="9"
                     fontWeight="600"
                   >
                     {stateLabelShort(box.monitor?.state ?? 'offline')}
@@ -738,9 +729,9 @@ export function ArchitectureDiagramsView({
                   {/* Sub-agent Counter Pill inside Root Head Card */}
                   <g opacity={subCount > 0 ? 1 : 0.48}>
                     <rect
-                      x={box.x + 114}
+                      x={box.x + 104}
                       y="162"
-                      width="82"
+                      width="90"
                       height="18"
                       rx="9"
                       fill={box.identityColors.bg}
@@ -748,11 +739,11 @@ export function ArchitectureDiagramsView({
                       strokeWidth="1"
                     />
                     <text
-                      x={box.x + 155}
+                      x={box.x + 149}
                       y="174.5"
                       textAnchor="middle"
                       fill={box.identityColors.fg}
-                      fontSize="9.5"
+                      fontSize="9"
                       fontWeight="600"
                     >
                       Sub-agents: {subCount}

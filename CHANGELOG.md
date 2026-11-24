@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.9.0] - 2026-11-24
+
+### Changed
+- **`MOBAi` Root Head Naming (Variant B) & Multi-Project Namespace Filtering (`CodexMonitorProvider.cs`, `ClaudeMonitorProvider.cs`, `AntigravityMonitorProvider.cs`, `DashboardContracts.cs`, Frontend Components):** Standardized the 4 standing Root Head titles to `MOBAi ChatGPT Codex` (`codex-monitor`), `MOBAi Claude Opus` (`claude-monitor`), `MOBAi Antigravity Gemini` (`antigravity-monitor`), and `MOBAi Antigravity Opus` (`antigravity-opus-head`), filtered sessions/threads/summaries by the `MOBAi ` namespace (with backward-compatible legacy fallback for `GPT Head`/`Claude Head`/`Argon Head`/`Opus Head`) so future sessions of separate projects do not trigger hygiene warnings or sub-agent overcounting, and added `Orchestrator · Gemini 4 Carbon` transcript model detection.
+
+---
+
 ## [3.8.9] - 2026-11-23
 
 ### Changed

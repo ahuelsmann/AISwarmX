@@ -44,7 +44,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
       monitors: [
         {
           id: 'claude-monitor',
-          displayName: 'Claude Head',
+          displayName: 'MOBAi Claude Opus',
           role: 'Chief Operating Officer (COO)',
           profile: 'P1',
           tool: 'Claude Code',
@@ -59,7 +59,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
         },
         {
           id: 'codex-monitor',
-          displayName: 'GPT Head',
+          displayName: 'MOBAi ChatGPT Codex',
           role: 'Technical Director & CPM',
           profile: 'P2',
           tool: 'ChatGPT Codex',
@@ -74,7 +74,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
         },
         {
           id: 'antigravity-monitor',
-          displayName: 'Argon Head',
+          displayName: 'MOBAi Antigravity Gemini',
           role: 'Head of AI Strategy',
           profile: 'P3',
           tool: 'Antigravity',
@@ -89,7 +89,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
         },
         {
           id: 'antigravity-opus-head',
-          displayName: 'Opus Head',
+          displayName: 'MOBAi Antigravity Opus',
           role: 'Acting COO & Opus Orchestrator',
           profile: 'P1',
           tool: 'Antigravity',
@@ -639,13 +639,18 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
       'Open PRs (1)'
     ]);
 
-    // Row 1: Compact monitor cards ordered GPT Head -> Claude Head -> Argon Head -> Opus Head
+    // Row 1: Compact monitor cards ordered MOBAi ChatGPT Codex -> MOBAi Claude Opus -> MOBAi Antigravity Gemini -> MOBAi Antigravity Opus
     const monitorSection = screen.getByRole('region', { name: 'Live Monitor Status' });
     expect(
       within(monitorSection)
         .getAllByRole('heading', { level: 2 })
         .map((h) => h.textContent)
-    ).toEqual(['GPT Head', 'Claude Head', 'Argon Head', 'Opus Head']);
+    ).toEqual([
+      'MOBAi ChatGPT Codex',
+      'MOBAi Claude Opus',
+      'MOBAi Antigravity Gemini',
+      'MOBAi Antigravity Opus'
+    ]);
     expect(screen.getByText(/Reset: 12am \(Europe\/Berlin\)/)).toBeInTheDocument();
     expect(screen.getByText('Active · Hourly')).toBeInTheDocument();
     expect(screen.getAllByText('Standby').length).toBeGreaterThanOrEqual(2);
@@ -919,14 +924,14 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
         })
       ).toBeInTheDocument();
 
-      await user.click(screen.getByRole('button', { name: 'Select GPT Head' }));
-      expect(screen.getByText(/GPT Head · P2/)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Select MOBAi ChatGPT Codex' }));
+      expect(screen.getByText(/MOBAi ChatGPT Codex · P2/)).toBeInTheDocument();
 
-      await user.click(screen.getByRole('button', { name: 'Select Opus Head' }));
-      expect(screen.getByText(/Opus Head · P1/)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Select MOBAi Antigravity Opus' }));
+      expect(screen.getByText(/MOBAi Antigravity Opus · P1/)).toBeInTheDocument();
 
-      await user.click(screen.getByRole('button', { name: 'Select Argon Head' }));
-      expect(screen.getByText(/Argon Head · P3/)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Select MOBAi Antigravity Gemini' }));
+      expect(screen.getByText(/MOBAi Antigravity Gemini · P3/)).toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: 'Select lifecycle stage 2. Ready' }));
       expect(screen.getByText('Stage 2 · Ready (Human Maintainer Trigger)')).toBeInTheDocument();
@@ -1006,19 +1011,21 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
 
     expect(
       within(within(monitorSection).getByTestId('monitor-slot-3')).getByRole('heading', {
-        name: 'Opus Head'
+        name: 'MOBAi Antigravity Opus'
       })
     ).toBeInTheDocument();
     expect(within(monitorSection).getByTestId('monitor-slot-4')).toHaveTextContent(/Empty slot/i);
     expect(within(monitorSection).getByTestId('monitor-slot-5')).toHaveTextContent(/Empty slot/i);
 
-    // Move Opus Head (slot 3) to empty slot 5 via click-move button
-    await user.click(within(monitorSection).getByRole('button', { name: 'Move Opus Head' }));
+    // Move MOBAi Antigravity Opus (slot 3) to empty slot 5 via click-move button
+    await user.click(
+      within(monitorSection).getByRole('button', { name: 'Move MOBAi Antigravity Opus' })
+    );
     await user.click(within(monitorSection).getByRole('button', { name: 'Place in grid slot 6' }));
 
     expect(
       within(within(monitorSection).getByTestId('monitor-slot-5')).getByRole('heading', {
-        name: 'Opus Head'
+        name: 'MOBAi Antigravity Opus'
       })
     ).toBeInTheDocument();
     expect(within(monitorSection).getByTestId('monitor-slot-3')).toHaveTextContent(/Empty slot/i);
@@ -1032,7 +1039,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
       'antigravity-opus-head'
     ]);
 
-    // Drag & drop swap: drag Claude Head (slot 1) onto Argon Head (slot 2)
+    // Drag & drop swap: drag MOBAi Claude Opus (slot 1) onto MOBAi Antigravity Gemini (slot 2)
     const slot1 = within(monitorSection).getByTestId('monitor-slot-1');
     const slot2 = within(monitorSection).getByTestId('monitor-slot-2');
     const claudeCard = slot1.querySelector('[draggable="true"]') as HTMLElement;
@@ -1068,17 +1075,17 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     const reloadedSection = screen.getByRole('region', { name: 'Live Monitor Status' });
     expect(
       within(within(reloadedSection).getByTestId('monitor-slot-1')).getByRole('heading', {
-        name: 'Argon Head'
+        name: 'MOBAi Antigravity Gemini'
       })
     ).toBeInTheDocument();
     expect(
       within(within(reloadedSection).getByTestId('monitor-slot-2')).getByRole('heading', {
-        name: 'Claude Head'
+        name: 'MOBAi Claude Opus'
       })
     ).toBeInTheDocument();
     expect(
       within(within(reloadedSection).getByTestId('monitor-slot-5')).getByRole('heading', {
-        name: 'Opus Head'
+        name: 'MOBAi Antigravity Opus'
       })
     ).toBeInTheDocument();
 
@@ -1087,7 +1094,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(readMonitorGridCookie()).toBeNull();
     expect(
       within(within(reloadedSection).getByTestId('monitor-slot-3')).getByRole('heading', {
-        name: 'Opus Head'
+        name: 'MOBAi Antigravity Opus'
       })
     ).toBeInTheDocument();
   });

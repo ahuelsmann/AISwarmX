@@ -339,17 +339,17 @@ function slotsEqual(left: (string | null)[], right: (string | null)[]): boolean 
 }
 
 function resolveMonitorMandate(monitor: MonitorInfo): string {
-  if (monitor.id === 'antigravity-opus-head' || /opus head/i.test(monitor.displayName)) {
-    return 'Master/Root Orchestrator (P1 Opus 5.5) · Acting COO & Sub-Agent Swarm Spawner';
+  if (monitor.id === 'antigravity-opus-head' || /antigravity opus|opus head/i.test(monitor.displayName)) {
+    return 'MOBAi Antigravity Opus (P1 Opus 5.5) · Acting COO & Sub-Agent Swarm Spawner';
   }
-  if (monitor.id === 'antigravity-monitor' || /argon head/i.test(monitor.displayName)) {
-    return 'Master/Root Orchestrator (P3 Argon) · AI Strategy, UI/UX & Sub-Agent Swarm Spawner';
+  if (monitor.id === 'antigravity-monitor' || /antigravity gemini|argon head/i.test(monitor.displayName)) {
+    return 'MOBAi Antigravity Gemini (P3) · AI Strategy, UI/UX & Sub-Agent Swarm Spawner';
   }
   if (monitor.id === 'claude-monitor' || /claude/i.test(monitor.displayName)) {
-    return 'Master/Root COO (P1) · Kanban Single-Writer & Swarm Spawner';
+    return 'MOBAi Claude Opus (P1 COO) · Kanban Single-Writer & Swarm Spawner';
   }
-  if (monitor.id === 'codex-monitor' || /gpt head|codex/i.test(monitor.displayName)) {
-    return 'Master/Root TD & CPM (P2) · Architecture Veto & Cross-Family Swarm Spawner';
+  if (monitor.id === 'codex-monitor' || /chatgpt|gpt head|codex/i.test(monitor.displayName)) {
+    return 'MOBAi ChatGPT Codex (P2 TD & CPM) · Architecture Veto & Cross-Family Swarm Spawner';
   }
   return monitor.role;
 }

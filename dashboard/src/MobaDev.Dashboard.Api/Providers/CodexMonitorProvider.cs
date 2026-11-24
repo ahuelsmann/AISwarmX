@@ -10,15 +10,18 @@ using MobaDev.Dashboard.Api.Security;
 namespace MobaDev.Dashboard.Api.Providers;
 
 /// <summary>
-/// Reads standing GPT Head (formerly Codex Monitor) metadata read-only from ~/.codex/state_5.sqlite,
-/// automation.toml, and session rollout tail telemetry (usage/rate-limit signals only).
+/// Reads standing MOBAi ChatGPT Codex (formerly GPT Head / Codex Monitor) metadata read-only from
+/// ~/.codex/state_5.sqlite, automation.toml, and session rollout tail telemetry (usage/rate-limit signals only).
 /// </summary>
 public sealed partial class CodexMonitorProvider
 {
     private const int TailReadBytes = 64 * 1024;
     private const string MonitorId = "codex-monitor";
-    private const string DisplayName = "GPT Head";
-    private const string LegacyDisplayName = "Codex Monitor";
+    private const string DisplayName = "MOBAi ChatGPT Codex";
+    private const string LegacyHeadDisplayName = "GPT Head";
+    private const string LegacyMonitorDisplayName = "Codex Monitor";
+    private const string MobaNamespacePrefix = "MOBAi ";
+    private const string MobaAltPrefix = "MOBA ";
     private const string Role = "Technical Director & CPM";
     private const string Profile = "P2";
     private const string Tool = "ChatGPT Codex";
@@ -50,7 +53,7 @@ public sealed partial class CodexMonitorProvider
                 ORDER BY updated_at DESC
                 """;
 
-            var allActiveThreads = new List<CodexThreadRecord>();
+            var mobaThreads = new List<CodexThreadRecord>();
             var standingThreads = new List<CodexThreadRecord>();
             using var reader = command.ExecuteReader();
             while (reader.Read())
@@ -59,12 +62,15 @@ public sealed partial class CodexMonitorProvider
                 var name = reader.IsDBNull(1) ? null : reader.GetString(1);
                 var model = reader.IsDBNull(2) ? null : reader.GetString(2);
                 var updatedAtSeconds = reader.IsDBNull(3) ? 0L : reader.GetInt64(3);
-                var isStanding = !string.IsNullOrWhiteSpace(name) &&
-                                 !string.Equals(name, "Guardian review", StringComparison.OrdinalIgnoreCase);
+
+                if (IsForeignProjectNamedThread(name))
+                {
+                    continue;
+                }
 
                 var record = new CodexThreadRecord(id, name ?? string.Empty, model, updatedAtSeconds);
-                allActiveThreads.Add(record);
-                if (isStanding)
+                mobaThreads.Add(record);
+                if (IsMobaStandingThread(name))
                 {
                     standingThreads.Add(record);
                 }
@@ -74,17 +80,15 @@ public sealed partial class CodexMonitorProvider
 
             if (standingThreads.Count == 0)
             {
-                var fallbackThreads = allActiveThreads
+                var fallbackThreads = mobaThreads
                     .Where(t => t.UpdatedAtSeconds >= subAgentCutoffSeconds)
                     .ToList();
                 var fallbackByModel = CountThreadsByModel(fallbackThreads, "gpt-6.2-sol");
-                return Task.FromResult(Unavailable(now, "ok", "No active GPT Head thread found.", automationStatus, fallbackThreads.Count, fallbackByModel));
+                return Task.FromResult(Unavailable(now, "ok", $"No active {DisplayName} thread found.", automationStatus, fallbackThreads.Count, fallbackByModel));
             }
 
             var selected = standingThreads
-                .OrderByDescending(t =>
-                    string.Equals(t.Name, DisplayName, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(t.Name, LegacyDisplayName, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(t => GetStandingPriorityRank(t.Name))
                 .ThenByDescending(t => t.UpdatedAtSeconds)
                 .First();
 
@@ -100,7 +104,7 @@ public sealed partial class CodexMonitorProvider
                     ? "busy"
                     : "standby";
 
-            var activeSubThreads = allActiveThreads
+            var activeSubThreads = mobaThreads
                 .Where(t =>
                     !string.Equals(t.Id, selected.Id, StringComparison.Ordinal) &&
                     t.UpdatedAtSeconds >= subAgentCutoffSeconds)
@@ -109,7 +113,7 @@ public sealed partial class CodexMonitorProvider
             var activeSubAgentsByModel = CountThreadsByModel(activeSubThreads, selected.Model ?? "gpt-6.2-sol");
 
             var notice = standingThreads.Count > 1
-                ? $"{standingThreads.Count} non-archived named Codex threads active (target: 1)."
+                ? $"{standingThreads.Count} non-archived MOBAi Codex threads active (target: 1)."
                 : null;
             if (!string.IsNullOrEmpty(rateLimitResetLabel))
             {
@@ -149,6 +153,69 @@ public sealed partial class CodexMonitorProvider
                 $"Codex state unreadable: {ex.Message}",
                 automationStatus));
         }
+    }
+
+    private static bool IsMobaStandingThread(string? name)
+    {
+        var trimmed = name?.Trim();
+        if (string.IsNullOrEmpty(trimmed) ||
+            string.Equals(trimmed, "Guardian review", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith(MobaAltPrefix, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(trimmed, LegacyHeadDisplayName, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(trimmed, LegacyMonitorDisplayName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsForeignProjectNamedThread(string? name)
+    {
+        var trimmed = name?.Trim();
+        if (string.IsNullOrEmpty(trimmed) ||
+            string.Equals(trimmed, "Guardian review", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !IsMobaStandingThread(trimmed);
+    }
+
+    private static int GetStandingPriorityRank(string? name)
+    {
+        var trimmed = name?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return 0;
+        }
+
+        if (string.Equals(trimmed, DisplayName, StringComparison.OrdinalIgnoreCase))
+        {
+            return 5;
+        }
+
+        if (trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed.Contains("ChatGPT", StringComparison.OrdinalIgnoreCase) ||
+                   trimmed.Contains("Codex", StringComparison.OrdinalIgnoreCase) ||
+                   trimmed.Contains("GPT", StringComparison.OrdinalIgnoreCase)
+                ? 4
+                : 3;
+        }
+
+        if (trimmed.StartsWith(MobaAltPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return 2;
+        }
+
+        if (string.Equals(trimmed, LegacyHeadDisplayName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, LegacyMonitorDisplayName, StringComparison.OrdinalIgnoreCase))
+        {
+            return 1;
+        }
+
+        return 0;
     }
 
     private static IReadOnlyDictionary<string, int> CountThreadsByModel(

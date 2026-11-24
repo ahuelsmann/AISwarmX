@@ -245,10 +245,10 @@ public sealed class MonitorProvidersTests
         var claude = await new ClaudeMonitorProvider().GetMonitorAsync(paths, CancellationToken.None);
         var antigravityHeads = await new AntigravityMonitorProvider().GetMonitorsAsync(paths, CancellationToken.None);
 
-        Assert.Equal("GPT Head", gpt.DisplayName);
-        Assert.Equal("Claude Head", claude.DisplayName);
+        Assert.Equal("MOBAi ChatGPT Codex", gpt.DisplayName);
+        Assert.Equal("MOBAi Claude Opus", claude.DisplayName);
         Assert.Equal(2, antigravityHeads.Count);
-        Assert.Equal("Argon Head", antigravityHeads[0].DisplayName);
+        Assert.Equal("MOBAi Antigravity Gemini", antigravityHeads[0].DisplayName);
         Assert.Equal("Orchestrator · Gemini 4 Argon", antigravityHeads[0].Model);
         Assert.Equal("busy", antigravityHeads[0].State);
         Assert.Equal(1, antigravityHeads[0].ActiveSessionCount);
@@ -257,7 +257,7 @@ public sealed class MonitorProvidersTests
         Assert.Equal(1, antigravityHeads[0].ActiveSubAgentsByModel!["Gemini 4 Hydrogen"]);
         Assert.Null(antigravityHeads[0].Source.Notice);
 
-        Assert.Equal("Opus Head", antigravityHeads[1].DisplayName);
+        Assert.Equal("MOBAi Antigravity Opus", antigravityHeads[1].DisplayName);
         Assert.Equal("Orchestrator · Claude Opus 5.5", antigravityHeads[1].Model);
         Assert.Equal("standby", antigravityHeads[1].State);
         Assert.Equal(1, antigravityHeads[1].ActiveSessionCount);
@@ -328,5 +328,77 @@ public sealed class MonitorProvidersTests
         var saturatedMonitor = await provider.GetMonitorAsync(paths, CancellationToken.None);
         Assert.Equal("rate_limited", saturatedMonitor.State);
         Assert.NotNull(saturatedMonitor.RateLimitResetLabel);
+    }
+
+    [Fact]
+    public async Task Providers_FilterByMobaiPrefixAndIgnoreForeignProjectSessions()
+    {
+        using var fx = new TempDashboardFixture();
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
+            fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
+
+        var nowEpoch = DateTimeOffset.UtcNow.AddSeconds(-20).ToUnixTimeSeconds();
+        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.CodexHomePath, "state_5.sqlite"), $"""
+            CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, model TEXT, archived INTEGER, updated_at INTEGER);
+            INSERT INTO threads VALUES ('moba-gpt', 'MOBAi ChatGPT Codex', 'gpt-6.2-sol', 0, {nowEpoch});
+            INSERT INTO threads VALUES ('other-gpt', 'NEXTi ChatGPT Codex', 'gpt-6.2-sol', 0, {nowEpoch});
+            """);
+
+        var claudeSessionsDir = Path.Combine(fx.ClaudeHomePath, "sessions");
+        Directory.CreateDirectory(claudeSessionsDir);
+        await File.WriteAllTextAsync(Path.Combine(claudeSessionsDir, "3001.json"), """
+            { "sessionId": "55555555-5555-5555-5555-555555555555", "name": "MOBAi Claude Opus", "status": "idle", "updatedAt": 1795418444682 }
+            """);
+        await File.WriteAllTextAsync(Path.Combine(claudeSessionsDir, "3002.json"), """
+            { "sessionId": "66666666-6666-6666-6666-666666666666", "name": "NEXTi Claude Opus", "status": "busy", "updatedAt": 1795418444999 }
+            """);
+        await File.WriteAllTextAsync(Path.Combine(claudeSessionsDir, "3003.json"), """
+            { "sessionId": "77777777-7777-7777-7777-777777777777", "name": "", "cwd": "C:\\OtherRepo\\App", "status": "busy", "updatedAt": 1795418444999 }
+            """);
+
+        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.AntigravityHomePath, "conversation_summaries.db"), """
+            CREATE TABLE conversation_summaries (
+                conversation_id TEXT PRIMARY KEY,
+                title TEXT,
+                status TEXT,
+                last_modified_time TEXT,
+                source TEXT
+            );
+            INSERT INTO conversation_summaries VALUES ('moba-gem', 'MOBAi Antigravity Gemini', 'CASCADE_RUN_STATUS_RUNNING', '2026-11-24T13:20:00Z', '');
+            INSERT INTO conversation_summaries VALUES ('moba-opus', 'MOBAi Antigravity Opus', 'CASCADE_RUN_STATUS_IDLE', '2026-11-24T13:19:00Z', '');
+            INSERT INTO conversation_summaries VALUES ('other-gem', 'NEXTi Antigravity Gemini', 'CASCADE_RUN_STATUS_RUNNING', '2026-11-24T13:21:00Z', '');
+            INSERT INTO conversation_summaries VALUES ('random-chat', 'Random Chat', 'CASCADE_RUN_STATUS_RUNNING', '2026-11-24T13:21:30Z', '');
+            """);
+
+        var gemLogsDir = Path.Combine(fx.AntigravityHomePath, "brain", "moba-gem", ".system_generated", "logs");
+        Directory.CreateDirectory(gemLogsDir);
+        await File.WriteAllTextAsync(Path.Combine(gemLogsDir, "transcript.jsonl"), "{\"model\":\"gemini-4-carbon-medium\"}\n");
+
+        var codex = await new CodexMonitorProvider().GetMonitorAsync(paths, CancellationToken.None);
+        var claude = await new ClaudeMonitorProvider().GetMonitorAsync(paths, CancellationToken.None);
+        var antigravityHeads = await new AntigravityMonitorProvider().GetMonitorsAsync(paths, CancellationToken.None);
+
+        Assert.Equal("MOBAi ChatGPT Codex", codex.DisplayName);
+        Assert.Equal(1, codex.ActiveSessionCount);
+        Assert.Equal(0, codex.ActiveSubAgentCount);
+        Assert.Null(codex.Source.Notice);
+
+        Assert.Equal("MOBAi Claude Opus", claude.DisplayName);
+        Assert.Equal(1, claude.ActiveSessionCount);
+        Assert.Equal(0, claude.ActiveSubAgentCount);
+        Assert.Null(claude.Source.Notice);
+
+        Assert.Equal(2, antigravityHeads.Count);
+        Assert.Equal("MOBAi Antigravity Gemini", antigravityHeads[0].DisplayName);
+        Assert.Equal("Orchestrator · Gemini 4 Carbon", antigravityHeads[0].Model);
+        Assert.Equal(1, antigravityHeads[0].ActiveSessionCount);
+        Assert.Equal(0, antigravityHeads[0].ActiveSubAgentCount);
+        Assert.Null(antigravityHeads[0].Source.Notice);
+
+        Assert.Equal("MOBAi Antigravity Opus", antigravityHeads[1].DisplayName);
+        Assert.Equal(1, antigravityHeads[1].ActiveSessionCount);
+        Assert.Equal(0, antigravityHeads[1].ActiveSubAgentCount);
+        Assert.Null(antigravityHeads[1].Source.Notice);
     }
 }

@@ -9,22 +9,26 @@ using MobaDev.Dashboard.Api.Security;
 namespace MobaDev.Dashboard.Api.Providers;
 
 /// <summary>
-/// Reads standing Antigravity Root Head metadata (Argon Head &amp; Opus Head) read-only from
-/// ~/.gemini/antigravity/conversation_summaries.db and transcript tail model tags.
+/// Reads standing MOBAi Antigravity Root Head metadata (MOBAi Antigravity Gemini &amp; MOBAi Antigravity Opus)
+/// read-only from ~/.gemini/antigravity/conversation_summaries.db and transcript tail model tags.
 /// </summary>
 public sealed partial class AntigravityMonitorProvider
 {
     private const int TailReadBytes = 512 * 1024;
     private const string ArgonMonitorId = "antigravity-monitor";
-    private const string ArgonDisplayName = "Argon Head";
+    private const string ArgonDisplayName = "MOBAi Antigravity Gemini";
+    private const string LegacyArgonHeadName = "Argon Head";
     private const string LegacyDisplayName = "Antigravity Monitor";
+    private const string MobaNamespacePrefix = "MOBAi ";
+    private const string MobaAltPrefix = "MOBA ";
     private const string ArgonRole = "Head of AI Strategy";
     private const string ArgonProfile = "P3";
     private const string DefaultArgonModel = "Orchestrator · Gemini 4 Argon";
     private const string LegacyDesktopModel = "Orchestrator (Neon)";
 
     private const string OpusMonitorId = "antigravity-opus-head";
-    private const string OpusDisplayName = "Opus Head";
+    private const string OpusDisplayName = "MOBAi Antigravity Opus";
+    private const string LegacyOpusHeadName = "Opus Head";
     private const string OpusRole = "Acting COO & Opus Orchestrator";
     private const string OpusProfile = "P1";
     private const string DefaultOpusModel = "Orchestrator · Claude Opus 5.5";
@@ -64,7 +68,8 @@ public sealed partial class AntigravityMonitorProvider
                 """;
 
             var runningConversationIds = new List<string>();
-            var namedDesktopConversations = new List<AntigravityConversationRecord>();
+            var foreignRootIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var mobaDesktopConversations = new List<AntigravityConversationRecord>();
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
@@ -74,43 +79,54 @@ public sealed partial class AntigravityMonitorProvider
                 var lastModifiedRaw = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
                 var source = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
 
+                var isCliSource = string.Equals(source, "CORTEX_TRAJECTORY_SOURCE_CLI", StringComparison.OrdinalIgnoreCase);
+                if (!isCliSource && !string.IsNullOrWhiteSpace(title) && !IsMobaAntigravityTitle(title))
+                {
+                    if (!string.IsNullOrWhiteSpace(id))
+                    {
+                        foreignRootIds.Add(id);
+                    }
+
+                    continue;
+                }
+
                 if (string.Equals(status, "CASCADE_RUN_STATUS_RUNNING", StringComparison.OrdinalIgnoreCase) &&
                     !string.IsNullOrWhiteSpace(id))
                 {
                     runningConversationIds.Add(id);
                 }
 
-                if (string.Equals(source, "CORTEX_TRAJECTORY_SOURCE_CLI", StringComparison.OrdinalIgnoreCase) ||
-                    string.IsNullOrWhiteSpace(title))
+                if (isCliSource || string.IsNullOrWhiteSpace(title))
                 {
                     continue;
                 }
 
-                namedDesktopConversations.Add(new AntigravityConversationRecord(id, title, status, lastModifiedRaw));
+                mobaDesktopConversations.Add(new AntigravityConversationRecord(id, title, status, lastModifiedRaw));
             }
 
-            if (namedDesktopConversations.Count == 0)
+            if (mobaDesktopConversations.Count == 0)
             {
-                var (emptyArgonByModel, _) = ClassifyAntigravitySubAgents(paths.AntigravityHomePath, runningConversationIds, hasArgonHead: true, hasOpusHead: false);
+                var scopedRunning = runningConversationIds.Where(id => !foreignRootIds.Contains(id)).ToList();
+                var (emptyArgonByModel, _) = ClassifyAntigravitySubAgents(paths.AntigravityHomePath, scopedRunning, hasArgonHead: true, hasOpusHead: false);
                 IReadOnlyList<MonitorInfo> empty =
                 [
-                    Unavailable(ArgonMonitorId, ArgonDisplayName, ArgonRole, ArgonProfile, now, "ok", "No named Antigravity desktop session found.", runningConversationIds.Count, activeSubAgentsByModel: emptyArgonByModel),
-                    Unavailable(OpusMonitorId, OpusDisplayName, OpusRole, OpusProfile, now, "ok", "No Opus Head session found.", defaultModel: DefaultOpusModel)
+                    Unavailable(ArgonMonitorId, ArgonDisplayName, ArgonRole, ArgonProfile, now, "ok", $"No {ArgonDisplayName} session found.", scopedRunning.Count, activeSubAgentsByModel: emptyArgonByModel),
+                    Unavailable(OpusMonitorId, OpusDisplayName, OpusRole, OpusProfile, now, "ok", $"No {OpusDisplayName} session found.", defaultModel: DefaultOpusModel)
                 ];
                 return Task.FromResult(empty);
             }
 
-            var opusSelected = namedDesktopConversations
-                .FirstOrDefault(c => string.Equals(c.Title, OpusDisplayName, StringComparison.OrdinalIgnoreCase));
-
-            var argonSelected = namedDesktopConversations
-                .Where(c => opusSelected is null || !string.Equals(c.Id, opusSelected.Id, StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(c =>
-                    string.Equals(c.Title, ArgonDisplayName, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(c.Title, LegacyDisplayName, StringComparison.OrdinalIgnoreCase))
+            var opusSelected = mobaDesktopConversations
+                .Where(c => IsOpusCandidateTitle(c.Title))
+                .OrderByDescending(c => GetOpusPriorityRank(c.Title))
                 .FirstOrDefault();
 
-            var rootIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var argonSelected = mobaDesktopConversations
+                .Where(c => opusSelected is null || !string.Equals(c.Id, opusSelected.Id, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(c => GetGeminiPriorityRank(c.Title))
+                .FirstOrDefault();
+
+            var rootIds = new HashSet<string>(foreignRootIds, StringComparer.OrdinalIgnoreCase);
             if (argonSelected is not null && !string.IsNullOrWhiteSpace(argonSelected.Id))
             {
                 rootIds.Add(argonSelected.Id);
@@ -130,15 +146,15 @@ public sealed partial class AntigravityMonitorProvider
             var argonSubAgentCount = argonSubAgentsByModel.Values.Sum();
             var opusSubAgentCount = opusSubAgentsByModel.Values.Sum();
 
-            var extraSessionCount = Math.Max(0, namedDesktopConversations.Count - (argonSelected is not null ? 1 : 0) - (opusSelected is not null ? 1 : 0));
-            var extraNotice = namedDesktopConversations.Count > 2
-                ? $"{namedDesktopConversations.Count} named Antigravity sessions found in summaries (target: 2: Argon Head + Opus Head)."
+            var extraSessionCount = Math.Max(0, mobaDesktopConversations.Count - (argonSelected is not null ? 1 : 0) - (opusSelected is not null ? 1 : 0));
+            var extraNotice = mobaDesktopConversations.Count > 2
+                ? $"{mobaDesktopConversations.Count} MOBAi Antigravity sessions found in summaries (target: 2: {ArgonDisplayName} + {OpusDisplayName})."
                 : null;
 
             MonitorInfo argonInfo;
             if (argonSelected is not null)
             {
-                var legacyMatched = string.Equals(argonSelected.Title, LegacyDisplayName, StringComparison.OrdinalIgnoreCase);
+                var legacyMatched = string.Equals(argonSelected.Title.Trim(), LegacyDisplayName, StringComparison.OrdinalIgnoreCase);
                 var fallbackModel = legacyMatched ? LegacyDesktopModel : DefaultArgonModel;
                 var model = InspectConversationModel(paths.AntigravityHomePath, argonSelected.Id, fallbackModel);
                 argonInfo = BuildMonitorInfo(
@@ -163,7 +179,7 @@ public sealed partial class AntigravityMonitorProvider
                     ArgonProfile,
                     now,
                     "ok",
-                    "No Argon Head session found.",
+                    $"No {ArgonDisplayName} session found.",
                     activeSubAgentCount: 0);
             }
 
@@ -193,7 +209,7 @@ public sealed partial class AntigravityMonitorProvider
                     OpusProfile,
                     now,
                     "ok",
-                    "No Opus Head session found.",
+                    $"No {OpusDisplayName} session found.",
                     activeSubAgentCount: 0,
                     defaultModel: DefaultOpusModel);
             }
@@ -367,6 +383,11 @@ public sealed partial class AntigravityMonitorProvider
             return "Orchestrator · Claude Sonnet 5.5";
         }
 
+        if (normalized.Contains("carbon", StringComparison.Ordinal))
+        {
+            return "Orchestrator · Gemini 4 Carbon";
+        }
+
         if (normalized.Contains("argon", StringComparison.Ordinal))
         {
             return "Orchestrator · Gemini 4 Argon";
@@ -383,6 +404,81 @@ public sealed partial class AntigravityMonitorProvider
         }
 
         return string.IsNullOrWhiteSpace(rawModel) ? fallbackModel : rawModel;
+    }
+
+    private static bool IsMobaAntigravityTitle(string? title)
+    {
+        var trimmed = title?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return false;
+        }
+
+        return trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith(MobaAltPrefix, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(trimmed, LegacyArgonHeadName, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(trimmed, LegacyDisplayName, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(trimmed, LegacyOpusHeadName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsOpusCandidateTitle(string title)
+    {
+        var trimmed = title.Trim();
+        return string.Equals(trimmed, OpusDisplayName, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(trimmed, LegacyOpusHeadName, StringComparison.OrdinalIgnoreCase) ||
+               ((trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
+                 trimmed.StartsWith(MobaAltPrefix, StringComparison.OrdinalIgnoreCase)) &&
+                trimmed.Contains("Opus", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static int GetOpusPriorityRank(string title)
+    {
+        var trimmed = title.Trim();
+        if (string.Equals(trimmed, OpusDisplayName, StringComparison.OrdinalIgnoreCase))
+        {
+            return 4;
+        }
+
+        if (trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return 3;
+        }
+
+        if (trimmed.StartsWith(MobaAltPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return 2;
+        }
+
+        return string.Equals(trimmed, LegacyOpusHeadName, StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+    }
+
+    private static int GetGeminiPriorityRank(string title)
+    {
+        var trimmed = title.Trim();
+        if (string.Equals(trimmed, ArgonDisplayName, StringComparison.OrdinalIgnoreCase))
+        {
+            return 5;
+        }
+
+        if (trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed.Contains("Gemini", StringComparison.OrdinalIgnoreCase) ||
+                   trimmed.Contains("Carbon", StringComparison.OrdinalIgnoreCase) ||
+                   trimmed.Contains("Argon", StringComparison.OrdinalIgnoreCase) ||
+                   trimmed.Contains("Neon", StringComparison.OrdinalIgnoreCase)
+                ? 4
+                : 3;
+        }
+
+        if (trimmed.StartsWith(MobaAltPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return 2;
+        }
+
+        return string.Equals(trimmed, LegacyArgonHeadName, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(trimmed, LegacyDisplayName, StringComparison.OrdinalIgnoreCase)
+            ? 1
+            : 0;
     }
 
     private static MonitorInfo Unavailable(
