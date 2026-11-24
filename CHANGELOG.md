@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.9.7] - 2026-11-24
+
+### Changed
+- **Clean Empty 2×3 Monitor Grid Cells (`MonitorCards.tsx`, `App.test.tsx`):** Removed the visible placeholder box, dashed border, and `Empty slot · Row X, Col Y` / `Free 2×3 slot` text from unoccupied 2×3 Monitor Grid cells in idle state so free slots stay visually clean and empty, while still revealing drop/place targets on demand during drag-and-drop or click-to-move actions.
+
+---
+
 ## [3.9.6] - 2026-11-24
 
 ### Added
