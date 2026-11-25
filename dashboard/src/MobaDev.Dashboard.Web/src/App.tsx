@@ -15,6 +15,7 @@ import { ArchitectureDiagramsView } from './components/ArchitectureDiagramsView'
 import { ConfigDocsView } from './components/ConfigDocsView';
 import { GovernanceMatrixView } from './components/GovernanceMatrixView';
 import { HygieneAndSyncPanel } from './components/HygieneAndSyncPanel';
+import { MainLandingTickerCard } from './components/MainLandingTickerCard';
 import { MonitorCards } from './components/MonitorCards';
 import { PipelineCard } from './components/PipelineCard';
 import { StatusHeader, type WarningTarget } from './components/StatusHeader';
@@ -302,6 +303,8 @@ export function App() {
                 pullRequests={snapshot.pipeline.pullRequests}
                 onOpenMatrix={() => handleOpenMatrixSync(false)}
               />
+
+              <MainLandingTickerCard pipeline={snapshot.pipeline} nowMs={nowMs} />
 
               <div className={styles.liveSplit}>
                 <PipelineCard pipeline={snapshot.pipeline} nowMs={nowMs} isDark={isDark} />

@@ -5,6 +5,13 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.12.0] - 2026-11-25
+
+### Added
+- **Main Landing Queue Card (`MainLandingTickerCard.tsx`, `App.tsx`, `App.test.tsx`):** Added an ordered **`Main Landing Queue`** arrival board (`Variante A`) to `Live Operations` that deterministically ranks open features by proximity to `main` (`#1 Auto-Merge · Ready` -> `Auto-Merge · Running` -> `Ready · Checks Green` -> `Draft · Checks Green` -> `CI / Review Running` -> `Action Needed`) alongside a **`Just landed on main`** strip of recently merged PRs.
+
+---
+
 ## [3.11.3] - 2026-11-24
 
 ### Fixed & Changed
