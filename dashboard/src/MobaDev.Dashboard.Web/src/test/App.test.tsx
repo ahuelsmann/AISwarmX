@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
+import { rankPullRequestsForMain } from '../components/MainLandingTickerCard';
 import {
   clearMonitorGridCookie,
   formatQuotaPauseSuffix,
@@ -1298,6 +1299,96 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     await user.click(within(busCard).getByRole('button', { name: /Unread \(1\)/i }));
     expect(within(busCard).getByText('P3 UI/UX PASS on PR #541')).toBeInTheDocument();
     expect(within(busCard).queryByText('Acked earlier Sonar pointer')).not.toBeInTheDocument();
+  });
+
+  it('renders Main Landing Queue in exact arrival order with Just landed on main strip', async () => {
+    const base = createSnapshotFixture();
+    const templatePr = base.pipeline.pullRequests[0]!;
+    const nowIso = new Date().toISOString();
+    const customPayload = createSnapshotFixture({
+      pipeline: {
+        ...base.pipeline,
+        pullRequests: [
+          {
+            ...templatePr,
+            number: 544,
+            title: 'ci: scope Stryker lanes (#539)',
+            isDraft: true,
+            autoMergeEnabled: false,
+            mergeState: 'CLEAN',
+            ciStatus: 'pending',
+            sonarStatus: 'pending',
+            linkedIssues: [{ number: 539, url: 'https://github.com/ahuelsmann/MOBAflow/issues/539' }],
+            updatedAtUtc: nowIso
+          },
+          {
+            ...templatePr,
+            number: 540,
+            title: 'docs: HelpTopics drift (#510 S1)',
+            isDraft: false,
+            autoMergeEnabled: true,
+            mergeState: 'CLEAN',
+            ciStatus: 'pass',
+            sonarStatus: 'pass',
+            linkedIssues: [{ number: 510, url: 'https://github.com/ahuelsmann/MOBAflow/issues/510' }],
+            updatedAtUtc: nowIso
+          },
+          {
+            ...templatePr,
+            number: 541,
+            title: 'feat: MOBAdemo shell (#430 slice 7)',
+            isDraft: false,
+            autoMergeEnabled: false,
+            mergeState: 'CLEAN',
+            ciStatus: 'pass',
+            sonarStatus: 'pass',
+            linkedIssues: [{ number: 430, url: 'https://github.com/ahuelsmann/MOBAflow/issues/430' }],
+            updatedAtUtc: nowIso
+          }
+        ],
+        recentlyMerged: [
+          {
+            ...templatePr,
+            number: 537,
+            title: 'feat(ci): MOBAdemo CI job (#430 slice 4)',
+            state: 'MERGED',
+            stateLabel: 'Merged',
+            isDraft: false,
+            mergedAtUtc: nowIso,
+            updatedAtUtc: nowIso
+          }
+        ]
+      }
+    });
+
+    const ranked = rankPullRequestsForMain(customPayload.pipeline.pullRequests);
+    expect(ranked.map((r) => r.pr.number)).toEqual([540, 541, 544]);
+    expect(ranked.map((r) => r.stageLabel)).toEqual([
+      'Auto-Merge · Ready',
+      'Ready · Checks Green',
+      'CI / Review Running'
+    ]);
+
+    stubDashboardFetch(customPayload);
+    render(<App />);
+
+    const queueCard = await screen.findByLabelText('Main Landing Queue');
+    expect(within(queueCard).getByText('3 Approaching main')).toBeInTheDocument();
+    expect(within(queueCard).getByText('1 Landed')).toBeInTheDocument();
+
+    const orderedList = within(queueCard).getByRole('list', { name: 'Features approaching main' });
+    const rows = within(orderedList).getAllByRole('listitem');
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toHaveTextContent('#1');
+    expect(rows[0]).toHaveTextContent('PR #540');
+    expect(rows[0]).toHaveTextContent('Auto-Merge · Ready');
+    expect(rows[1]).toHaveTextContent('#2');
+    expect(rows[1]).toHaveTextContent('PR #541');
+    expect(rows[2]).toHaveTextContent('#3');
+    expect(rows[2]).toHaveTextContent('PR #544');
+
+    const landedStrip = within(queueCard).getByLabelText('Just landed on main');
+    expect(within(landedStrip).getByText('PR #537')).toBeInTheDocument();
   });
 
   it('degrades gracefully when backend is unreachable', async () => {
