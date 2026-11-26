@@ -5,6 +5,21 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.14.0] - 2026-11-26
+
+### Added & Changed
+- **Swarm Bus Work Queue, Review Claims & State Deduplication (`bus/mobai-swarm-bus.mjs`, `bus/mobai-swarm-bus.test.mjs`):**
+  - Added additive SQLite schema migrations (`messages.state`, `review_claims`, `work_queue`, `meta`) preserving existing data.
+  - Added `bus_review_claim` (MCP + `--cli review-claim`) for atomic single-holder review claims per `(pr_number, head_sha, role)` (`companion`, `final`, `p3-verification`).
+  - Added `bus_queue` (MCP + `--cli queue`) supporting `list`, `next` (transactional resume-first + 4h lease renewal, expired lease takeover, priority/oldest order, `meta.code_wip >= 3` `L`-only gate), `release`, `done`, `upsert`, and `sync-meta`.
+  - Added optional `state` deduplication parameter to `bus_send` to suppress duplicate status messages when state is unchanged.
+- **Watchdog Queue Sync & Auto-Wake Events (`scripts/Invoke-SwarmWatchdog.ps1`):**
+  - Added `-SyncQueue` (also implied by `-DispatchEvents` and `-RegisterScheduledTask`) with Project #1 Priority/Risk schema verification, `work_queue` synchronization, and file-based `meta.code_wip` calculation.
+  - Added deduplicated `PrMerged` (`NextWorkAvailable`) and `HeadIdleWake` (waking Codex when idle `> 30m` and not `rate_limited` while `code_wip < 3` and queued work exists).
+- **Governance & Review Marker Standardization (`agents/`, `docs/delivery-workflow.md`, `docs/hygiene-and-automation.md`):** Documented cross-family final review (`claude`/`openai`/`gemini`), non-orchestrator dispatcher rule, `<!-- moba-final-review ... -->` PR comment marker, `bus_review_claim`, `bus_send` `state` deduplication, and session-start `bus_queue next` resume flow.
+
+---
+
 ## [3.12.1] - 2026-11-26
 
 ### Fixed

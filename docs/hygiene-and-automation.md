@@ -39,7 +39,8 @@ Checks live readiness and board synchronization via `gh` CLI and the read-only l
 ### Capabilities
 - **Auto Repo Hygiene:** Runs `Invoke-RepoHygiene.ps1 -Json` (disable with `-SkipHygiene`).
 - **Kanban Self-Healing (`-AutoHealBoard`):** Moves any `CLOSED` Issue or `MERGED`/`CLOSED` Pull Request still stuck in `Ready`, `In progress`, or `In review` on GitHub Project #1 directly to `Done`.
-- **Event-Driven Deduplicated Dispatcher (`-DispatchEvents`, `-ResetEventState`):** Detects concrete PR state transitions (`CiOrSonarFailed` and `AllChecksGreenReady`), persists a 24-hour deduplication map in `%LOCALAPPDATA%\MOBAdev\watchdog-state.json` (plus `%LOCALAPPDATA%\MOBAdev\watchdog-alerts.log`) so identical commit/check events never re-fire, routes `codex/*` events directly to `codex.exe queue`, and logs Claude/Antigravity alerts with zero LLM tokens.
+- **Work Queue & `code_wip` Sync (`-SyncQueue`, implied by `-DispatchEvents`):** Inspects Project #1 schema/Ready items (triggering a clear warning if `Priority`/`Risk class` fields are missing or unexpected), upserts `Status == "Ready"` issues (`P0`→`0`..`P3`→`3`, default `2`, plus `risk_class`) into `work_queue` while preserving active `'claimed'` leases, marks non-Ready items `'removed'` and closed issues `'done'`, and computes `meta.code_wip` from open `ahuelsmann/MOBAflow` PRs whose changed files are not all under `docs/`, `specs/`, or `plans/`.
+- **Event-Driven Deduplicated Dispatcher (`-DispatchEvents`, `-ResetEventState`):** Detects concrete PR and head transitions (`CiOrSonarFailed`, `AllChecksGreenReady`, `PrMerged` → `NextWorkAvailable` carrying the top eligible queued item, and `HeadIdleWake` waking Codex once per `issue_number` when idle `> 30m` with `code_wip < 3` and `state != 'rate_limited'`), persists a 24-hour deduplication map in `%LOCALAPPDATA%\MOBAdev\watchdog-state.json` (plus `%LOCALAPPDATA%\MOBAdev\watchdog-alerts.log`) so identical events never re-fire, routes `codex/*` events directly to `codex.exe queue` / `bus_send --wake`, and logs alerts with zero LLM tokens.
 - **Actionable Readiness Signals:**
   - `QuietWindowOpenForRf30`: True when `OpenCodePrCount == 0` and Issue `#452` (`RF-30`) is open in `In progress`.
   - `FastPathOrReviewCandidates`: Lists open PRs whose CI/Sonar checks are all green (`BEHIND` or `Draft`) ready for `Disjoint main-Sync Fast-Path` promotion/auto-merge.
@@ -50,13 +51,16 @@ Checks live readiness and board synchronization via `gh` CLI and the read-only l
 ### Usage
 
 ```powershell
-# Run once with Kanban self-healing and deduplicated event dispatch
-pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\scripts\Invoke-SwarmWatchdog.ps1 -AutoHealBoard -DispatchEvents
+# Run once with Kanban self-healing, queue sync, and deduplicated event dispatch
+pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\scripts\Invoke-SwarmWatchdog.ps1 -AutoHealBoard -DispatchEvents -SyncQueue
+
+# Dry-run queue sync without running repo hygiene or event dispatch
+pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\scripts\Invoke-SwarmWatchdog.ps1 -SkipHygiene -SyncQueue -Json
 
 # Reset 24h event deduplication state
 pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\scripts\Invoke-SwarmWatchdog.ps1 -SkipHygiene -DispatchEvents -ResetEventState
 
-# Optional: register a local Windows Scheduled Task (runs every 10 min, hidden, zero LLM tokens)
+# Optional: register a local Windows Scheduled Task (runs every 10 min, hidden, -AutoHealBoard -DispatchEvents -SyncQueue, zero LLM tokens)
 pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\scripts\Invoke-SwarmWatchdog.ps1 -RegisterScheduledTask -IntervalMinutes 10
 
 # Optional: remove the Scheduled Task
@@ -103,6 +107,6 @@ pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\scripts\Invoke-ClaudeEphemeralW
 
 Local WAL-mode SQLite MCP stdio server (`%LOCALAPPDATA%\MOBAdev\swarm-bus.db`) plus zero-token `--cli` interface connecting **Claude Code / Desktop**, **ChatGPT Codex**, **Antigravity**, and `Invoke-SwarmWatchdog.ps1`:
 
-- **MCP Tools (`mobai-swarm-bus`):** `bus_send` (with optional `wake: true` -> `codex.exe queue`), `bus_inbox`, `bus_ack` (threaded replies), `bus_locks` (cross-tool prefix-overlap path lock detection & TTL expiry), and `bus_status`.
+- **MCP Tools (`mobai-swarm-bus`):** `bus_send` (with optional `state` deduplication and `wake: true` -> `codex.exe queue`), `bus_inbox`, `bus_ack` (threaded replies), `bus_locks` (cross-tool prefix-overlap path lock detection & TTL expiry), `bus_status`, `bus_review_claim` (atomic single-holder review slot per `(pr_number, head_sha, role)`), and `bus_queue` (`list`, `next` with 4h lease resume/renewal & `code_wip >= 3` `L`-only gate, `release`, `done`, `upsert`, `sync-meta`).
 - **Claude Code Hook (`bus/claude-swarm-bus-hook.mjs`):** Configured on `SessionStart` and `UserPromptSubmit` in `~/.claude/settings.json`; injects unread `claude-opus`/`all` Swarm Bus messages and active foreign path locks cleanly into Claude's turn context (emitting 0 output when nothing is pending).
 - **Dashboard Live Feed (`Communication` Tab):** Exposed read-only at `GET /api/bus` and rendered in the dedicated **Communication** tab (`SwarmBusCard.tsx`, with status filters and unread header counter) on `http://127.0.0.1:5179`.
