@@ -35,15 +35,38 @@ public sealed partial class AntigravityMonitorProvider
 
     private const string Tool = "Antigravity";
 
-    public async Task<MonitorInfo> GetMonitorAsync(ResolvedDashboardPaths paths, CancellationToken cancellationToken)
+    public Task<MonitorInfo> GetMonitorAsync(ResolvedDashboardPaths paths, CancellationToken cancellationToken)
     {
-        var monitors = await GetMonitorsAsync(paths, cancellationToken).ConfigureAwait(false);
+        return GetMonitorAsync(
+            paths,
+            TimeSpan.FromMinutes(DashboardOptions.DefaultBusyIdleAfterMinutes),
+            cancellationToken);
+    }
+
+    public async Task<MonitorInfo> GetMonitorAsync(
+        ResolvedDashboardPaths paths,
+        TimeSpan busyIdleThreshold,
+        CancellationToken cancellationToken)
+    {
+        var monitors = await GetMonitorsAsync(paths, busyIdleThreshold, cancellationToken).ConfigureAwait(false);
         return monitors[0];
     }
 
     public Task<IReadOnlyList<MonitorInfo>> GetMonitorsAsync(ResolvedDashboardPaths paths, CancellationToken cancellationToken)
     {
+        return GetMonitorsAsync(
+            paths,
+            TimeSpan.FromMinutes(DashboardOptions.DefaultBusyIdleAfterMinutes),
+            cancellationToken);
+    }
+
+    public Task<IReadOnlyList<MonitorInfo>> GetMonitorsAsync(
+        ResolvedDashboardPaths paths,
+        TimeSpan busyIdleThreshold,
+        CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
+        var effectiveThreshold = MonitorStateRules.NormalizeThreshold(busyIdleThreshold);
         var now = DateTimeOffset.UtcNow;
 
         var dbPath = Path.Combine(paths.AntigravityHomePath, "conversation_summaries.db");
@@ -191,6 +214,7 @@ public sealed partial class AntigravityMonitorProvider
                     argonSubAgentCount,
                     argonSubAgentsByModel,
                     now,
+                    effectiveThreshold,
                     extraNotice);
             }
             else
@@ -231,6 +255,7 @@ public sealed partial class AntigravityMonitorProvider
                     activeSubAgentCount: opusSubAgentCount,
                     activeSubAgentsByModel: opusSubAgentsByModel,
                     now,
+                    effectiveThreshold,
                     notice: null);
             }
             else
@@ -320,14 +345,16 @@ public sealed partial class AntigravityMonitorProvider
         int activeSubAgentCount,
         IReadOnlyDictionary<string, int> activeSubAgentsByModel,
         DateTimeOffset now,
+        TimeSpan busyIdleThreshold,
         string? notice)
     {
         var isRunning = string.Equals(selected.Status, "CASCADE_RUN_STATUS_RUNNING", StringComparison.OrdinalIgnoreCase);
-        var state = isRunning
+        var rawState = isRunning
             ? "busy"
             : !string.IsNullOrEmpty(rateLimitResetLabel)
                 ? "rate_limited"
                 : "standby";
+        var state = MonitorStateRules.ApplyIdle(rawState, lastActivityUtc, now, busyIdleThreshold);
 
         return new MonitorInfo(
             Id: id,

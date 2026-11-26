@@ -6,6 +6,7 @@ namespace MobaDev.Dashboard.Api.Configuration;
 public sealed class DashboardOptions
 {
     public const string SectionName = "Dashboard";
+    public const int DefaultBusyIdleAfterMinutes = 10;
 
     public string BindUrl { get; set; } = "http://127.0.0.1:5179";
     public string MobaDevRepoPath { get; set; } = string.Empty;
@@ -19,8 +20,19 @@ public sealed class DashboardOptions
     public string GitHubProjectOwner { get; set; } = "ahuelsmann";
     public int LocalCacheTtlSeconds { get; set; } = 8;
     public int GitHubCacheTtlSeconds { get; set; } = 45;
+    public int BusyIdleAfterMinutes { get; set; } = DefaultBusyIdleAfterMinutes;
     public string StaticWebRootPath { get; set; } = string.Empty;
     public string SwarmBusDbPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Resolves the inactivity threshold after which a busy monitor transitions to idle.
+    /// Non-positive values fall back to <see cref="DefaultBusyIdleAfterMinutes"/>.
+    /// </summary>
+    public TimeSpan ResolveBusyIdleThreshold()
+    {
+        var minutes = BusyIdleAfterMinutes >= 1 ? BusyIdleAfterMinutes : DefaultBusyIdleAfterMinutes;
+        return TimeSpan.FromMinutes(minutes);
+    }
 
     /// <summary>
     /// Resolves effective repository and local tool paths without hardcoding user-specific paths in code.

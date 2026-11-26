@@ -11,7 +11,7 @@ export interface MonitorInfo {
   role: string;
   profile: string;
   tool: string;
-  state: 'busy' | 'standby' | 'rate_limited' | 'offline' | string;
+  state: 'busy' | 'idle' | 'standby' | 'rate_limited' | 'offline' | string;
   model?: string | null;
   lastActivityUtc?: string | null;
   rateLimitResetLabel?: string | null;

@@ -27,7 +27,19 @@ public sealed partial class ClaudeMonitorProvider
 
     public Task<MonitorInfo> GetMonitorAsync(ResolvedDashboardPaths paths, CancellationToken cancellationToken)
     {
+        return GetMonitorAsync(
+            paths,
+            TimeSpan.FromMinutes(DashboardOptions.DefaultBusyIdleAfterMinutes),
+            cancellationToken);
+    }
+
+    public Task<MonitorInfo> GetMonitorAsync(
+        ResolvedDashboardPaths paths,
+        TimeSpan busyIdleThreshold,
+        CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
+        var effectiveThreshold = MonitorStateRules.NormalizeThreshold(busyIdleThreshold);
         var now = DateTimeOffset.UtcNow;
 
         var activeSubagentModels = CollectActiveSubagentFileModels(paths.ClaudeHomePath, now);
@@ -94,6 +106,8 @@ public sealed partial class ClaudeMonitorProvider
         {
             state = "standby";
         }
+
+        state = MonitorStateRules.ApplyIdle(state, lastActivityUtc, now, effectiveThreshold);
 
         var notice = sessions.Count > 1
             ? $"{sessions.Count} active MOBAi Claude sessions detected (target: 1)."

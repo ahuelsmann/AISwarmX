@@ -380,7 +380,9 @@ function slotsEqual(left: (string | null)[], right: (string | null)[]): boolean 
 
 export function formatQuotaPauseSuffix(monitors: MonitorInfo[]): string {
   const isReady = (id: string) =>
-    monitors.some((m) => m.id === id && (m.state === 'busy' || m.state === 'standby'));
+    monitors.some(
+      (m) => m.id === id && (m.state === 'busy' || m.state === 'idle' || m.state === 'standby')
+    );
 
   const claudeReady = isReady('claude-monitor');
   const codexReady = isReady('codex-monitor');
@@ -413,7 +415,7 @@ export function formatQuotaPauseSuffix(monitors: MonitorInfo[]): string {
   };
 
   const activeNames = monitors
-    .filter((m) => m.state === 'busy' || m.state === 'standby')
+    .filter((m) => m.state === 'busy' || m.state === 'idle' || m.state === 'standby')
     .map((m) => labelById[m.id] ?? m.displayName);
 
   return activeNames.length > 0 ? `(${activeNames.join(' + ')} Active)` : '(No Active Quorum)';
@@ -566,7 +568,9 @@ export function MonitorCards({
 
   const triadDef = governance?.roles.find((r) => r.role.toLowerCase().includes('triad'));
   const totalSeats = monitors.length > 0 ? monitors.length : 4;
-  const readyCount = monitors.filter((m) => m.state === 'busy' || m.state === 'standby').length;
+  const readyCount = monitors.filter(
+    (m) => m.state === 'busy' || m.state === 'idle' || m.state === 'standby'
+  ).length;
   const rateLimitedCount = monitors.filter((m) => m.state === 'rate_limited').length;
   const busyMonitorsCount = monitors.filter((m) => m.state === 'busy').length;
   const totalSubAgentsCount = monitors.reduce((acc, m) => acc + (m.activeSubAgentCount ?? 0), 0);
@@ -847,7 +851,11 @@ export function MonitorCards({
                               <ProfileBadge profile={monitor.profile} isDark={isDark} />
                             </GlossaryTooltip>
                           </div>
-                          <MonitorStateBadge state={monitor.state} />
+                          <MonitorStateBadge
+                            state={monitor.state}
+                            lastActivityUtc={monitor.lastActivityUtc}
+                            nowMs={nowMs}
+                          />
                         </div>
 
                         <div className={styles.roleRow}>
@@ -987,7 +995,36 @@ export function MonitorCards({
   );
 }
 
-function MonitorStateBadge({ state }: { state: string }) {
+export function formatIdleStateLabel(
+  lastActivityUtc: string | null | undefined,
+  nowMs: number
+): string {
+  if (!lastActivityUtc) {
+    return 'Idle · inactive';
+  }
+
+  const parsedMs = Date.parse(lastActivityUtc);
+  if (Number.isNaN(parsedMs)) {
+    return 'Idle · inactive';
+  }
+
+  const diffMinutes = Math.floor((nowMs - parsedMs) / 60_000);
+  if (diffMinutes < 1) {
+    return 'Idle · inactive';
+  }
+
+  return `Idle · no activity for ${diffMinutes} min`;
+}
+
+function MonitorStateBadge({
+  state,
+  lastActivityUtc,
+  nowMs
+}: {
+  state: string;
+  lastActivityUtc?: string | null;
+  nowMs: number;
+}) {
   switch (state) {
     case 'busy':
       return (
@@ -996,6 +1033,12 @@ function MonitorStateBadge({ state }: { state: string }) {
             <span className="pulse-dot" aria-hidden="true" />
             Active / Busy
           </span>
+        </Badge>
+      );
+    case 'idle':
+      return (
+        <Badge appearance="tint" color="subtle" shape="rounded" icon={<Clock16Regular />}>
+          {formatIdleStateLabel(lastActivityUtc, nowMs)}
         </Badge>
       );
     case 'standby':

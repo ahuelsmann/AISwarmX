@@ -1,4 +1,5 @@
 using MobaDev.Dashboard.Api.Configuration;
+using MobaDev.Dashboard.Api.Contracts;
 using MobaDev.Dashboard.Api.Providers;
 using Xunit;
 
@@ -115,7 +116,8 @@ public sealed class MonitorProvidersTests
         Assert.Equal("unavailable", missingResult.Source.Status);
 
         var dbPath = Path.Combine(fx.AntigravityHomePath, "conversation_summaries.db");
-        TempDashboardFixture.CreateSqliteDb(dbPath, """
+        var recentIso = DateTimeOffset.UtcNow.AddMinutes(-2).ToString("O");
+        TempDashboardFixture.CreateSqliteDb(dbPath, $"""
             CREATE TABLE conversation_summaries (
                 conversation_id TEXT PRIMARY KEY,
                 title TEXT,
@@ -123,7 +125,7 @@ public sealed class MonitorProvidersTests
                 last_modified_time TEXT,
                 source TEXT
             );
-            INSERT INTO conversation_summaries VALUES ('c1', 'Antigravity Monitor', 'CASCADE_RUN_STATUS_RUNNING', '2026-11-19T11:40:00Z', '');
+            INSERT INTO conversation_summaries VALUES ('c1', 'Antigravity Monitor', 'CASCADE_RUN_STATUS_RUNNING', '{recentIso}', '');
             INSERT INTO conversation_summaries VALUES ('c2', 'CLI Check', 'CASCADE_RUN_STATUS_IDLE', '2026-11-18T10:00:00Z', 'CORTEX_TRAJECTORY_SOURCE_CLI');
             """);
 
@@ -218,7 +220,8 @@ public sealed class MonitorProvidersTests
             { "sessionId": "44444444-4444-4444-4444-444444444444", "name": "Claude Head", "status": "idle", "updatedAt": 1795418444682 }
             """);
 
-        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.AntigravityHomePath, "conversation_summaries.db"), """
+        var recentIso = DateTimeOffset.UtcNow.AddMinutes(-1).ToString("O");
+        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.AntigravityHomePath, "conversation_summaries.db"), $"""
             CREATE TABLE conversation_summaries (
                 conversation_id TEXT PRIMARY KEY,
                 title TEXT,
@@ -226,9 +229,9 @@ public sealed class MonitorProvidersTests
                 last_modified_time TEXT,
                 source TEXT
             );
-            INSERT INTO conversation_summaries VALUES ('argon-1', 'Argon Head', 'CASCADE_RUN_STATUS_RUNNING', '2026-11-23T07:20:00Z', '');
+            INSERT INTO conversation_summaries VALUES ('argon-1', 'Argon Head', 'CASCADE_RUN_STATUS_RUNNING', '{recentIso}', '');
             INSERT INTO conversation_summaries VALUES ('opus-1', 'Opus Head', 'CASCADE_RUN_STATUS_IDLE', '2026-11-23T07:14:48Z', '');
-            INSERT INTO conversation_summaries VALUES ('worker-1', 'Worker Slice', 'CASCADE_RUN_STATUS_RUNNING', '2026-11-23T07:20:05Z', 'CORTEX_TRAJECTORY_SOURCE_CLI');
+            INSERT INTO conversation_summaries VALUES ('worker-1', 'Worker Slice', 'CASCADE_RUN_STATUS_RUNNING', '{recentIso}', 'CORTEX_TRAJECTORY_SOURCE_CLI');
             """);
 
         var argonLogDir = Path.Combine(fx.AntigravityHomePath, "brain", "argon-1", ".system_generated", "logs");
@@ -535,5 +538,85 @@ public sealed class MonitorProvidersTests
         Assert.Equal("rate_limited", signal2Heads[1].State);
         Assert.Equal("Quota exhausted (HTTP 429)", signal2Heads[1].RateLimitResetLabel);
         Assert.DoesNotContain(secretUserText, signal2Heads[1].Source.Notice ?? string.Empty);
+    }
+
+    [Fact]
+    public async Task Providers_DowngradeStaleBusyMonitorsToIdleAndHonorConfigurableThreshold()
+    {
+        using var fx = new TempDashboardFixture();
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
+            fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
+
+        var now = DateTimeOffset.UtcNow;
+        var stale30MinAgo = now.AddMinutes(-30);
+        var active2MinAgo = now.AddMinutes(-2);
+
+        // (a) Antigravity running + last activity 30 min ago -> "idle"
+        // (b) Antigravity running + last activity 2 min ago -> "busy"
+        var agDbPath = Path.Combine(fx.AntigravityHomePath, "conversation_summaries.db");
+        TempDashboardFixture.CreateSqliteDb(agDbPath, $"""
+            CREATE TABLE conversation_summaries (
+                conversation_id TEXT PRIMARY KEY,
+                title TEXT,
+                status TEXT,
+                last_modified_time TEXT,
+                source TEXT
+            );
+            INSERT INTO conversation_summaries VALUES ('gem-stale', 'MOBAi Antigravity Gemini', 'CASCADE_RUN_STATUS_RUNNING', '{stale30MinAgo:O}', '');
+            INSERT INTO conversation_summaries VALUES ('opus-active', 'MOBAi Antigravity Opus', 'CASCADE_RUN_STATUS_RUNNING', '{active2MinAgo:O}', '');
+            """);
+
+        var agProvider = new AntigravityMonitorProvider();
+        var agMonitors = await agProvider.GetMonitorsAsync(paths, CancellationToken.None);
+
+        Assert.Equal(2, agMonitors.Count);
+        Assert.Equal("idle", agMonitors[0].State);
+        Assert.Equal("busy", agMonitors[1].State);
+
+        // (c) Claude busy + stale activity -> "idle"
+        var claudeSessionsDir = Path.Combine(fx.ClaudeHomePath, "sessions");
+        Directory.CreateDirectory(claudeSessionsDir);
+        var claudeSessionFile = Path.Combine(claudeSessionsDir, "9001.json");
+        await File.WriteAllTextAsync(claudeSessionFile, $$"""
+            {
+              "sessionId": "88888888-8888-8888-8888-888888888888",
+              "name": "MOBAi Claude Opus",
+              "status": "busy",
+              "updatedAt": {{stale30MinAgo.ToUnixTimeMilliseconds()}}
+            }
+            """);
+
+        var claudeProvider = new ClaudeMonitorProvider();
+        var claudeIdle = await claudeProvider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("idle", claudeIdle.State);
+
+        // (d) Configurable BusyIdleAfterMinutes threshold:
+        // - 45 min keeps a 30-min-old session "busy"
+        // - 1 min downgrades a 2-min-old session to "idle"
+        // - Non-positive BusyIdleAfterMinutes falls back to default 10 min
+        var lenientOptions = new DashboardOptions { BusyIdleAfterMinutes = 45 };
+        var strictOptions = new DashboardOptions { BusyIdleAfterMinutes = 1 };
+        var invalidOptions = new DashboardOptions { BusyIdleAfterMinutes = 0 };
+
+        Assert.Equal(TimeSpan.FromMinutes(10), invalidOptions.ResolveBusyIdleThreshold());
+
+        var agLenient = await agProvider.GetMonitorsAsync(paths, lenientOptions.ResolveBusyIdleThreshold(), CancellationToken.None);
+        Assert.Equal("busy", agLenient[0].State);
+        Assert.Equal("busy", agLenient[1].State);
+
+        var agStrict = await agProvider.GetMonitorsAsync(paths, strictOptions.ResolveBusyIdleThreshold(), CancellationToken.None);
+        Assert.Equal("idle", agStrict[0].State);
+        Assert.Equal("idle", agStrict[1].State);
+
+        var claudeLenient = await claudeProvider.GetMonitorAsync(paths, lenientOptions.ResolveBusyIdleThreshold(), CancellationToken.None);
+        Assert.Equal("busy", claudeLenient.State);
+
+        // MonitorStateRules.ApplyIdle direct checks
+        Assert.Equal("idle", MonitorStateRules.ApplyIdle("BUSY", null, now, TimeSpan.FromMinutes(10)));
+        Assert.Equal("busy", MonitorStateRules.ApplyIdle("busy", now.AddMinutes(-10), now, TimeSpan.FromMinutes(10)));
+        Assert.Equal("idle", MonitorStateRules.ApplyIdle("busy", now.AddMinutes(-10).AddSeconds(-1), now, TimeSpan.FromMinutes(10)));
+        Assert.Equal("standby", MonitorStateRules.ApplyIdle("standby", stale30MinAgo, now, TimeSpan.FromMinutes(10)));
+        Assert.Equal("rate_limited", MonitorStateRules.ApplyIdle("rate_limited", stale30MinAgo, now, TimeSpan.FromMinutes(10)));
     }
 }

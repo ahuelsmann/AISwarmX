@@ -181,7 +181,11 @@ export function deriveActiveAgentsSummary(monitorsResponse: MonitorsResponse): A
   const monitors = monitorsResponse.monitors;
   const standingMonitorsTotal = monitors.length;
   const standingMonitorsOnline = monitors.filter(
-    (m) => m.state === 'standby' || m.state === 'busy' || m.state === 'rate_limited'
+    (m) =>
+      m.state === 'standby' ||
+      m.state === 'idle' ||
+      m.state === 'busy' ||
+      m.state === 'rate_limited'
   ).length;
   const standingMonitorsBusy = monitors.filter((m) => m.state === 'busy').length;
   const activeSubAgentsTotal = monitors.reduce((acc, m) => acc + (m.activeSubAgentCount ?? 0), 0);
