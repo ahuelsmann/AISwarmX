@@ -619,4 +619,101 @@ public sealed class MonitorProvidersTests
         Assert.Equal("standby", MonitorStateRules.ApplyIdle("standby", stale30MinAgo, now, TimeSpan.FromMinutes(10)));
         Assert.Equal("rate_limited", MonitorStateRules.ApplyIdle("rate_limited", stale30MinAgo, now, TimeSpan.FromMinutes(10)));
     }
+
+    [Fact]
+    public async Task Providers_StaleBusyWithActiveQuotaPausePreservesRateLimitedStateAndResetLabel()
+    {
+        using var fx = new TempDashboardFixture();
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
+            fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
+
+        var now = DateTimeOffset.UtcNow;
+        var stale30MinAgo = now.AddMinutes(-30);
+        var active2MinAgo = now.AddMinutes(-2);
+        var futureResetUtc = now.AddDays(2);
+        var futureResetIso = futureResetUtc.ToString("O");
+        var expectedLocal = futureResetUtc.ToLocalTime();
+        var expectedAgResetLabel = expectedLocal.Date == now.ToLocalTime().Date
+            ? $"{expectedLocal.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)} · quota exhausted"
+            : $"{expectedLocal.ToString("MMM d, HH:mm", System.Globalization.CultureInfo.InvariantCulture)} · quota exhausted";
+
+        // 1. Antigravity: stale RUNNING (30 min ago) + active quota pause -> "rate_limited" with non-null ResetLabel
+        //    while active RUNNING (2 min ago) + quota snapshot stays "busy".
+        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.AntigravityHomePath, "conversation_summaries.db"), $"""
+            CREATE TABLE conversation_summaries (
+                conversation_id TEXT PRIMARY KEY,
+                title TEXT,
+                status TEXT,
+                last_modified_time TEXT,
+                source TEXT
+            );
+            INSERT INTO conversation_summaries VALUES ('gem-stale-limit', 'MOBAi Antigravity Gemini', 'CASCADE_RUN_STATUS_RUNNING', '{stale30MinAgo:O}', '');
+            INSERT INTO conversation_summaries VALUES ('opus-active-running', 'MOBAi Antigravity Opus', 'CASCADE_RUN_STATUS_RUNNING', '{active2MinAgo:O}', '');
+            """);
+
+        var gemLogs = Path.Combine(fx.AntigravityHomePath, "brain", "gem-stale-limit", ".system_generated", "logs");
+        var opusLogs = Path.Combine(fx.AntigravityHomePath, "brain", "opus-active-running", ".system_generated", "logs");
+        Directory.CreateDirectory(gemLogs);
+        Directory.CreateDirectory(opusLogs);
+
+        await File.WriteAllTextAsync(Path.Combine(gemLogs, "transcript.jsonl"), "{\"model\":\"gemini-4-carbon-medium\"}\n");
+        await File.WriteAllTextAsync(Path.Combine(opusLogs, "transcript.jsonl"), "{\"model\":\"claude-opus-5-5-medium\"}\n");
+        await File.WriteAllTextAsync(
+            Path.Combine(gemLogs, "transcript_full.jsonl"),
+            "{\"step\":1,\"content\":\"{\\\"gemini-4-carbon-medium\\\":{\\\"quota_remaining\\\":\\\"0%\\\",\\\"quota_resets\\\":\\\"" +
+            futureResetIso +
+            "\\\"},\\\"claude-opus-5-5-medium\\\":{\\\"quota_remaining\\\":\\\"0%\\\",\\\"quota_resets\\\":\\\"" +
+            futureResetIso +
+            "\\\"}}\"}\n");
+
+        var agHeads = await new AntigravityMonitorProvider().GetMonitorsAsync(paths, CancellationToken.None);
+        Assert.Equal(2, agHeads.Count);
+        Assert.Equal("rate_limited", agHeads[0].State);
+        Assert.Equal(expectedAgResetLabel, agHeads[0].RateLimitResetLabel);
+        Assert.Equal("busy", agHeads[1].State);
+        Assert.Null(agHeads[1].RateLimitResetLabel);
+
+        // 2. Claude: stale busy (30 min ago) + active quota pause in transcript -> "rate_limited" with ResetLabel
+        var claudeSessionsDir = Path.Combine(fx.ClaudeHomePath, "sessions");
+        Directory.CreateDirectory(claudeSessionsDir);
+        var claudeSessionId = "99999999-9999-9999-9999-999999999999";
+        var cwd = Path.Combine(fx.MobaFlowPath, "worktree-stale-busy-limit");
+        var encodedFolder = ClaudeMonitorProvider.EncodeProjectFolder(cwd);
+        var projectDir = Path.Combine(fx.ClaudeHomePath, "projects", encodedFolder);
+        Directory.CreateDirectory(projectDir);
+
+        var sessionFile = Path.Combine(claudeSessionsDir, "9002.json");
+        await File.WriteAllTextAsync(sessionFile, $$"""
+            {
+              "sessionId": "{{claudeSessionId}}",
+              "cwd": "{{cwd.Replace("\\", "\\\\")}}",
+              "name": "MOBAi Claude Opus",
+              "status": "busy",
+              "updatedAt": {{stale30MinAgo.ToUnixTimeMilliseconds()}}
+            }
+            """);
+        await File.WriteAllLinesAsync(
+            Path.Combine(projectDir, $"{claudeSessionId}.jsonl"),
+            ["""{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your 5-hour limit resets 12am (Europe/Berlin)"}]}}"""]);
+
+        var claudeProvider = new ClaudeMonitorProvider();
+        var claudeLimited = await claudeProvider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("rate_limited", claudeLimited.State);
+        Assert.Equal("12am (Europe/Berlin)", claudeLimited.RateLimitResetLabel);
+
+        // Active within threshold (2 min ago) remains "busy"
+        await File.WriteAllTextAsync(sessionFile, $$"""
+            {
+              "sessionId": "{{claudeSessionId}}",
+              "cwd": "{{cwd.Replace("\\", "\\\\")}}",
+              "name": "MOBAi Claude Opus",
+              "status": "busy",
+              "updatedAt": {{active2MinAgo.ToUnixTimeMilliseconds()}}
+            }
+            """);
+        var claudeActive = await claudeProvider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("busy", claudeActive.State);
+        Assert.Null(claudeActive.RateLimitResetLabel);
+    }
 }

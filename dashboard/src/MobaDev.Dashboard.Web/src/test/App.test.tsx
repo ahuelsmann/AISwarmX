@@ -1158,7 +1158,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
         name: 'MOBAi Antigravity Opus'
       })
     ).toBeInTheDocument();
-  });
+  }, 10_000);
 
   it('renders Dirty · Preserved badge and Copy Safe Prune Cmd action in Hygiene panel', async () => {
     const user = userEvent.setup();

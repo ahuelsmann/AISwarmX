@@ -104,22 +104,13 @@ public sealed partial class ClaudeMonitorProvider
             ? DateTimeOffset.FromUnixTimeMilliseconds(selected.UpdatedAtMs)
             : (DateTimeOffset?)null;
 
-        string state;
-        if (!string.IsNullOrEmpty(rateLimitResetLabel) &&
-            !string.Equals(selected.Status, "busy", StringComparison.OrdinalIgnoreCase))
-        {
-            state = "rate_limited";
-        }
-        else if (string.Equals(selected.Status, "busy", StringComparison.OrdinalIgnoreCase))
-        {
-            state = "busy";
-        }
-        else
-        {
-            state = "standby";
-        }
-
-        state = MonitorStateRules.ApplyIdle(state, lastActivityUtc, now, effectiveThreshold);
+        var isBusy = string.Equals(selected.Status, "busy", StringComparison.OrdinalIgnoreCase);
+        var (state, effectiveRateLimitResetLabel) = MonitorStateRules.ResolveState(
+            isBusy,
+            rateLimitResetLabel,
+            lastActivityUtc,
+            now,
+            effectiveThreshold);
 
         var notice = sessions.Count > 1
             ? $"{sessions.Count} active MOBAi Claude sessions detected (target: 1)."
@@ -134,7 +125,7 @@ public sealed partial class ClaudeMonitorProvider
             State: state,
             Model: model,
             LastActivityUtc: lastActivityUtc,
-            RateLimitResetLabel: rateLimitResetLabel,
+            RateLimitResetLabel: effectiveRateLimitResetLabel,
             ActiveSessionCount: sessions.Count,
             AutomationStatus: null,
             Source: new SourceHealth("ok", now, notice),

@@ -435,12 +435,12 @@ public sealed partial class AntigravityMonitorProvider
         string? notice)
     {
         var isRunning = string.Equals(selected.Status, "CASCADE_RUN_STATUS_RUNNING", StringComparison.OrdinalIgnoreCase);
-        var rawState = isRunning
-            ? "busy"
-            : !string.IsNullOrEmpty(rateLimitResetLabel)
-                ? "rate_limited"
-                : "standby";
-        var state = MonitorStateRules.ApplyIdle(rawState, lastActivityUtc, now, busyIdleThreshold);
+        var (state, effectiveRateLimitResetLabel) = MonitorStateRules.ResolveState(
+            isRunning,
+            rateLimitResetLabel,
+            lastActivityUtc,
+            now,
+            busyIdleThreshold);
 
         return new MonitorInfo(
             Id: id,
@@ -451,7 +451,7 @@ public sealed partial class AntigravityMonitorProvider
             State: state,
             Model: model,
             LastActivityUtc: lastActivityUtc,
-            RateLimitResetLabel: isRunning ? null : rateLimitResetLabel,
+            RateLimitResetLabel: effectiveRateLimitResetLabel,
             ActiveSessionCount: activeSessionCount,
             AutomationStatus: null,
             Source: new SourceHealth("ok", now, notice),
