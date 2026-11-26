@@ -123,22 +123,17 @@ public sealed partial class AntigravityMonitorProvider
                 : null;
 
             var candidateIds = BuildCandidateRootIds(argonSelected?.Id, opusSelected?.Id);
+            var buildContext = new HeadBuildContext(paths.AntigravityHomePath, candidateIds, now, effectiveThreshold);
             var argonInfo = BuildArgonHeadMonitor(
-                paths.AntigravityHomePath,
+                buildContext,
                 argonSelected,
-                candidateIds,
                 extraSessionCount,
                 argonSubAgentsByModel,
-                now,
-                effectiveThreshold,
                 extraNotice);
             var opusInfo = BuildOpusHeadMonitor(
-                paths.AntigravityHomePath,
+                buildContext,
                 opusSelected,
-                candidateIds,
-                opusSubAgentsByModel,
-                now,
-                effectiveThreshold);
+                opusSubAgentsByModel);
 
             IReadOnlyList<MonitorInfo> result = [argonInfo, opusInfo];
             return Task.FromResult(result);
@@ -179,36 +174,50 @@ public sealed partial class AntigravityMonitorProvider
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            var id = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
-            var title = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
-            var status = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
-            var lastModifiedRaw = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
-            var source = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
-
-            var isCliSource = string.Equals(source, "CORTEX_TRAJECTORY_SOURCE_CLI", StringComparison.OrdinalIgnoreCase);
-            if (!isCliSource && !string.IsNullOrWhiteSpace(title) && !IsMobaAntigravityTitle(title))
-            {
-                if (!string.IsNullOrWhiteSpace(id))
-                {
-                    foreignRootIds.Add(id);
-                }
-
-                continue;
-            }
-
-            if (string.Equals(status, "CASCADE_RUN_STATUS_RUNNING", StringComparison.OrdinalIgnoreCase) &&
-                !string.IsNullOrWhiteSpace(id))
-            {
-                runningConversationIds.Add(id);
-            }
-
-            if (!isCliSource && !string.IsNullOrWhiteSpace(title))
-            {
-                mobaDesktopConversations.Add(new AntigravityConversationRecord(id, title, status, lastModifiedRaw));
-            }
+            AddConversationRow(reader, runningConversationIds, foreignRootIds, mobaDesktopConversations);
         }
 
         return new ConversationSummarySnapshot(runningConversationIds, foreignRootIds, mobaDesktopConversations);
+    }
+
+    private static void AddConversationRow(
+        SqliteDataReader reader,
+        List<string> runningConversationIds,
+        HashSet<string> foreignRootIds,
+        List<AntigravityConversationRecord> mobaDesktopConversations)
+    {
+        var id = ReadOptionalString(reader, 0);
+        var title = ReadOptionalString(reader, 1);
+        var status = ReadOptionalString(reader, 2);
+        var lastModifiedRaw = ReadOptionalString(reader, 3);
+        var source = ReadOptionalString(reader, 4);
+
+        var isCliSource = string.Equals(source, "CORTEX_TRAJECTORY_SOURCE_CLI", StringComparison.OrdinalIgnoreCase);
+        if (!isCliSource && !string.IsNullOrWhiteSpace(title) && !IsMobaAntigravityTitle(title))
+        {
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                foreignRootIds.Add(id);
+            }
+
+            return;
+        }
+
+        if (string.Equals(status, "CASCADE_RUN_STATUS_RUNNING", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(id))
+        {
+            runningConversationIds.Add(id);
+        }
+
+        if (!isCliSource && !string.IsNullOrWhiteSpace(title))
+        {
+            mobaDesktopConversations.Add(new AntigravityConversationRecord(id, title, status, lastModifiedRaw));
+        }
+    }
+
+    private static string ReadOptionalString(SqliteDataReader reader, int ordinal)
+    {
+        return reader.IsDBNull(ordinal) ? string.Empty : reader.GetString(ordinal);
     }
 
     private static IReadOnlyList<MonitorInfo> BuildEmptyMonitorsResponse(
@@ -269,13 +278,10 @@ public sealed partial class AntigravityMonitorProvider
     }
 
     private static MonitorInfo BuildArgonHeadMonitor(
-        string antigravityHomePath,
+        HeadBuildContext context,
         AntigravityConversationRecord? argonSelected,
-        IReadOnlyList<string> candidateIds,
         int extraSessionCount,
         IReadOnlyDictionary<string, int> argonSubAgentsByModel,
-        DateTimeOffset now,
-        TimeSpan effectiveThreshold,
         string? extraNotice)
     {
         if (argonSelected is null)
@@ -285,7 +291,7 @@ public sealed partial class AntigravityMonitorProvider
                 ArgonDisplayName,
                 ArgonRole,
                 ArgonProfile,
-                now,
+                context.Now,
                 "ok",
                 $"No {ArgonDisplayName} session found.",
                 activeSubAgentCount: 0);
@@ -293,15 +299,15 @@ public sealed partial class AntigravityMonitorProvider
 
         var legacyMatched = string.Equals(argonSelected.Title.Trim(), LegacyDisplayName, StringComparison.OrdinalIgnoreCase);
         var fallbackModel = legacyMatched ? LegacyDesktopModel : DefaultArgonModel;
-        var model = InspectConversationModel(antigravityHomePath, argonSelected.Id, fallbackModel);
+        var model = InspectConversationModel(context.AntigravityHomePath, argonSelected.Id, fallbackModel);
         var lastActivityUtc = ParseLastActivityUtc(argonSelected.LastModifiedRaw);
         var rateLimitResetLabel = DetectAntigravityRateLimit(
-            antigravityHomePath,
+            context.AntigravityHomePath,
             argonSelected.Id,
             model,
             lastActivityUtc,
-            candidateIds,
-            now);
+            context.CandidateIds,
+            context.Now);
         return BuildMonitorInfo(
             ArgonMonitorId,
             ArgonDisplayName,
@@ -314,18 +320,15 @@ public sealed partial class AntigravityMonitorProvider
             activeSessionCount: 1 + extraSessionCount,
             activeSubAgentCount: argonSubAgentsByModel.Values.Sum(),
             activeSubAgentsByModel: argonSubAgentsByModel,
-            now,
-            effectiveThreshold,
+            context.Now,
+            context.BusyIdleThreshold,
             extraNotice);
     }
 
     private static MonitorInfo BuildOpusHeadMonitor(
-        string antigravityHomePath,
+        HeadBuildContext context,
         AntigravityConversationRecord? opusSelected,
-        IReadOnlyList<string> candidateIds,
-        IReadOnlyDictionary<string, int> opusSubAgentsByModel,
-        DateTimeOffset now,
-        TimeSpan effectiveThreshold)
+        IReadOnlyDictionary<string, int> opusSubAgentsByModel)
     {
         if (opusSelected is null)
         {
@@ -334,22 +337,22 @@ public sealed partial class AntigravityMonitorProvider
                 OpusDisplayName,
                 OpusRole,
                 OpusProfile,
-                now,
+                context.Now,
                 "ok",
                 $"No {OpusDisplayName} session found.",
                 activeSubAgentCount: 0,
                 defaultModel: DefaultOpusModel);
         }
 
-        var model = InspectConversationModel(antigravityHomePath, opusSelected.Id, DefaultOpusModel);
+        var model = InspectConversationModel(context.AntigravityHomePath, opusSelected.Id, DefaultOpusModel);
         var lastActivityUtc = ParseLastActivityUtc(opusSelected.LastModifiedRaw);
         var rateLimitResetLabel = DetectAntigravityRateLimit(
-            antigravityHomePath,
+            context.AntigravityHomePath,
             opusSelected.Id,
             model,
             lastActivityUtc,
-            candidateIds,
-            now);
+            context.CandidateIds,
+            context.Now);
         return BuildMonitorInfo(
             OpusMonitorId,
             OpusDisplayName,
@@ -362,10 +365,16 @@ public sealed partial class AntigravityMonitorProvider
             activeSessionCount: 1,
             activeSubAgentCount: opusSubAgentsByModel.Values.Sum(),
             activeSubAgentsByModel: opusSubAgentsByModel,
-            now,
-            effectiveThreshold,
+            context.Now,
+            context.BusyIdleThreshold,
             notice: null);
     }
+
+    private sealed record HeadBuildContext(
+        string AntigravityHomePath,
+        IReadOnlyList<string> CandidateIds,
+        DateTimeOffset Now,
+        TimeSpan BusyIdleThreshold);
 
     private sealed record ConversationSummarySnapshot(
         List<string> RunningConversationIds,
