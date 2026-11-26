@@ -25,6 +25,18 @@ public sealed partial class ClaudeMonitorProvider
     private const string Profile = "P1";
     private const string Tool = "Claude Code";
 
+    private readonly TimeProvider _timeProvider;
+
+    public ClaudeMonitorProvider()
+        : this(TimeProvider.System)
+    {
+    }
+
+    internal ClaudeMonitorProvider(TimeProvider timeProvider)
+    {
+        _timeProvider = timeProvider ?? TimeProvider.System;
+    }
+
     public Task<MonitorInfo> GetMonitorAsync(ResolvedDashboardPaths paths, CancellationToken cancellationToken)
     {
         return GetMonitorAsync(
@@ -40,7 +52,7 @@ public sealed partial class ClaudeMonitorProvider
     {
         cancellationToken.ThrowIfCancellationRequested();
         var effectiveThreshold = MonitorStateRules.NormalizeThreshold(busyIdleThreshold);
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
 
         var activeSubagentModels = CollectActiveSubagentFileModels(paths.ClaudeHomePath, now);
         var sessionsDir = Path.Combine(paths.ClaudeHomePath, "sessions");

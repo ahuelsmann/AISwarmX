@@ -134,6 +134,16 @@ function formatMonitorStateText(state: string | undefined): string {
   }
 }
 
+function resolveMonitorDotStatusKey(state: string | undefined): 'ok' | 'warn' | 'neutral' {
+  if (state === 'standby') {
+    return 'ok';
+  }
+  if (state === 'busy' || state === 'rate_limited') {
+    return 'warn';
+  }
+  return 'neutral';
+}
+
 interface DecisionTriadCardProps {
   monitors: MonitorInfo[];
   governance: GovernanceResponse;
@@ -252,14 +262,7 @@ export function DecisionTriadCard({
           const stateLabel = formatMonitorStateText(monitor?.state);
           const toolName = monitor?.tool ?? seat.tool;
           const isBusy = monitor?.state === 'busy';
-          const dotStatusKey =
-            monitor?.state === 'standby'
-              ? 'ok'
-              : monitor?.state === 'idle'
-                ? 'neutral'
-                : isBusy || monitor?.state === 'rate_limited'
-                  ? 'warn'
-                  : 'neutral';
+          const dotStatusKey = resolveMonitorDotStatusKey(monitor?.state);
           const dotColor = getStatusStyles(dotStatusKey, isDark).solid;
 
           const seatTone = resolveProfileTone(seat.profile);

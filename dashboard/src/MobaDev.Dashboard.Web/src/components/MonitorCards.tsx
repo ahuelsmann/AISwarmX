@@ -1016,15 +1016,17 @@ export function formatIdleStateLabel(
   return `Idle · no activity for ${diffMinutes} min`;
 }
 
+interface MonitorStateBadgeProps {
+  state: string;
+  lastActivityUtc?: string | null;
+  nowMs: number;
+}
+
 function MonitorStateBadge({
   state,
   lastActivityUtc,
   nowMs
-}: {
-  state: string;
-  lastActivityUtc?: string | null;
-  nowMs: number;
-}) {
+}: Readonly<MonitorStateBadgeProps>) {
   switch (state) {
     case 'busy':
       return (

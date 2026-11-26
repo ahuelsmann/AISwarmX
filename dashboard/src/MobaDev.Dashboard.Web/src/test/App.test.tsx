@@ -1229,8 +1229,8 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     // Dual-Opus pause (both Claude Opus and Antigravity Opus rate-limited) -> Codex + Gemini Failover
     const dualOpusPaused = customPayload.monitors.monitors.map((m) =>
       m.id === 'claude-monitor' || m.id === 'antigravity-opus-head'
-        ? { ...m, state: 'rate_limited' }
-        : { ...m, state: 'standby' }
+        ? { ...m, state: 'rate_limited' as const }
+        : { ...m, state: 'standby' as const }
     );
     expect(formatQuotaPauseSuffix(dualOpusPaused)).toBe('(Codex + Gemini Failover)');
   });

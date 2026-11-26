@@ -34,6 +34,17 @@ public sealed partial class AntigravityMonitorProvider
     private const string DefaultOpusModel = "Orchestrator · Claude Opus 5.5";
 
     private const string Tool = "Antigravity";
+    private readonly TimeProvider _timeProvider;
+
+    public AntigravityMonitorProvider()
+        : this(TimeProvider.System)
+    {
+    }
+
+    internal AntigravityMonitorProvider(TimeProvider timeProvider)
+    {
+        _timeProvider = timeProvider ?? TimeProvider.System;
+    }
 
     public Task<MonitorInfo> GetMonitorAsync(ResolvedDashboardPaths paths, CancellationToken cancellationToken)
     {
@@ -67,7 +78,7 @@ public sealed partial class AntigravityMonitorProvider
     {
         cancellationToken.ThrowIfCancellationRequested();
         var effectiveThreshold = MonitorStateRules.NormalizeThreshold(busyIdleThreshold);
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
 
         var dbPath = Path.Combine(paths.AntigravityHomePath, "conversation_summaries.db");
         if (!File.Exists(dbPath))
@@ -82,94 +93,22 @@ public sealed partial class AntigravityMonitorProvider
 
         try
         {
-            using var connection = SqliteReadOnlyHelper.OpenReadOnly(dbPath);
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT conversation_id, title, status, last_modified_time, source
-                FROM conversation_summaries
-                ORDER BY last_modified_time DESC
-                """;
-
-            var runningConversationIds = new List<string>();
-            var foreignRootIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var mobaDesktopConversations = new List<AntigravityConversationRecord>();
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
+            var summaryData = LoadConversations(dbPath);
+            if (summaryData.MobaDesktopConversations.Count == 0)
             {
-                var id = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
-                var title = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
-                var status = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
-                var lastModifiedRaw = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
-                var source = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
-
-                var isCliSource = string.Equals(source, "CORTEX_TRAJECTORY_SOURCE_CLI", StringComparison.OrdinalIgnoreCase);
-                if (!isCliSource && !string.IsNullOrWhiteSpace(title) && !IsMobaAntigravityTitle(title))
-                {
-                    if (!string.IsNullOrWhiteSpace(id))
-                    {
-                        foreignRootIds.Add(id);
-                    }
-
-                    continue;
-                }
-
-                if (string.Equals(status, "CASCADE_RUN_STATUS_RUNNING", StringComparison.OrdinalIgnoreCase) &&
-                    !string.IsNullOrWhiteSpace(id))
-                {
-                    runningConversationIds.Add(id);
-                }
-
-                if (isCliSource || string.IsNullOrWhiteSpace(title))
-                {
-                    continue;
-                }
-
-                mobaDesktopConversations.Add(new AntigravityConversationRecord(id, title, status, lastModifiedRaw));
-            }
-
-            if (mobaDesktopConversations.Count == 0)
-            {
-                var scopedRunning = runningConversationIds.Where(id => !foreignRootIds.Contains(id)).ToList();
-                var emptySet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var (emptyArgonByModel, _) = ClassifyAntigravitySubAgents(
+                return Task.FromResult(BuildEmptyMonitorsResponse(
                     paths.AntigravityHomePath,
-                    scopedRunning,
-                    hasArgonHead: true,
-                    hasOpusHead: false,
-                    emptySet,
-                    emptySet);
-                IReadOnlyList<MonitorInfo> empty =
-                [
-                    Unavailable(ArgonMonitorId, ArgonDisplayName, ArgonRole, ArgonProfile, now, "ok", $"No {ArgonDisplayName} session found.", scopedRunning.Count, activeSubAgentsByModel: emptyArgonByModel),
-                    Unavailable(OpusMonitorId, OpusDisplayName, OpusRole, OpusProfile, now, "ok", $"No {OpusDisplayName} session found.", defaultModel: DefaultOpusModel)
-                ];
-                return Task.FromResult(empty);
+                    summaryData.RunningConversationIds,
+                    summaryData.ForeignRootIds,
+                    now));
             }
 
-            var opusSelected = mobaDesktopConversations
-                .Where(c => IsOpusCandidateTitle(c.Title))
-                .OrderByDescending(c => GetOpusPriorityRank(c.Title))
-                .FirstOrDefault();
-
-            var argonSelected = mobaDesktopConversations
-                .Where(c => opusSelected is null || !string.Equals(c.Id, opusSelected.Id, StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(c => GetGeminiPriorityRank(c.Title))
-                .FirstOrDefault();
-
-            var rootIds = new HashSet<string>(foreignRootIds, StringComparer.OrdinalIgnoreCase);
-            if (argonSelected is not null && !string.IsNullOrWhiteSpace(argonSelected.Id))
-            {
-                rootIds.Add(argonSelected.Id);
-            }
-
-            if (opusSelected is not null && !string.IsNullOrWhiteSpace(opusSelected.Id))
-            {
-                rootIds.Add(opusSelected.Id);
-            }
+            var (argonSelected, opusSelected) = SelectRootHeads(summaryData.MobaDesktopConversations);
+            var rootIds = BuildRootIdSet(summaryData.ForeignRootIds, argonSelected?.Id, opusSelected?.Id);
 
             var argonSpawnedIds = ExtractSpawnedSubAgentIds(paths.AntigravityHomePath, argonSelected?.Id);
             var opusSpawnedIds = ExtractSpawnedSubAgentIds(paths.AntigravityHomePath, opusSelected?.Id);
-            var subAgentIds = runningConversationIds.Where(id => !rootIds.Contains(id)).ToList();
+            var subAgentIds = summaryData.RunningConversationIds.Where(id => !rootIds.Contains(id)).ToList();
             var (argonSubAgentsByModel, opusSubAgentsByModel) = ClassifyAntigravitySubAgents(
                 paths.AntigravityHomePath,
                 subAgentIds,
@@ -177,100 +116,29 @@ public sealed partial class AntigravityMonitorProvider
                 hasOpusHead: opusSelected is not null,
                 argonSpawnedIds,
                 opusSpawnedIds);
-            var argonSubAgentCount = argonSubAgentsByModel.Values.Sum();
-            var opusSubAgentCount = opusSubAgentsByModel.Values.Sum();
 
-            var extraSessionCount = Math.Max(0, mobaDesktopConversations.Count - (argonSelected is not null ? 1 : 0) - (opusSelected is not null ? 1 : 0));
-            var extraNotice = mobaDesktopConversations.Count > 2
-                ? $"{mobaDesktopConversations.Count} MOBAi Antigravity sessions found in summaries (target: 2: {ArgonDisplayName} + {OpusDisplayName})."
+            var extraSessionCount = Math.Max(0, summaryData.MobaDesktopConversations.Count - (argonSelected is not null ? 1 : 0) - (opusSelected is not null ? 1 : 0));
+            var extraNotice = summaryData.MobaDesktopConversations.Count > 2
+                ? $"{summaryData.MobaDesktopConversations.Count} MOBAi Antigravity sessions found in summaries (target: 2: {ArgonDisplayName} + {OpusDisplayName})."
                 : null;
 
             var candidateIds = BuildCandidateRootIds(argonSelected?.Id, opusSelected?.Id);
-
-            MonitorInfo argonInfo;
-            if (argonSelected is not null)
-            {
-                var legacyMatched = string.Equals(argonSelected.Title.Trim(), LegacyDisplayName, StringComparison.OrdinalIgnoreCase);
-                var fallbackModel = legacyMatched ? LegacyDesktopModel : DefaultArgonModel;
-                var model = InspectConversationModel(paths.AntigravityHomePath, argonSelected.Id, fallbackModel);
-                var argonLastActivityUtc = ParseLastActivityUtc(argonSelected.LastModifiedRaw);
-                var rateLimitResetLabel = DetectAntigravityRateLimit(
-                    paths.AntigravityHomePath,
-                    argonSelected.Id,
-                    model,
-                    argonLastActivityUtc,
-                    candidateIds,
-                    now);
-                argonInfo = BuildMonitorInfo(
-                    ArgonMonitorId,
-                    ArgonDisplayName,
-                    ArgonRole,
-                    ArgonProfile,
-                    argonSelected,
-                    model,
-                    argonLastActivityUtc,
-                    rateLimitResetLabel,
-                    activeSessionCount: 1 + extraSessionCount,
-                    argonSubAgentCount,
-                    argonSubAgentsByModel,
-                    now,
-                    effectiveThreshold,
-                    extraNotice);
-            }
-            else
-            {
-                argonInfo = Unavailable(
-                    ArgonMonitorId,
-                    ArgonDisplayName,
-                    ArgonRole,
-                    ArgonProfile,
-                    now,
-                    "ok",
-                    $"No {ArgonDisplayName} session found.",
-                    activeSubAgentCount: 0);
-            }
-
-            MonitorInfo opusInfo;
-            if (opusSelected is not null)
-            {
-                var model = InspectConversationModel(paths.AntigravityHomePath, opusSelected.Id, DefaultOpusModel);
-                var opusLastActivityUtc = ParseLastActivityUtc(opusSelected.LastModifiedRaw);
-                var rateLimitResetLabel = DetectAntigravityRateLimit(
-                    paths.AntigravityHomePath,
-                    opusSelected.Id,
-                    model,
-                    opusLastActivityUtc,
-                    candidateIds,
-                    now);
-                opusInfo = BuildMonitorInfo(
-                    OpusMonitorId,
-                    OpusDisplayName,
-                    OpusRole,
-                    OpusProfile,
-                    opusSelected,
-                    model,
-                    opusLastActivityUtc,
-                    rateLimitResetLabel,
-                    activeSessionCount: 1,
-                    activeSubAgentCount: opusSubAgentCount,
-                    activeSubAgentsByModel: opusSubAgentsByModel,
-                    now,
-                    effectiveThreshold,
-                    notice: null);
-            }
-            else
-            {
-                opusInfo = Unavailable(
-                    OpusMonitorId,
-                    OpusDisplayName,
-                    OpusRole,
-                    OpusProfile,
-                    now,
-                    "ok",
-                    $"No {OpusDisplayName} session found.",
-                    activeSubAgentCount: 0,
-                    defaultModel: DefaultOpusModel);
-            }
+            var argonInfo = BuildArgonHeadMonitor(
+                paths.AntigravityHomePath,
+                argonSelected,
+                candidateIds,
+                extraSessionCount,
+                argonSubAgentsByModel,
+                now,
+                effectiveThreshold,
+                extraNotice);
+            var opusInfo = BuildOpusHeadMonitor(
+                paths.AntigravityHomePath,
+                opusSelected,
+                candidateIds,
+                opusSubAgentsByModel,
+                now,
+                effectiveThreshold);
 
             IReadOnlyList<MonitorInfo> result = [argonInfo, opusInfo];
             return Task.FromResult(result);
@@ -294,6 +162,215 @@ public sealed partial class AntigravityMonitorProvider
             return Task.FromResult(failed);
         }
     }
+
+    private static ConversationSummarySnapshot LoadConversations(string dbPath)
+    {
+        using var connection = SqliteReadOnlyHelper.OpenReadOnly(dbPath);
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT conversation_id, title, status, last_modified_time, source
+            FROM conversation_summaries
+            ORDER BY last_modified_time DESC
+            """;
+
+        var runningConversationIds = new List<string>();
+        var foreignRootIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var mobaDesktopConversations = new List<AntigravityConversationRecord>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var id = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+            var title = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+            var status = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+            var lastModifiedRaw = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
+            var source = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
+
+            var isCliSource = string.Equals(source, "CORTEX_TRAJECTORY_SOURCE_CLI", StringComparison.OrdinalIgnoreCase);
+            if (!isCliSource && !string.IsNullOrWhiteSpace(title) && !IsMobaAntigravityTitle(title))
+            {
+                if (!string.IsNullOrWhiteSpace(id))
+                {
+                    foreignRootIds.Add(id);
+                }
+
+                continue;
+            }
+
+            if (string.Equals(status, "CASCADE_RUN_STATUS_RUNNING", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(id))
+            {
+                runningConversationIds.Add(id);
+            }
+
+            if (!isCliSource && !string.IsNullOrWhiteSpace(title))
+            {
+                mobaDesktopConversations.Add(new AntigravityConversationRecord(id, title, status, lastModifiedRaw));
+            }
+        }
+
+        return new ConversationSummarySnapshot(runningConversationIds, foreignRootIds, mobaDesktopConversations);
+    }
+
+    private static IReadOnlyList<MonitorInfo> BuildEmptyMonitorsResponse(
+        string antigravityHomePath,
+        IReadOnlyList<string> runningConversationIds,
+        IReadOnlySet<string> foreignRootIds,
+        DateTimeOffset now)
+    {
+        var scopedRunning = runningConversationIds.Where(id => !foreignRootIds.Contains(id)).ToList();
+        var emptySet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var (emptyArgonByModel, _) = ClassifyAntigravitySubAgents(
+            antigravityHomePath,
+            scopedRunning,
+            hasArgonHead: true,
+            hasOpusHead: false,
+            emptySet,
+            emptySet);
+        return
+        [
+            Unavailable(ArgonMonitorId, ArgonDisplayName, ArgonRole, ArgonProfile, now, "ok", $"No {ArgonDisplayName} session found.", scopedRunning.Count, activeSubAgentsByModel: emptyArgonByModel),
+            Unavailable(OpusMonitorId, OpusDisplayName, OpusRole, OpusProfile, now, "ok", $"No {OpusDisplayName} session found.", defaultModel: DefaultOpusModel)
+        ];
+    }
+
+    private static (AntigravityConversationRecord? ArgonSelected, AntigravityConversationRecord? OpusSelected) SelectRootHeads(
+        IReadOnlyList<AntigravityConversationRecord> mobaDesktopConversations)
+    {
+        var opusSelected = mobaDesktopConversations
+            .Where(c => IsOpusCandidateTitle(c.Title))
+            .OrderByDescending(c => GetOpusPriorityRank(c.Title))
+            .FirstOrDefault();
+
+        var argonSelected = mobaDesktopConversations
+            .Where(c => opusSelected is null || !string.Equals(c.Id, opusSelected.Id, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(c => GetGeminiPriorityRank(c.Title))
+            .FirstOrDefault();
+
+        return (argonSelected, opusSelected);
+    }
+
+    private static HashSet<string> BuildRootIdSet(
+        IEnumerable<string> foreignRootIds,
+        string? argonId,
+        string? opusId)
+    {
+        var rootIds = new HashSet<string>(foreignRootIds, StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(argonId))
+        {
+            rootIds.Add(argonId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(opusId))
+        {
+            rootIds.Add(opusId);
+        }
+
+        return rootIds;
+    }
+
+    private static MonitorInfo BuildArgonHeadMonitor(
+        string antigravityHomePath,
+        AntigravityConversationRecord? argonSelected,
+        IReadOnlyList<string> candidateIds,
+        int extraSessionCount,
+        IReadOnlyDictionary<string, int> argonSubAgentsByModel,
+        DateTimeOffset now,
+        TimeSpan effectiveThreshold,
+        string? extraNotice)
+    {
+        if (argonSelected is null)
+        {
+            return Unavailable(
+                ArgonMonitorId,
+                ArgonDisplayName,
+                ArgonRole,
+                ArgonProfile,
+                now,
+                "ok",
+                $"No {ArgonDisplayName} session found.",
+                activeSubAgentCount: 0);
+        }
+
+        var legacyMatched = string.Equals(argonSelected.Title.Trim(), LegacyDisplayName, StringComparison.OrdinalIgnoreCase);
+        var fallbackModel = legacyMatched ? LegacyDesktopModel : DefaultArgonModel;
+        var model = InspectConversationModel(antigravityHomePath, argonSelected.Id, fallbackModel);
+        var lastActivityUtc = ParseLastActivityUtc(argonSelected.LastModifiedRaw);
+        var rateLimitResetLabel = DetectAntigravityRateLimit(
+            antigravityHomePath,
+            argonSelected.Id,
+            model,
+            lastActivityUtc,
+            candidateIds,
+            now);
+        return BuildMonitorInfo(
+            ArgonMonitorId,
+            ArgonDisplayName,
+            ArgonRole,
+            ArgonProfile,
+            argonSelected,
+            model,
+            lastActivityUtc,
+            rateLimitResetLabel,
+            activeSessionCount: 1 + extraSessionCount,
+            activeSubAgentCount: argonSubAgentsByModel.Values.Sum(),
+            activeSubAgentsByModel: argonSubAgentsByModel,
+            now,
+            effectiveThreshold,
+            extraNotice);
+    }
+
+    private static MonitorInfo BuildOpusHeadMonitor(
+        string antigravityHomePath,
+        AntigravityConversationRecord? opusSelected,
+        IReadOnlyList<string> candidateIds,
+        IReadOnlyDictionary<string, int> opusSubAgentsByModel,
+        DateTimeOffset now,
+        TimeSpan effectiveThreshold)
+    {
+        if (opusSelected is null)
+        {
+            return Unavailable(
+                OpusMonitorId,
+                OpusDisplayName,
+                OpusRole,
+                OpusProfile,
+                now,
+                "ok",
+                $"No {OpusDisplayName} session found.",
+                activeSubAgentCount: 0,
+                defaultModel: DefaultOpusModel);
+        }
+
+        var model = InspectConversationModel(antigravityHomePath, opusSelected.Id, DefaultOpusModel);
+        var lastActivityUtc = ParseLastActivityUtc(opusSelected.LastModifiedRaw);
+        var rateLimitResetLabel = DetectAntigravityRateLimit(
+            antigravityHomePath,
+            opusSelected.Id,
+            model,
+            lastActivityUtc,
+            candidateIds,
+            now);
+        return BuildMonitorInfo(
+            OpusMonitorId,
+            OpusDisplayName,
+            OpusRole,
+            OpusProfile,
+            opusSelected,
+            model,
+            lastActivityUtc,
+            rateLimitResetLabel,
+            activeSessionCount: 1,
+            activeSubAgentCount: opusSubAgentsByModel.Values.Sum(),
+            activeSubAgentsByModel: opusSubAgentsByModel,
+            now,
+            effectiveThreshold,
+            notice: null);
+    }
+
+    private sealed record ConversationSummarySnapshot(
+        List<string> RunningConversationIds,
+        HashSet<string> ForeignRootIds,
+        List<AntigravityConversationRecord> MobaDesktopConversations);
 
     private static (IReadOnlyDictionary<string, int> ArgonByModel, IReadOnlyDictionary<string, int> OpusByModel) ClassifyAntigravitySubAgents(
         string antigravityHomePath,
