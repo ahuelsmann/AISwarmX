@@ -194,3 +194,95 @@ test('Claude Swarm Bus hook emits nothing when empty and injects unread messages
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('Swarm Bus auto-acks headless recipients, supersedes stale watchdog PR alerts, and aggregates inbox for all', async () => {
+  const { dir, dbPath } = createTempDbPath();
+  const child = spawn(process.execPath, ['--no-warnings', BUS_SCRIPT], {
+    env: { ...process.env, MOBADEV_SWARM_BUS_DB: dbPath },
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+
+  const rl = readline.createInterface({ input: child.stdout });
+  const pending = new Map();
+  rl.on('line', (line) => {
+    const parsed = JSON.parse(line);
+    const resolve = pending.get(parsed.id);
+    if (resolve) {
+      pending.delete(parsed.id);
+      resolve(parsed);
+    }
+  });
+
+  let nextId = 1;
+  function rpc(method, params = {}) {
+    const id = nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Timeout waiting for ${method}`)), 5000);
+      pending.set(id, (res) => {
+        clearTimeout(timer);
+        resolve(res);
+      });
+      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+    });
+  }
+
+  try {
+    await rpc('initialize', {});
+
+    // 1. Watchdog emits first alert on PR #545, then a newer alert on the same PR -> older alert auto-superseded.
+    await rpc('tools/call', {
+      name: 'bus_send',
+      arguments: { from: 'watchdog', to: 'codex', topic: 'CiOrSonarFailed', body: 'first', pr: 545 }
+    });
+    await rpc('tools/call', {
+      name: 'bus_send',
+      arguments: { from: 'watchdog', to: 'codex', topic: 'AllChecksGreenReady', body: 'second', pr: 545 }
+    });
+
+    // 2. Ack with reply back to headless 'watchdog' -> reply is auto-marked acked (never creates orphan unread).
+    await rpc('tools/call', {
+      name: 'bus_ack',
+      arguments: { message_id: 2, agent: 'codex', reply: 'Received green alert.' }
+    });
+
+    // 3. Message to headless 'claude-opus-worker' is also auto-acked immediately.
+    await rpc('tools/call', {
+      name: 'bus_send',
+      arguments: { from: 'antigravity-gemini', to: 'claude-opus-worker', topic: 're:p1-review-pass', body: 'Noted.', pr: 544 }
+    });
+
+    // 4. Send one real unread message to codex and query agent: 'all'.
+    await rpc('tools/call', {
+      name: 'bus_send',
+      arguments: { from: 'antigravity-gemini', to: 'codex', topic: 'review-pass', body: 'PR #545 PASS', pr: 545 }
+    });
+
+    const allInbox = JSON.parse((await rpc('tools/call', {
+      name: 'bus_inbox',
+      arguments: { agent: 'all', unread_only: true }
+    })).result.content[0].text);
+    assert.equal(allInbox.count, 1);
+    assert.equal(allInbox.messages[0].recipient, 'codex');
+    assert.equal(allInbox.messages[0].topic, 'review-pass');
+
+    const status = JSON.parse((await rpc('tools/call', {
+      name: 'bus_status',
+      arguments: { limit: 10 }
+    })).result.content[0].text);
+    assert.equal(status.totalUnread, 1);
+  } finally {
+    rl.close();
+    child.stdin.end();
+    await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        child.kill();
+        resolve();
+      }, 1500);
+      child.once('exit', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

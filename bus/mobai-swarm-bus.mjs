@@ -19,6 +19,7 @@ const SERVER_NAME = 'mobai-swarm-bus';
 const SERVER_VERSION = '1.0.0';
 const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_CODEX_THREAD_ID = '01a14504-bd6c-7a50-b715-1a2f2ec76467';
+const HEADLESS_RECIPIENTS = new Set(['watchdog', 'claude-opus-worker', 'system']);
 
 function resolveDbPath() {
   if (process.env.MOBADEV_SWARM_BUS_DB && process.env.MOBADEV_SWARM_BUS_DB.trim()) {
@@ -146,9 +147,22 @@ export function handleBusSend(db, args) {
     : 'normal';
 
   const createdAt = nowUtcIso();
+  if (sender.toLowerCase() === 'watchdog' && Number.isFinite(prNumber)) {
+    db.prepare(`
+      UPDATE messages
+      SET status = 'acked', acked_by = 'auto-superseded', acked_at_utc = ?
+      WHERE lower(sender) = 'watchdog' AND pr_number = ? AND status = 'unread'
+    `).run(createdAt, prNumber);
+  }
+
+  const isHeadlessRecipient = HEADLESS_RECIPIENTS.has(recipient.toLowerCase());
+  const initialStatus = isHeadlessRecipient ? 'acked' : 'unread';
+  const initialAckedBy = isHeadlessRecipient ? 'auto-headless' : null;
+  const initialAckedAt = isHeadlessRecipient ? createdAt : null;
+
   const stmt = db.prepare(`
-    INSERT INTO messages (created_at_utc, sender, recipient, topic, body, pr_number, issue_number, priority, reply_to_id, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'unread')
+    INSERT INTO messages (created_at_utc, sender, recipient, topic, body, pr_number, issue_number, priority, reply_to_id, status, acked_by, acked_at_utc)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const info = stmt.run(
     createdAt,
@@ -159,7 +173,10 @@ export function handleBusSend(db, args) {
     Number.isFinite(prNumber) ? prNumber : null,
     Number.isFinite(issueNumber) ? issueNumber : null,
     priority,
-    Number.isFinite(replyToId) ? replyToId : null
+    Number.isFinite(replyToId) ? replyToId : null,
+    initialStatus,
+    initialAckedBy,
+    initialAckedAt
   );
 
   const wakeResults = [];
@@ -190,18 +207,28 @@ export function handleBusInbox(db, args) {
   const agent = String(args.agent ?? 'all').trim();
   const unreadOnly = args.unread_only === undefined ? true : Boolean(args.unread_only);
   const limit = Math.max(1, Math.min(100, Number(args.limit ?? 20) || 20));
+  const includeAllRecipients = agent.toLowerCase() === 'all' || agent === '*';
 
-  const sql = unreadOnly
-    ? `SELECT id, created_at_utc, sender, recipient, topic, body, pr_number, issue_number, priority, reply_to_id, status, acked_by, acked_at_utc
-       FROM messages
-       WHERE (lower(recipient) = lower(?) OR lower(recipient) = 'all') AND status = 'unread'
-       ORDER BY id DESC LIMIT ?`
-    : `SELECT id, created_at_utc, sender, recipient, topic, body, pr_number, issue_number, priority, reply_to_id, status, acked_by, acked_at_utc
-       FROM messages
-       WHERE (lower(recipient) = lower(?) OR lower(recipient) = 'all')
-       ORDER BY id DESC LIMIT ?`;
+  const sql = includeAllRecipients
+    ? (unreadOnly
+        ? `SELECT id, created_at_utc, sender, recipient, topic, body, pr_number, issue_number, priority, reply_to_id, status, acked_by, acked_at_utc
+           FROM messages
+           WHERE status = 'unread'
+           ORDER BY id DESC LIMIT ?`
+        : `SELECT id, created_at_utc, sender, recipient, topic, body, pr_number, issue_number, priority, reply_to_id, status, acked_by, acked_at_utc
+           FROM messages
+           ORDER BY id DESC LIMIT ?`)
+    : (unreadOnly
+        ? `SELECT id, created_at_utc, sender, recipient, topic, body, pr_number, issue_number, priority, reply_to_id, status, acked_by, acked_at_utc
+           FROM messages
+           WHERE (lower(recipient) = lower(?) OR lower(recipient) = 'all') AND status = 'unread'
+           ORDER BY id DESC LIMIT ?`
+        : `SELECT id, created_at_utc, sender, recipient, topic, body, pr_number, issue_number, priority, reply_to_id, status, acked_by, acked_at_utc
+           FROM messages
+           WHERE (lower(recipient) = lower(?) OR lower(recipient) = 'all')
+           ORDER BY id DESC LIMIT ?`);
 
-  const rows = db.prepare(sql).all(agent, limit);
+  const rows = includeAllRecipients ? db.prepare(sql).all(limit) : db.prepare(sql).all(agent, limit);
   return {
     agent,
     unreadOnly,

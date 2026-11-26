@@ -5,6 +5,16 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.12.1] - 2026-11-26
+
+### Fixed
+- **Swarm Bus Unread Hygiene (`bus/mobai-swarm-bus.mjs`, `bus/mobai-swarm-bus.test.mjs`):**
+  - Auto-marked messages sent to headless senders (`watchdog`, `claude-opus-worker`, `system`) as `acked` (`auto-headless`) so `bus_ack` courtesy replies never linger unread in the Communication inbox.
+  - Auto-superseded older `unread` Watchdog alerts for the same `pr_number` when a newer Watchdog status event arrives for that PR.
+  - Fixed `bus_inbox` with `agent: "all"` (or `"*"`) to aggregate unread/recent messages across all recipients instead of filtering strictly to literal `recipient = 'all'`.
+
+---
+
 ## [3.12.0] - 2026-11-25
 
 ### Added
