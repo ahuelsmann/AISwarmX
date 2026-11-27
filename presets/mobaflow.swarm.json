@@ -1,0 +1,166 @@
+{
+  "$schema": "../schemas/swarm.config.schema.json",
+  "schemaVersion": "1.0",
+  "swarmName": "MOBAflow Agent Swarm",
+  "defaultWorkspaceId": "mobaflow",
+  "workspaces": [
+    {
+      "id": "mobaflow",
+      "displayName": "MOBAflow",
+      "repoPath": "${SWARM_REPOS_ROOT}/MOBAflow",
+      "githubRepository": "ahuelsmann/MOBAflow",
+      "githubProjectOwner": "ahuelsmann",
+      "githubProjectNumber": 1,
+      "codeWipLimit": 3,
+      "lowRiskDocPrefixes": [
+        "docs/",
+        "specs/",
+        "plans/"
+      ],
+      "scripts": {
+        "hygiene": "scripts/Invoke-RepoHygiene.ps1",
+        "watchdog": "scripts/Invoke-SwarmWatchdog.ps1"
+      }
+    },
+    {
+      "id": "mobadev",
+      "displayName": "MOBAdev",
+      "repoPath": "${SWARM_REPOS_ROOT}/MOBAdev",
+      "githubRepository": "ahuelsmann/MOBAdev",
+      "githubProjectOwner": "ahuelsmann",
+      "githubProjectNumber": 1,
+      "codeWipLimit": 2,
+      "lowRiskDocPrefixes": [
+        "docs/",
+        "schemas/",
+        "presets/",
+        "CHANGELOG.md"
+      ],
+      "scripts": {
+        "hygiene": "scripts/Invoke-RepoHygiene.ps1",
+        "watchdog": "scripts/Invoke-SwarmWatchdog.ps1"
+      }
+    }
+  ],
+  "capabilityProfiles": {
+    "P1": {
+      "description": "Depth, Architecture, Safety & COO Steering",
+      "allowedModels": [
+        "Opus 5.5",
+        "claude-opus-5-5"
+      ],
+      "prohibitedModels": [
+        "Claude Fable 5.2",
+        "claude-fable-5-2"
+      ]
+    },
+    "P2": {
+      "description": "Repo, Build, Fact Precision & Cross-Family Verification",
+      "allowedModels": [
+        "GPT-6.2 Sol",
+        "gpt-6.2-sol",
+        "GPT-6.2 Astra",
+        "gpt-6.2-astra",
+        "GPT-OSS 120B",
+        "gpt-oss-120b"
+      ],
+      "prohibitedModels": [
+        "Claude Fable 5.2",
+        "claude-fable-5-2",
+        "GPT-6 Astra",
+        "gpt-6-astra",
+        "GPT-6.1 Sol",
+        "gpt-6-1-sol"
+      ]
+    },
+    "P3": {
+      "description": "System Context, Product & UI/UX Architecture",
+      "allowedModels": [
+        "Gemini 4 Carbon",
+        "gemini-4-carbon-medium"
+      ],
+      "prohibitedModels": [
+        "Claude Fable 5.2",
+        "claude-fable-5-2",
+        "Gemini 4 Argon",
+        "gemini-4-argon",
+        "Gemini 4 Neon",
+        "gemini-4-neon"
+      ]
+    },
+    "P4": {
+      "description": "Cadence, Triage, Fast Delivery & Read-Only Explore",
+      "allowedModels": [
+        "Sonnet 5.5",
+        "claude-sonnet-5-5",
+        "Gemini 4 Hydrogen",
+        "gemini-4-hydrogen-xhigh",
+        "GPT-6.2 Astra",
+        "gpt-6.2-astra",
+        "Claude Haiku 4.5",
+        "claude-haiku-4-5"
+      ],
+      "prohibitedModels": [
+        "Claude Fable 5.2",
+        "claude-fable-5-2"
+      ]
+    }
+  },
+  "standingAgents": [
+    {
+      "id": "claude-opus",
+      "displayName": "MOBAi Claude Opus",
+      "family": "claude",
+      "profile": "P1",
+      "role": "COO & Primary Intake Owner",
+      "wakeAdapter": {
+        "kind": "claude-ephemeral",
+        "executableOrEnv": "${MOBADEV_CLAUDE_EXE}"
+      }
+    },
+    {
+      "id": "codex",
+      "displayName": "MOBAi ChatGPT Codex",
+      "family": "openai",
+      "profile": "P2",
+      "role": "Technical Director & CPM",
+      "wakeAdapter": {
+        "kind": "codex-queue",
+        "threadIdOrEnv": "${MOBADEV_CODEX_THREAD_ID}",
+        "executableOrEnv": "${MOBADEV_CODEX_EXE}"
+      }
+    },
+    {
+      "id": "antigravity-gemini",
+      "displayName": "MOBAi Antigravity Gemini",
+      "family": "gemini",
+      "profile": "P3",
+      "role": "Head of AI Strategy & UI/UX",
+      "wakeAdapter": {
+        "kind": "antigravity-http",
+        "endpointOrEnv": "${MOBADEV_ANTIGRAVITY_ENDPOINT}"
+      }
+    },
+    {
+      "id": "antigravity-opus",
+      "displayName": "MOBAi Antigravity Opus",
+      "family": "claude",
+      "profile": "P1",
+      "role": "Acting COO & Fresh Independent P1 Reviewer",
+      "wakeAdapter": {
+        "kind": "antigravity-http",
+        "endpointOrEnv": "${MOBADEV_ANTIGRAVITY_ENDPOINT}"
+      }
+    }
+  ],
+  "bus": {
+    "dbPath": "${LOCALAPPDATA}/MOBAdev/swarm-bus.db",
+    "lockTtlMinutes": 30
+  },
+  "dashboard": {
+    "bindUrl": "http://127.0.0.1:5179",
+    "staticWebRootPath": "dashboard/src/MobaDev.Dashboard.Web/dist",
+    "localCacheTtlSeconds": 8,
+    "githubCacheTtlSeconds": 45
+  }
+}
