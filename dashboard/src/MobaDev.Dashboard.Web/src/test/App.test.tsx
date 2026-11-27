@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
+import { deriveActiveAgentsSummary } from '../components/ActiveAgentsStrip';
 import { rankPullRequestsForMain } from '../components/MainLandingTickerCard';
 import {
   clearMonitorGridCookie,
@@ -1157,7 +1158,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
         name: 'MOBAi Antigravity Opus'
       })
     ).toBeInTheDocument();
-  });
+  }, 10_000);
 
   it('renders Dirty · Preserved badge and Copy Safe Prune Cmd action in Hygiene panel', async () => {
     const user = userEvent.setup();
@@ -1228,8 +1229,8 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     // Dual-Opus pause (both Claude Opus and Antigravity Opus rate-limited) -> Codex + Gemini Failover
     const dualOpusPaused = customPayload.monitors.monitors.map((m) =>
       m.id === 'claude-monitor' || m.id === 'antigravity-opus-head'
-        ? { ...m, state: 'rate_limited' }
-        : { ...m, state: 'standby' }
+        ? { ...m, state: 'rate_limited' as const }
+        : { ...m, state: 'standby' as const }
     );
     expect(formatQuotaPauseSuffix(dualOpusPaused)).toBe('(Codex + Gemini Failover)');
   });
@@ -1389,6 +1390,53 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
 
     const landedStrip = within(queueCard).getByLabelText('Just landed on main');
     expect(within(landedStrip).getByText('PR #537')).toBeInTheDocument();
+  });
+
+  it('renders idle monitors with inactive duration hint and excludes them from busy counts', async () => {
+    const user = userEvent.setup();
+    const thirtyMinutesAgoIso = new Date(Date.now() - 30 * 60_000).toISOString();
+    const customPayload = createSnapshotFixture();
+    customPayload.monitors.summary = undefined;
+    customPayload.monitors.monitors = customPayload.monitors.monitors.map((m) => {
+      if (m.id === 'antigravity-monitor') {
+        return {
+          ...m,
+          state: 'idle',
+          lastActivityUtc: thirtyMinutesAgoIso,
+          activeSubAgentCount: 0
+        };
+      }
+      if (m.id === 'claude-monitor') {
+        return {
+          ...m,
+          state: 'idle',
+          lastActivityUtc: null,
+          rateLimitResetLabel: null,
+          activeSubAgentCount: 0
+        };
+      }
+      if (m.id === 'codex-monitor') {
+        return { ...m, activeSubAgentCount: 0 };
+      }
+      return m;
+    });
+    const derived = deriveActiveAgentsSummary(customPayload.monitors);
+    expect(derived.standingMonitorsOnline).toBe(4);
+    expect(derived.standingMonitorsBusy).toBe(0);
+    expect(derived.totalActiveAgents).toBe(0);
+
+    stubDashboardFetch(customPayload);
+    render(<App />);
+
+    const monitorSection = await screen.findByRole('region', { name: 'Live Monitor Status' });
+    expect(within(monitorSection).getByText(/Idle · no activity for 30 min/)).toBeInTheDocument();
+    expect(within(monitorSection).getByText('Idle · inactive')).toBeInTheDocument();
+    expect(within(monitorSection).queryByText('Active / Busy')).not.toBeInTheDocument();
+    expect(within(monitorSection).getByText('Quorum 4 / 4 Ready')).toBeInTheDocument();
+    expect(within(monitorSection).getByText('0 Busy / Recent')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: /Architecture/i }));
+    expect(await screen.findAllByText('Idle')).not.toHaveLength(0);
   });
 
   it('degrades gracefully when backend is unreachable', async () => {

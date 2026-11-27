@@ -171,9 +171,10 @@ public sealed partial class DashboardSnapshotService
             }
             else
             {
-                var claudeTask = _claudeProvider.GetMonitorAsync(paths, cancellationToken);
+                var busyIdleThreshold = options.ResolveBusyIdleThreshold();
+                var claudeTask = _claudeProvider.GetMonitorAsync(paths, busyIdleThreshold, cancellationToken);
                 var codexTask = _codexProvider.GetMonitorAsync(paths, cancellationToken);
-                var antigravityTask = _antigravityProvider.GetMonitorsAsync(paths, cancellationToken);
+                var antigravityTask = _antigravityProvider.GetMonitorsAsync(paths, busyIdleThreshold, cancellationToken);
                 var governanceTask = _governanceProvider.GetGovernanceAsync(paths, cancellationToken);
                 var worktreeTask = _worktreeProvider.GetWorktreesAsync(paths, pipeline.PullRequests, cancellationToken);
                 var branchTask = _worktreeProvider.GetBranchHygieneAsync(paths, pipeline.PullRequests, cancellationToken);
@@ -272,7 +273,7 @@ public sealed partial class DashboardSnapshotService
     private static ActiveAgentsSummary ComputeActiveAgentsSummary(IReadOnlyList<MonitorInfo> monitors)
     {
         var standingTotal = monitors.Count;
-        var standingOnline = monitors.Count(m => m.State is "standby" or "busy" or "rate_limited");
+        var standingOnline = monitors.Count(m => m.State is "standby" or "idle" or "busy" or "rate_limited");
         var standingBusy = monitors.Count(m => m.State == "busy");
         var activeSubAgents = monitors.Sum(m => m.ActiveSubAgentCount);
         var subAgentsByModel = SubAgentModelCatalog.BuildSummaryList(monitors);

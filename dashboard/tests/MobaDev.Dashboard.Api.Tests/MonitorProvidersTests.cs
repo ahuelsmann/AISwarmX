@@ -1,4 +1,5 @@
 using MobaDev.Dashboard.Api.Configuration;
+using MobaDev.Dashboard.Api.Contracts;
 using MobaDev.Dashboard.Api.Providers;
 using Xunit;
 
@@ -32,10 +33,11 @@ public sealed class MonitorProvidersTests
 
         const string secretPrompt = "PRIVATE_USER_PROMPT_SHOULD_NEVER_LEAK";
         var line1 = $$$"""{"type":"user","message":{"role":"user","content":[{"type":"text","text":"{{{secretPrompt}}}"}]}}""";
-        const string line2 = """{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your 5-hour limit resets 12am (Europe/Berlin)"}]}}""";
+        const string line2 = """{"timestamp":"2026-11-18T21:15:00Z","type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your 5-hour limit resets 12am (Europe/Berlin)"}]}}""";
         await File.WriteAllLinesAsync(Path.Combine(projectDir, $"{sessionId}.jsonl"), [line1, line2]);
 
-        var provider = new ClaudeMonitorProvider();
+        var fixedClock = new FixedTimeProvider(new DateTimeOffset(2026, 11, 18, 21, 30, 0, TimeSpan.Zero));
+        var provider = new ClaudeMonitorProvider(fixedClock);
         var paths = new ResolvedDashboardPaths(
             fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
             fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
@@ -49,7 +51,7 @@ public sealed class MonitorProvidersTests
         Assert.DoesNotContain(secretPrompt, monitor.Source.Notice ?? string.Empty);
 
         // Also verifies German monthly spend-limit wording is detected accurately
-        const string germanLimitLine = """{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"Monatliches Ausgabenlimit erreicht\nErhöhe dein Limit, um weiterzuarbeiten · Die Plannutzung wird am Mo., 23. Nov., 20:00 zurückgesetzt"}]}}""";
+        const string germanLimitLine = """{"timestamp":"2026-11-18T21:15:00Z","type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"Monatliches Ausgabenlimit erreicht\nErhöhe dein Limit, um weiterzuarbeiten · Die Plannutzung wird am Mo., 23. Nov., 20:00 zurückgesetzt"}]}}""";
         await File.WriteAllLinesAsync(Path.Combine(projectDir, $"{sessionId}.jsonl"), [germanLimitLine]);
         var germanMonitor = await provider.GetMonitorAsync(paths, CancellationToken.None);
         Assert.Equal("rate_limited", germanMonitor.State);
@@ -57,7 +59,7 @@ public sealed class MonitorProvidersTests
 
         // Also verifies rate_limited quota pause remains visible even after local session file is closed
         Directory.Delete(sessionsDir, recursive: true);
-        const string closedWeeklyLimitLine = """{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your weekly limit resets Nov 23, 8pm (Europe/Berlin)"}]}}""";
+        const string closedWeeklyLimitLine = """{"timestamp":"2026-11-18T21:20:00Z","type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your weekly limit resets Nov 23, 8pm (Europe/Berlin)"}]}}""";
         await File.WriteAllLinesAsync(Path.Combine(projectDir, $"{sessionId}.jsonl"), [closedWeeklyLimitLine]);
         var closedMonitor = await provider.GetMonitorAsync(paths, CancellationToken.None);
         Assert.Equal("rate_limited", closedMonitor.State);
@@ -115,7 +117,8 @@ public sealed class MonitorProvidersTests
         Assert.Equal("unavailable", missingResult.Source.Status);
 
         var dbPath = Path.Combine(fx.AntigravityHomePath, "conversation_summaries.db");
-        TempDashboardFixture.CreateSqliteDb(dbPath, """
+        var recentIso = DateTimeOffset.UtcNow.AddMinutes(-2).ToString("O");
+        TempDashboardFixture.CreateSqliteDb(dbPath, $"""
             CREATE TABLE conversation_summaries (
                 conversation_id TEXT PRIMARY KEY,
                 title TEXT,
@@ -123,7 +126,7 @@ public sealed class MonitorProvidersTests
                 last_modified_time TEXT,
                 source TEXT
             );
-            INSERT INTO conversation_summaries VALUES ('c1', 'Antigravity Monitor', 'CASCADE_RUN_STATUS_RUNNING', '2026-11-19T11:40:00Z', '');
+            INSERT INTO conversation_summaries VALUES ('c1', 'Antigravity Monitor', 'CASCADE_RUN_STATUS_RUNNING', '{recentIso}', '');
             INSERT INTO conversation_summaries VALUES ('c2', 'CLI Check', 'CASCADE_RUN_STATUS_IDLE', '2026-11-18T10:00:00Z', 'CORTEX_TRAJECTORY_SOURCE_CLI');
             """);
 
@@ -218,7 +221,8 @@ public sealed class MonitorProvidersTests
             { "sessionId": "44444444-4444-4444-4444-444444444444", "name": "Claude Head", "status": "idle", "updatedAt": 1795418444682 }
             """);
 
-        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.AntigravityHomePath, "conversation_summaries.db"), """
+        var recentIso = DateTimeOffset.UtcNow.AddMinutes(-1).ToString("O");
+        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.AntigravityHomePath, "conversation_summaries.db"), $"""
             CREATE TABLE conversation_summaries (
                 conversation_id TEXT PRIMARY KEY,
                 title TEXT,
@@ -226,9 +230,9 @@ public sealed class MonitorProvidersTests
                 last_modified_time TEXT,
                 source TEXT
             );
-            INSERT INTO conversation_summaries VALUES ('argon-1', 'Argon Head', 'CASCADE_RUN_STATUS_RUNNING', '2026-11-23T07:20:00Z', '');
+            INSERT INTO conversation_summaries VALUES ('argon-1', 'Argon Head', 'CASCADE_RUN_STATUS_RUNNING', '{recentIso}', '');
             INSERT INTO conversation_summaries VALUES ('opus-1', 'Opus Head', 'CASCADE_RUN_STATUS_IDLE', '2026-11-23T07:14:48Z', '');
-            INSERT INTO conversation_summaries VALUES ('worker-1', 'Worker Slice', 'CASCADE_RUN_STATUS_RUNNING', '2026-11-23T07:20:05Z', 'CORTEX_TRAJECTORY_SOURCE_CLI');
+            INSERT INTO conversation_summaries VALUES ('worker-1', 'Worker Slice', 'CASCADE_RUN_STATUS_RUNNING', '{recentIso}', 'CORTEX_TRAJECTORY_SOURCE_CLI');
             """);
 
         var argonLogDir = Path.Combine(fx.AntigravityHomePath, "brain", "argon-1", ".system_generated", "logs");
@@ -535,5 +539,279 @@ public sealed class MonitorProvidersTests
         Assert.Equal("rate_limited", signal2Heads[1].State);
         Assert.Equal("Quota exhausted (HTTP 429)", signal2Heads[1].RateLimitResetLabel);
         Assert.DoesNotContain(secretUserText, signal2Heads[1].Source.Notice ?? string.Empty);
+    }
+
+    [Fact]
+    public async Task Providers_DowngradeStaleBusyMonitorsToIdleAndHonorConfigurableThreshold()
+    {
+        using var fx = new TempDashboardFixture();
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
+            fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
+
+        var now = DateTimeOffset.UtcNow;
+        var stale30MinAgo = now.AddMinutes(-30);
+        var active2MinAgo = now.AddMinutes(-2);
+
+        // (a) Antigravity running + last activity 30 min ago -> "idle"
+        // (b) Antigravity running + last activity 2 min ago -> "busy"
+        var agDbPath = Path.Combine(fx.AntigravityHomePath, "conversation_summaries.db");
+        TempDashboardFixture.CreateSqliteDb(agDbPath, $"""
+            CREATE TABLE conversation_summaries (
+                conversation_id TEXT PRIMARY KEY,
+                title TEXT,
+                status TEXT,
+                last_modified_time TEXT,
+                source TEXT
+            );
+            INSERT INTO conversation_summaries VALUES ('gem-stale', 'MOBAi Antigravity Gemini', 'CASCADE_RUN_STATUS_RUNNING', '{stale30MinAgo:O}', '');
+            INSERT INTO conversation_summaries VALUES ('opus-active', 'MOBAi Antigravity Opus', 'CASCADE_RUN_STATUS_RUNNING', '{active2MinAgo:O}', '');
+            """);
+
+        var agProvider = new AntigravityMonitorProvider();
+        var agMonitors = await agProvider.GetMonitorsAsync(paths, CancellationToken.None);
+
+        Assert.Equal(2, agMonitors.Count);
+        Assert.Equal("idle", agMonitors[0].State);
+        Assert.Equal("busy", agMonitors[1].State);
+
+        // (c) Claude busy + stale activity -> "idle"
+        var claudeSessionsDir = Path.Combine(fx.ClaudeHomePath, "sessions");
+        Directory.CreateDirectory(claudeSessionsDir);
+        var claudeSessionFile = Path.Combine(claudeSessionsDir, "9001.json");
+        await File.WriteAllTextAsync(claudeSessionFile, $$"""
+            {
+              "sessionId": "88888888-8888-8888-8888-888888888888",
+              "name": "MOBAi Claude Opus",
+              "status": "busy",
+              "updatedAt": {{stale30MinAgo.ToUnixTimeMilliseconds()}}
+            }
+            """);
+
+        var claudeProvider = new ClaudeMonitorProvider();
+        var claudeIdle = await claudeProvider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("idle", claudeIdle.State);
+
+        // (d) Configurable BusyIdleAfterMinutes threshold:
+        // - 45 min keeps a 30-min-old session "busy"
+        // - 1 min downgrades a 2-min-old session to "idle"
+        // - Non-positive BusyIdleAfterMinutes falls back to default 10 min
+        var lenientOptions = new DashboardOptions { BusyIdleAfterMinutes = 45 };
+        var strictOptions = new DashboardOptions { BusyIdleAfterMinutes = 1 };
+        var invalidOptions = new DashboardOptions { BusyIdleAfterMinutes = 0 };
+
+        Assert.Equal(TimeSpan.FromMinutes(10), invalidOptions.ResolveBusyIdleThreshold());
+
+        var agLenient = await agProvider.GetMonitorsAsync(paths, lenientOptions.ResolveBusyIdleThreshold(), CancellationToken.None);
+        Assert.Equal("busy", agLenient[0].State);
+        Assert.Equal("busy", agLenient[1].State);
+
+        var agStrict = await agProvider.GetMonitorsAsync(paths, strictOptions.ResolveBusyIdleThreshold(), CancellationToken.None);
+        Assert.Equal("idle", agStrict[0].State);
+        Assert.Equal("idle", agStrict[1].State);
+
+        var claudeLenient = await claudeProvider.GetMonitorAsync(paths, lenientOptions.ResolveBusyIdleThreshold(), CancellationToken.None);
+        Assert.Equal("busy", claudeLenient.State);
+
+        // MonitorStateRules.ApplyIdle direct checks
+        Assert.Equal("idle", MonitorStateRules.ApplyIdle("BUSY", null, now, TimeSpan.FromMinutes(10)));
+        Assert.Equal("busy", MonitorStateRules.ApplyIdle("busy", now.AddMinutes(-10), now, TimeSpan.FromMinutes(10)));
+        Assert.Equal("idle", MonitorStateRules.ApplyIdle("busy", now.AddMinutes(-10).AddSeconds(-1), now, TimeSpan.FromMinutes(10)));
+        Assert.Equal("standby", MonitorStateRules.ApplyIdle("standby", stale30MinAgo, now, TimeSpan.FromMinutes(10)));
+        Assert.Equal("rate_limited", MonitorStateRules.ApplyIdle("rate_limited", stale30MinAgo, now, TimeSpan.FromMinutes(10)));
+    }
+
+    [Fact]
+    public async Task Providers_StaleBusyWithActiveQuotaPausePreservesRateLimitedStateAndResetLabel()
+    {
+        using var fx = new TempDashboardFixture();
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
+            fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
+
+        var now = DateTimeOffset.UtcNow;
+        var stale30MinAgo = now.AddMinutes(-30);
+        var active2MinAgo = now.AddMinutes(-2);
+        var futureResetUtc = now.AddDays(2);
+        var futureResetIso = futureResetUtc.ToString("O");
+        var expectedLocal = futureResetUtc.ToLocalTime();
+        var expectedAgResetLabel = expectedLocal.Date == now.ToLocalTime().Date
+            ? $"{expectedLocal.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)} · quota exhausted"
+            : $"{expectedLocal.ToString("MMM d, HH:mm", System.Globalization.CultureInfo.InvariantCulture)} · quota exhausted";
+
+        // 1. Antigravity: stale RUNNING (30 min ago) + active quota pause -> "rate_limited" with non-null ResetLabel
+        //    while active RUNNING (2 min ago) + quota snapshot stays "busy".
+        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.AntigravityHomePath, "conversation_summaries.db"), $"""
+            CREATE TABLE conversation_summaries (
+                conversation_id TEXT PRIMARY KEY,
+                title TEXT,
+                status TEXT,
+                last_modified_time TEXT,
+                source TEXT
+            );
+            INSERT INTO conversation_summaries VALUES ('gem-stale-limit', 'MOBAi Antigravity Gemini', 'CASCADE_RUN_STATUS_RUNNING', '{stale30MinAgo:O}', '');
+            INSERT INTO conversation_summaries VALUES ('opus-active-running', 'MOBAi Antigravity Opus', 'CASCADE_RUN_STATUS_RUNNING', '{active2MinAgo:O}', '');
+            """);
+
+        var gemLogs = Path.Combine(fx.AntigravityHomePath, "brain", "gem-stale-limit", ".system_generated", "logs");
+        var opusLogs = Path.Combine(fx.AntigravityHomePath, "brain", "opus-active-running", ".system_generated", "logs");
+        Directory.CreateDirectory(gemLogs);
+        Directory.CreateDirectory(opusLogs);
+
+        await File.WriteAllTextAsync(Path.Combine(gemLogs, "transcript.jsonl"), "{\"model\":\"gemini-4-carbon-medium\"}\n");
+        await File.WriteAllTextAsync(Path.Combine(opusLogs, "transcript.jsonl"), "{\"model\":\"claude-opus-5-5-medium\"}\n");
+        await File.WriteAllTextAsync(
+            Path.Combine(gemLogs, "transcript_full.jsonl"),
+            "{\"step\":1,\"content\":\"{\\\"gemini-4-carbon-medium\\\":{\\\"quota_remaining\\\":\\\"0%\\\",\\\"quota_resets\\\":\\\"" +
+            futureResetIso +
+            "\\\"},\\\"claude-opus-5-5-medium\\\":{\\\"quota_remaining\\\":\\\"0%\\\",\\\"quota_resets\\\":\\\"" +
+            futureResetIso +
+            "\\\"}}\"}\n");
+
+        var agHeads = await new AntigravityMonitorProvider().GetMonitorsAsync(paths, CancellationToken.None);
+        Assert.Equal(2, agHeads.Count);
+        Assert.Equal("rate_limited", agHeads[0].State);
+        Assert.Equal(expectedAgResetLabel, agHeads[0].RateLimitResetLabel);
+        Assert.Equal("busy", agHeads[1].State);
+        Assert.Null(agHeads[1].RateLimitResetLabel);
+
+        // 2. Claude: fixed-clock regression tests covering future reset, expired reset, undated label, and live busy
+        var fixedNow = new DateTimeOffset(2026, 11, 27, 15, 0, 0, TimeSpan.Zero);
+        var claudeStale30MinAgo = fixedNow.AddMinutes(-30);
+        var claudeActive2MinAgo = fixedNow.AddMinutes(-2);
+
+        var claudeSessionsDir = Path.Combine(fx.ClaudeHomePath, "sessions");
+        Directory.CreateDirectory(claudeSessionsDir);
+        var claudeSessionId = "99999999-9999-9999-9999-999999999999";
+        var cwd = Path.Combine(fx.MobaFlowPath, "worktree-stale-busy-limit");
+        var encodedFolder = ClaudeMonitorProvider.EncodeProjectFolder(cwd);
+        var projectDir = Path.Combine(fx.ClaudeHomePath, "projects", encodedFolder);
+        Directory.CreateDirectory(projectDir);
+
+        var sessionFile = Path.Combine(claudeSessionsDir, "9002.json");
+        var transcriptFile = Path.Combine(projectDir, $"{claudeSessionId}.jsonl");
+
+        await File.WriteAllTextAsync(sessionFile, $$"""
+            {
+              "sessionId": "{{claudeSessionId}}",
+              "cwd": "{{cwd.Replace("\\", "\\\\")}}",
+              "name": "MOBAi Claude Opus",
+              "status": "busy",
+              "updatedAt": {{claudeStale30MinAgo.ToUnixTimeMilliseconds()}}
+            }
+            """);
+
+        // (a) Stale busy + dated future reset deadline (now=15:00Z < reset=16:00Z) -> "rate_limited"
+        await File.WriteAllLinesAsync(
+            transcriptFile,
+            ["""{"timestamp":"2026-11-27T14:25:00Z","type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your 5-hour limit resets 4pm (UTC)"}]}}"""]);
+
+        var claudeProvider = new ClaudeMonitorProvider(new FixedTimeProvider(fixedNow));
+        var claudeLimited = await claudeProvider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("rate_limited", claudeLimited.State);
+        Assert.Equal("4pm (UTC)", claudeLimited.RateLimitResetLabel);
+
+        // (b) Stale busy + expired reset deadline (event at 13:00Z, reset 2pm UTC = 14:00Z <= now=15:00Z) -> "idle"
+        await File.WriteAllLinesAsync(
+            transcriptFile,
+            ["""{"timestamp":"2026-11-27T13:00:00Z","type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your 5-hour limit resets 2pm (UTC)"}]}}"""]);
+
+        var claudeExpired = await claudeProvider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("idle", claudeExpired.State);
+        Assert.Null(claudeExpired.RateLimitResetLabel);
+
+        // (c) Stale busy with no session/event timestamp + undated time-only label -> "idle" (never promoted without verifiable future deadline)
+        await File.WriteAllTextAsync(sessionFile, $$"""
+            {
+              "sessionId": "{{claudeSessionId}}",
+              "cwd": "{{cwd.Replace("\\", "\\\\")}}",
+              "name": "MOBAi Claude Opus",
+              "status": "busy",
+              "updatedAt": 0
+            }
+            """);
+        await File.WriteAllLinesAsync(
+            transcriptFile,
+            ["""{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your 5-hour limit resets 4pm (UTC)"}]}}"""]);
+
+        var claudeUndated = await claudeProvider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("idle", claudeUndated.State);
+        Assert.Null(claudeUndated.RateLimitResetLabel);
+
+        // (c2) Stale busy with populated session updatedAt (14:30Z, 30 min before now=15:00Z) + undated relative reset "2pm (UTC)" -> "idle"
+        //      (must NOT roll 2pm to next day using session.UpdatedAtMs when the quota notice line itself has no timestamp)
+        await File.WriteAllTextAsync(sessionFile, $$"""
+            {
+              "sessionId": "{{claudeSessionId}}",
+              "cwd": "{{cwd.Replace("\\", "\\\\")}}",
+              "name": "MOBAi Claude Opus",
+              "status": "busy",
+              "updatedAt": {{claudeStale30MinAgo.ToUnixTimeMilliseconds()}}
+            }
+            """);
+        await File.WriteAllLinesAsync(
+            transcriptFile,
+            ["""{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"5-hour limit reached · resets 2pm (UTC)"}]}}"""]);
+
+        var claudeUndatedWithPopulatedSession = await claudeProvider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("idle", claudeUndatedWithPopulatedSession.State);
+        Assert.Null(claudeUndatedWithPopulatedSession.RateLimitResetLabel);
+
+        // (d) Live non-stale busy (2 min ago) remains "busy" with null RateLimitResetLabel
+        await File.WriteAllTextAsync(sessionFile, $$"""
+            {
+              "sessionId": "{{claudeSessionId}}",
+              "cwd": "{{cwd.Replace("\\", "\\\\")}}",
+              "name": "MOBAi Claude Opus",
+              "status": "busy",
+              "updatedAt": {{claudeActive2MinAgo.ToUnixTimeMilliseconds()}}
+            }
+            """);
+        await File.WriteAllLinesAsync(
+            transcriptFile,
+            ["""{"timestamp":"2026-11-27T14:55:00Z","type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your 5-hour limit resets 4pm (UTC)"}]}}"""]);
+
+        var claudeActive = await claudeProvider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("busy", claudeActive.State);
+        Assert.Null(claudeActive.RateLimitResetLabel);
+    }
+
+    [Fact]
+    public void ClaudeMonitorProvider_TryResolveRateLimitResetUtc_ParsesSupportedFormatsDeterministically()
+    {
+        var anchor = new DateTimeOffset(2026, 11, 27, 14, 0, 0, TimeSpan.Zero);
+
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("2026-11-26T20:00:00Z", null, out var isoUtc));
+        Assert.Equal(new DateTimeOffset(2026, 11, 26, 20, 0, 0, TimeSpan.Zero), isoUtc);
+
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("Nov 27, 4pm (UTC)", anchor, out var enShort));
+        Assert.Equal(new DateTimeOffset(2026, 11, 27, 16, 0, 0, TimeSpan.Zero), enShort);
+
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("Nov 27 at 4:30pm (GMT)", anchor, out var enAt));
+        Assert.Equal(new DateTimeOffset(2026, 11, 27, 16, 30, 0, TimeSpan.Zero), enAt);
+
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("2026-11-27 16:00 (UTC)", null, out var isoDateSpace));
+        Assert.Equal(new DateTimeOffset(2026, 11, 27, 16, 0, 0, TimeSpan.Zero), isoDateSpace);
+
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("27.11.2026, 16:00 (Europe/Berlin)", null, out var deComma));
+        Assert.Equal(new DateTimeOffset(2026, 11, 27, 15, 0, 0, TimeSpan.Zero), deComma);
+
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("27.11.2026 16:00 (UTC)", null, out var deSpace));
+        Assert.Equal(new DateTimeOffset(2026, 11, 27, 16, 0, 0, TimeSpan.Zero), deSpace);
+
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("16:00 Uhr (Europe/Berlin)", anchor, out var uhrUtc));
+        Assert.Equal(new DateTimeOffset(2026, 11, 27, 15, 0, 0, TimeSpan.Zero), uhrUtc);
+
+        // Time-only <= event local time advances by +1 day (14:00Z == 15:00 Berlin -> 14:30 Berlin rolls to Nov 28 13:30Z)
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("14:30 (Europe/Berlin)", anchor, out var rolloverUtc));
+        Assert.Equal(new DateTimeOffset(2026, 11, 28, 13, 30, 0, TimeSpan.Zero), rolloverUtc);
+
+        // Time-only without any anchor fails deterministically
+        Assert.False(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("4pm (UTC)", null, out _));
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 }

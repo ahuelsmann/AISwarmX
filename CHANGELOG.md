@@ -20,6 +20,16 @@ Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (
 
 ---
 
+## [3.13.0] - 2026-11-26
+
+### Added & Changed
+- **Monitor `idle` State (`DashboardOptions`, `MonitorStateRules`, `AntigravityMonitorProvider`, `ClaudeMonitorProvider`, `DashboardSnapshotService`, Dashboard Web):**
+  - Added configurable `BusyIdleAfterMinutes` (`10` minutes default, normalized to `>= 1`) in `DashboardOptions.cs` and `appsettings.json`, plus `MonitorStateRules.ApplyIdle(...)` to transition stale `"busy"` monitors (no `lastActivityUtc` or elapsed time `> threshold`) to `"idle"` for Antigravity and Claude while keeping Codex's existing `90s` `BusyThreshold` unchanged.
+  - Counted `"idle"` monitors as online/ready (and NOT busy) across `DashboardSnapshotService.ComputeActiveAgentsSummary`, `ActiveAgentsStrip`, `DecisionTriadCard`, and `MonitorCards`.
+  - Rendered `"idle"` monitors with neutral/subtle badge styling (`Idle · no activity for N min` / `Idle · inactive` in `MonitorCards.tsx`, `Idle` in `ArchitectureDiagramsView.tsx` and `DecisionTriadCard.tsx`), covered by new API (`MonitorProvidersTests.cs`) and Web (`App.test.tsx`) unit tests.
+
+---
+
 ## [3.12.1] - 2026-11-26
 
 ### Fixed
