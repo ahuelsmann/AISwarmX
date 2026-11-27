@@ -5,6 +5,17 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.15.0] - 2026-11-27
+
+### Added & Changed
+- **PR-Free Master-Merge Watchdog Mode (`scripts/Invoke-SwarmWatchdog.ps1`, `bus/mobai-swarm-bus.test.mjs`):**
+  - Detected PR-disabled repositories (`has_pull_requests: false`, HTTP `410`/`404` on `/pulls`, or GraphQL `"Pull requests are disabled"`) as a valid `0`-open-PR snapshot (`$openPrsReadSucceeded = $true`) so `work_queue` reconciliation runs normally instead of aborting.
+  - Skipped PR-based events (`CiOrSonarFailed`, `AllChecksGreenReady`, `gh pr list --state merged`) when PRs are disabled, and detected landed work via `Closed`/`Done` issues plus recent `main` commits referencing `Closes #N` / `Refs #N` (releasing leases on `Closes #N` and emitting `NextWorkAvailable`).
+  - Reported `PullRequestsDisabled`, `ActiveClaimedCodeCount`, and `EffectiveCodeWip` (`CodeWip = active claimed H/M/unclassified leases` when PRs are disabled, keeping `meta.code_wip = 0` so `bus_queue next` never double-counts).
+- **PR-Free Master-Merge Workflow & Agent Rules (`docs/delivery-workflow.md`, `docs/hygiene-and-automation.md`, `agents/antigravity/rules/mobaflow-agent-network.md`, `agents/claude/agents/*.md`):** Documented isolated worktree + task branch flow (`opus/...`, `codex/...`, `antigravity/...`), local verification gates, cross-family `base_sha..head_sha` reviews over `mobai-swarm-bus`, the bus verdict format (`moba-final-review verdict=PASS|CHANGES base=<40-char sha> head=<40-char sha> reviewer-family=claude|openai|gemini dispatcher=<head-name>`), and Master-merge squash (`Closes #<id>` / `Refs #<id>`) onto `origin/main` + remote branch cleanup + lock release + post-merge `main` monitoring.
+
+---
+
 ## [3.14.0] - 2026-11-26
 
 ### Added & Changed

@@ -137,18 +137,57 @@ try {
 }
 catch { }
 
-# 3. Query MOBAflow Open PRs
+# 3. Query MOBAflow Open PRs (gracefully handle PR-disabled repos as a valid 0-PR snapshot)
+$pullRequestsDisabled = $false
 $openPrs = @()
 $openPrsReadSucceeded = $false
 try {
-    $prJson = & gh pr list --repo ahuelsmann/MOBAflow --state open --limit 50 --json number,title,url,headRefName,headRefOid,isDraft,mergeStateStatus,statusCheckRollup,body,files,closingIssuesReferences 2>$null
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($prJson)) {
-        $openPrs = @($prJson | ConvertFrom-Json)
-        $openPrsReadSucceeded = $true
+    $repoOutRaw = & gh api repos/ahuelsmann/MOBAflow 2>&1
+    $repoOutText = ($repoOutRaw -join "`n").Trim()
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($repoOutText)) {
+        if ($repoOutText -eq "false") {
+            $pullRequestsDisabled = $true
+        }
+        elseif ($repoOutText.StartsWith("{")) {
+            $repoObj = $repoOutText | ConvertFrom-Json
+            if ($repoObj.PSObject.Properties["has_pull_requests"] -and $repoObj.has_pull_requests -eq $false) {
+                $pullRequestsDisabled = $true
+            }
+        }
     }
 }
 catch {
-    Write-Verbose "Watchdog open PR query failed: $_"
+    Write-Verbose "Watchdog repo metadata lookup failed: $_"
+}
+
+if ($pullRequestsDisabled) {
+    $openPrsReadSucceeded = $true
+}
+else {
+    try {
+        $prOutRaw = & gh pr list --repo ahuelsmann/MOBAflow --state open --limit 50 --json number,title,url,headRefName,headRefOid,isDraft,mergeStateStatus,statusCheckRollup,body,files,closingIssuesReferences 2>&1
+        $prOutText = ($prOutRaw -join "`n").Trim()
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($prOutText)) {
+            $openPrs = @($prOutText | ConvertFrom-Json)
+            $openPrsReadSucceeded = $true
+        }
+        elseif ($prOutText -match '(?i)pull requests are disabled|HTTP\s*(404|410)\b|\b(404|410)\b.*\/pulls') {
+            $pullRequestsDisabled = $true
+            $openPrs = @()
+            $openPrsReadSucceeded = $true
+        }
+    }
+    catch {
+        $prErrText = "$_"
+        if ($prErrText -match '(?i)pull requests are disabled|HTTP\s*(404|410)\b|\b(404|410)\b.*\/pulls') {
+            $pullRequestsDisabled = $true
+            $openPrs = @()
+            $openPrsReadSucceeded = $true
+        }
+        else {
+            Write-Verbose "Watchdog open PR query failed: $_"
+        }
+    }
 }
 
 $openCodePrCount = 0
@@ -306,14 +345,27 @@ try {
             $gqlArgs += @("-f", "cursor=$cursor")
         }
         $gqlRaw = & gh @gqlArgs 2>$null
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($gqlRaw)) {
+        $gqlRawText = ($gqlRaw -join "`n").Trim()
+        if ([string]::IsNullOrWhiteSpace($gqlRawText)) {
             $boardReadError = "gh api graphql exited with $LASTEXITCODE"
             break
         }
 
-        $gqlObj = ($gqlRaw -join "`n") | ConvertFrom-Json
+        $gqlObj = $gqlRawText | ConvertFrom-Json
         if ($gqlObj.PSObject.Properties["errors"] -and @($gqlObj.errors).Count -gt 0) {
-            $boardReadError = "GraphQL returned API errors"
+            $nonPrErrors = @($gqlObj.errors | Where-Object { "$($_.message)" -notmatch '(?i)pull requests are disabled' })
+            if ($nonPrErrors.Count -eq 0) {
+                $pullRequestsDisabled = $true
+                $openPrs = @()
+                $openPrsReadSucceeded = $true
+            }
+            else {
+                $boardReadError = "GraphQL returned API errors"
+                break
+            }
+        }
+        elseif ($LASTEXITCODE -ne 0) {
+            $boardReadError = "gh api graphql exited with $LASTEXITCODE"
             break
         }
 
@@ -450,16 +502,21 @@ if ($queueSyncWarning -and -not $Json) {
 }
 
 $queueSyncResult = [pscustomobject]@{
-    Enabled            = $effectiveSyncQueue
-    BoardReadSucceeded = $boardReadSucceeded
-    SchemaValid        = $queueSchemaValid
-    Warning            = $queueSyncWarning
-    UpsertedCount      = 0
-    RemovedCount       = 0
-    DoneCount          = 0
-    CodeWip            = $openCodePrCount
+    Enabled                = $effectiveSyncQueue
+    PullRequestsDisabled   = $pullRequestsDisabled
+    BoardReadSucceeded     = $boardReadSucceeded
+    SchemaValid            = $queueSchemaValid
+    Warning                = $queueSyncWarning
+    UpsertedCount          = 0
+    RemovedCount           = 0
+    DoneCount              = 0
+    OpenCodePrCount        = $openCodePrCount
+    ActiveClaimedCodeCount = 0
+    CodeWip                = $openCodePrCount
 }
 
+$landedIssuesFromSync = [System.Collections.Generic.List[object]]::new()
+$recentMainCommitSignals = [System.Collections.Generic.List[object]]::new()
 $queueItemsSnapshot = @()
 if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
     if ($effectiveSyncQueue -and $boardReadSucceeded) {
@@ -515,14 +572,20 @@ if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
 
                         if ($hasLinkedOpenPr) {
                             & $nodeCmd.Source --no-warnings $busScript --cli queue --action done --issue-number "$qNum" 2>$null | Out-Null
-                            if ($LASTEXITCODE -eq 0) { $queueSyncResult.DoneCount++ }
+                            if ($LASTEXITCODE -eq 0) {
+                                $queueSyncResult.DoneCount++
+                                $landedIssuesFromSync.Add([pscustomobject]@{ IssueNumber = $qNum; ClaimedBy = $qi.claimed_by })
+                            }
                             continue
                         }
 
                         if ($boardMatch) {
                             if ($boardMatch.GitHubState -eq "CLOSED" -or $boardMatch.KanbanStatus -eq "Done") {
                                 & $nodeCmd.Source --no-warnings $busScript --cli queue --action done --issue-number "$qNum" 2>$null | Out-Null
-                                if ($LASTEXITCODE -eq 0) { $queueSyncResult.DoneCount++ }
+                                if ($LASTEXITCODE -eq 0) {
+                                    $queueSyncResult.DoneCount++
+                                    $landedIssuesFromSync.Add([pscustomobject]@{ IssueNumber = $qNum; ClaimedBy = $qi.claimed_by })
+                                }
                             }
                             elseif ($boardMatch.KanbanStatus -in @("Planned", "Inbox")) {
                                 & $nodeCmd.Source --no-warnings $busScript --cli queue --action upsert --issue-number "$qNum" --status "removed" 2>$null | Out-Null
@@ -568,7 +631,10 @@ if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
 
                         if ($claimTransition -eq "done") {
                             & $nodeCmd.Source --no-warnings $busScript --cli queue --action done --issue-number "$qNum" 2>$null | Out-Null
-                            if ($LASTEXITCODE -eq 0) { $queueSyncResult.DoneCount++ }
+                            if ($LASTEXITCODE -eq 0) {
+                                $queueSyncResult.DoneCount++
+                                $landedIssuesFromSync.Add([pscustomobject]@{ IssueNumber = $qNum; ClaimedBy = $qi.claimed_by })
+                            }
                         }
                         elseif ($claimTransition -eq "removed") {
                             & $nodeCmd.Source --no-warnings $busScript --cli queue --action upsert --issue-number "$qNum" --status "removed" 2>$null | Out-Null
@@ -590,7 +656,10 @@ if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
 
                     if ($isClosed) {
                         & $nodeCmd.Source --no-warnings $busScript --cli queue --action done --issue-number "$qNum" 2>$null | Out-Null
-                        if ($LASTEXITCODE -eq 0) { $queueSyncResult.DoneCount++ }
+                        if ($LASTEXITCODE -eq 0) {
+                            $queueSyncResult.DoneCount++
+                            $landedIssuesFromSync.Add([pscustomobject]@{ IssueNumber = $qNum; ClaimedBy = $qi.claimed_by })
+                        }
                     }
                     else {
                         & $nodeCmd.Source --no-warnings $busScript --cli queue --action upsert --issue-number "$qNum" --status "removed" 2>$null | Out-Null
@@ -601,6 +670,76 @@ if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
         }
         catch {
             $queueSyncResult.Warning = if ($queueSyncResult.Warning) { "$($queueSyncResult.Warning); $_" } else { "$_" }
+        }
+    }
+
+    if ($pullRequestsDisabled) {
+        try {
+            $commitsRaw = & gh api -X GET repos/ahuelsmann/MOBAflow/commits -f sha=main -F per_page=10 2>$null
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($commitsRaw)) {
+                $commitsObj = ($commitsRaw -join "`n") | ConvertFrom-Json
+                $commitCutoff = [DateTimeOffset]::UtcNow.AddHours(-2)
+                foreach ($cm in @($commitsObj)) {
+                    if ($null -eq $cm -or -not $cm.PSObject.Properties["sha"] -or -not $cm.sha) { continue }
+                    $cMsg = if ($cm.PSObject.Properties["commit"] -and $cm.commit -and $cm.commit.PSObject.Properties["message"]) { "$($cm.commit.message)" } else { "" }
+                    if ([string]::IsNullOrWhiteSpace($cMsg)) { continue }
+                    $cDateStr = if ($cm.commit.PSObject.Properties["committer"] -and $cm.commit.committer -and $cm.commit.committer.date) { "$($cm.commit.committer.date)" } elseif ($cm.commit.PSObject.Properties["author"] -and $cm.commit.author -and $cm.commit.author.date) { "$($cm.commit.author.date)" } else { "" }
+                    if ($cDateStr) {
+                        $cTs = [DateTimeOffset]::MinValue
+                        if ([DateTimeOffset]::TryParse($cDateStr, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$cTs) -and $cTs -lt $commitCutoff) {
+                            continue
+                        }
+                    }
+
+                    $shaStr = "$($cm.sha)"
+                    $shaShort = if ($shaStr.Length -gt 8) { $shaStr.Substring(0, 8) } else { $shaStr }
+                    $closeNums = [System.Collections.Generic.HashSet[int]]::new()
+                    foreach ($m in [regex]::Matches($cMsg, '(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b')) {
+                        $null = $closeNums.Add([int]$m.Groups[1].Value)
+                    }
+                    $refNums = [System.Collections.Generic.HashSet[int]]::new()
+                    foreach ($m in [regex]::Matches($cMsg, '(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\s+#(\d+)\b')) {
+                        $null = $refNums.Add([int]$m.Groups[1].Value)
+                    }
+                    if ($refNums.Count -eq 0) { continue }
+
+                    $matchedClaimer = $null
+                    foreach ($cNum in $closeNums) {
+                        if ($effectiveSyncQueue -and $boardReadSucceeded) {
+                            $doneOut = & $nodeCmd.Source --no-warnings $busScript --cli queue --action done --issue-number "$cNum" 2>$null
+                            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($doneOut)) {
+                                try {
+                                    $doneObj = ($doneOut -join "`n") | ConvertFrom-Json
+                                    if ($doneObj.updated -and $doneObj.item) {
+                                        if (-not $matchedClaimer -and $doneObj.item.claimed_by) { $matchedClaimer = "$($doneObj.item.claimed_by)" }
+                                        if (-not ($landedIssuesFromSync | Where-Object { $_.IssueNumber -eq $cNum })) {
+                                            $queueSyncResult.DoneCount++
+                                            $landedIssuesFromSync.Add([pscustomobject]@{ IssueNumber = $cNum; ClaimedBy = $doneObj.item.claimed_by })
+                                        }
+                                    }
+                                }
+                                catch {
+                                    Write-Verbose "Watchdog commit done parse skipped: $_"
+                                }
+                            }
+                        }
+                    }
+
+                    $firstLine = ($cMsg -split "[\r\n]+")[0].Trim()
+                    $commitUrl = if ($cm.PSObject.Properties["html_url"] -and $cm.html_url) { "$($cm.html_url)" } else { "https://github.com/ahuelsmann/MOBAflow/commit/$shaStr" }
+                    $recentMainCommitSignals.Add([pscustomobject]@{
+                        ShaShort    = $shaShort
+                        Title       = $firstLine
+                        RefIssues   = @($refNums)
+                        CloseIssues = @($closeNums)
+                        ClaimedBy   = $matchedClaimer
+                        Url         = $commitUrl
+                    })
+                }
+            }
+        }
+        catch {
+            Write-Verbose "Watchdog main commits lookup failed: $_"
         }
     }
 
@@ -634,6 +773,8 @@ foreach ($qi in $queueItemsSnapshot) {
     }
 }
 $effectiveCodeWip = $openCodePrCount + $activeClaimedCodeCount
+$queueSyncResult.ActiveClaimedCodeCount = $activeClaimedCodeCount
+$queueSyncResult.CodeWip = if ($pullRequestsDisabled) { $activeClaimedCodeCount } else { $effectiveCodeWip }
 
 $topEligibleQueueItem = $null
 foreach ($qi in $queueItemsSnapshot) {
@@ -651,53 +792,92 @@ foreach ($qi in $queueItemsSnapshot) {
     break
 }
 
-# 6. Detect PrMerged -> NextWorkAvailable & HeadIdleWake
+# 6. Detect Landed Work (PR merges or PR-free main commits / Done issues) -> NextWorkAvailable & HeadIdleWake
 if ($null -ne $topEligibleQueueItem) {
-    try {
-        $mergedJson = & gh pr list --repo ahuelsmann/MOBAflow --state merged --limit 10 --json number,title,url,headRefName,mergeCommit,mergedAt 2>$null
-        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($mergedJson)) {
-            $mergedPrs = @($mergedJson | ConvertFrom-Json)
-            $mergedCutoff = $nowUtc.AddHours(-2)
-            foreach ($mpr in $mergedPrs) {
-                $mergedTs = [DateTimeOffset]::MinValue
-                if (-not $mpr.mergedAt -or -not [DateTimeOffset]::TryParse("$($mpr.mergedAt)", [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$mergedTs)) {
-                    continue
-                }
-                if ($mergedTs -lt $mergedCutoff) { continue }
-
-                $mergeSha = if ($mpr.mergeCommit -and $mpr.mergeCommit.oid) { "$($mpr.mergeCommit.oid)" } else { "merged" }
-                $mergeShaShort = if ($mergeSha.Length -gt 8) { $mergeSha.Substring(0, 8) } else { $mergeSha }
-                $mHeadRef = if ($mpr.headRefName) { "$($mpr.headRefName)" } else { "" }
-                $mOwner = Get-TargetOwnerFromBranch -BranchName $mHeadRef
-                $mUrl = if ($mpr.url) { "$($mpr.url)" } else { "https://github.com/ahuelsmann/MOBAflow/pull/$($mpr.number)" }
-                $topRiskLabel = if ($topEligibleQueueItem.risk_class) { $topEligibleQueueItem.risk_class } else { "-" }
-
-                $detectedEvents.Add([pscustomobject]@{
-                    EventKey     = "pr-merged-$($mpr.number):${mergeShaShort}"
-                    EventType    = "NextWorkAvailable"
-                    PrNumber     = [int]$mpr.number
-                    IssueNumber  = [int]$topEligibleQueueItem.issue_number
-                    TargetOwner  = $mOwner.Owner
-                    BusRecipient = $mOwner.BusId
-                    State        = "merged-$($mpr.number)-${mergeShaShort}"
-                    WakeViaBus   = $false
-                    Url          = $mUrl
-                    Message      = "[Watchdog NextWorkAvailable] PR #$($mpr.number) ($mHeadRef @ $mergeShaShort) merged. Top queued Ready item: #$($topEligibleQueueItem.issue_number) (P$($topEligibleQueueItem.priority), Risk=$topRiskLabel) $($topEligibleQueueItem.title) -> claim via bus_queue next."
-                })
+    $topRiskLabel = if ($topEligibleQueueItem.risk_class) { $topEligibleQueueItem.risk_class } else { "-" }
+    if ($pullRequestsDisabled) {
+        $notifiedIssues = [System.Collections.Generic.HashSet[int]]::new()
+        foreach ($sig in $recentMainCommitSignals) {
+            foreach ($rn in $sig.RefIssues) {
+                $null = $notifiedIssues.Add([int]$rn)
             }
+            $mOwner = if ($sig.ClaimedBy) { Get-TargetOwnerFromBranch -BranchName "$($sig.ClaimedBy)/" } else { [pscustomobject]@{ Owner = "Claude"; BusId = "claude-opus" } }
+            $detectedEvents.Add([pscustomobject]@{
+                EventKey     = "main-commit-$($sig.ShaShort)"
+                EventType    = "NextWorkAvailable"
+                PrNumber     = $null
+                IssueNumber  = [int]$topEligibleQueueItem.issue_number
+                TargetOwner  = $mOwner.Owner
+                BusRecipient = $mOwner.BusId
+                State        = "main-$($sig.ShaShort)"
+                WakeViaBus   = $false
+                Url          = $sig.Url
+                Message      = "[Watchdog NextWorkAvailable] Commit $($sig.ShaShort) landed on main ($($sig.Title)). Top queued Ready item: #$($topEligibleQueueItem.issue_number) (P$($topEligibleQueueItem.priority), Risk=$topRiskLabel) $($topEligibleQueueItem.title) -> claim via bus_queue next."
+            })
+        }
+
+        foreach ($landed in $landedIssuesFromSync) {
+            if ($notifiedIssues.Contains([int]$landed.IssueNumber)) { continue }
+            $mOwner = if ($landed.ClaimedBy) { Get-TargetOwnerFromBranch -BranchName "$($landed.ClaimedBy)/" } else { [pscustomobject]@{ Owner = "Claude"; BusId = "claude-opus" } }
+            $detectedEvents.Add([pscustomobject]@{
+                EventKey     = "issue-done-$($landed.IssueNumber)"
+                EventType    = "NextWorkAvailable"
+                PrNumber     = $null
+                IssueNumber  = [int]$topEligibleQueueItem.issue_number
+                TargetOwner  = $mOwner.Owner
+                BusRecipient = $mOwner.BusId
+                State        = "done-$($landed.IssueNumber)-next-$($topEligibleQueueItem.issue_number)"
+                WakeViaBus   = $false
+                Url          = "https://github.com/ahuelsmann/MOBAflow/issues/$($landed.IssueNumber)"
+                Message      = "[Watchdog NextWorkAvailable] Issue #$($landed.IssueNumber) closed/Done. Top queued Ready item: #$($topEligibleQueueItem.issue_number) (P$($topEligibleQueueItem.priority), Risk=$topRiskLabel) $($topEligibleQueueItem.title) -> claim via bus_queue next."
+            })
         }
     }
-    catch {
-        Write-Verbose "Watchdog merged PR lookup failed: $_"
+    else {
+        try {
+            $mergedJson = & gh pr list --repo ahuelsmann/MOBAflow --state merged --limit 10 --json number,title,url,headRefName,mergeCommit,mergedAt 2>$null
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($mergedJson)) {
+                $mergedPrs = @($mergedJson | ConvertFrom-Json)
+                $mergedCutoff = $nowUtc.AddHours(-2)
+                foreach ($mpr in $mergedPrs) {
+                    $mergedTs = [DateTimeOffset]::MinValue
+                    if (-not $mpr.mergedAt -or -not [DateTimeOffset]::TryParse("$($mpr.mergedAt)", [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$mergedTs)) {
+                        continue
+                    }
+                    if ($mergedTs -lt $mergedCutoff) { continue }
+
+                    $mergeSha = if ($mpr.mergeCommit -and $mpr.mergeCommit.oid) { "$($mpr.mergeCommit.oid)" } else { "merged" }
+                    $mergeShaShort = if ($mergeSha.Length -gt 8) { $mergeSha.Substring(0, 8) } else { $mergeSha }
+                    $mHeadRef = if ($mpr.headRefName) { "$($mpr.headRefName)" } else { "" }
+                    $mOwner = Get-TargetOwnerFromBranch -BranchName $mHeadRef
+                    $mUrl = if ($mpr.url) { "$($mpr.url)" } else { "https://github.com/ahuelsmann/MOBAflow/pull/$($mpr.number)" }
+
+                    $detectedEvents.Add([pscustomobject]@{
+                        EventKey     = "pr-merged-$($mpr.number):${mergeShaShort}"
+                        EventType    = "NextWorkAvailable"
+                        PrNumber     = [int]$mpr.number
+                        IssueNumber  = [int]$topEligibleQueueItem.issue_number
+                        TargetOwner  = $mOwner.Owner
+                        BusRecipient = $mOwner.BusId
+                        State        = "merged-$($mpr.number)-${mergeShaShort}"
+                        WakeViaBus   = $false
+                        Url          = $mUrl
+                        Message      = "[Watchdog NextWorkAvailable] PR #$($mpr.number) ($mHeadRef @ $mergeShaShort) merged. Top queued Ready item: #$($topEligibleQueueItem.issue_number) (P$($topEligibleQueueItem.priority), Risk=$topRiskLabel) $($topEligibleQueueItem.title) -> claim via bus_queue next."
+                    })
+                }
+            }
+        }
+        catch {
+            Write-Verbose "Watchdog merged PR lookup failed: $_"
+        }
     }
 
-    if ($openCodePrCount -lt 3 -and $monitorsOnline -and $null -ne $codexMonitor) {
+    if ($effectiveCodeWip -lt 3 -and $monitorsOnline -and $null -ne $codexMonitor) {
         if ($codexMonitor.State -notin @("rate_limited", "busy") -and $codexMonitor.LastActivityUtc) {
             $lastActTs = [DateTimeOffset]::MinValue
             if ([DateTimeOffset]::TryParse("$($codexMonitor.LastActivityUtc)", [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$lastActTs)) {
                 $inactiveMin = ($nowUtc - $lastActTs).TotalMinutes
                 if ($inactiveMin -gt 30) {
-                    $topRiskLabel = if ($topEligibleQueueItem.risk_class) { $topEligibleQueueItem.risk_class } else { "-" }
                     $detectedEvents.Add([pscustomobject]@{
                         EventKey     = "head-idle-wake:codex:issue-$($topEligibleQueueItem.issue_number)"
                         EventType    = "HeadIdleWake"
@@ -708,7 +888,7 @@ if ($null -ne $topEligibleQueueItem) {
                         State        = "idle-wake-$($topEligibleQueueItem.issue_number)"
                         WakeViaBus   = $true
                         Url          = "https://github.com/ahuelsmann/MOBAflow/issues/$($topEligibleQueueItem.issue_number)"
-                        Message      = "[Watchdog HeadIdleWake] Codex inactive $([Math]::Floor($inactiveMin))m (state=$($codexMonitor.State), code_wip=$openCodePrCount/3) with eligible Ready item #$($topEligibleQueueItem.issue_number) (P$($topEligibleQueueItem.priority), Risk=$topRiskLabel) $($topEligibleQueueItem.title). Claim via bus_queue next."
+                        Message      = "[Watchdog HeadIdleWake] Codex inactive $([Math]::Floor($inactiveMin))m (state=$($codexMonitor.State), code_wip=$effectiveCodeWip/2) with eligible Ready item #$($topEligibleQueueItem.issue_number) (P$($topEligibleQueueItem.priority), Risk=$topRiskLabel) $($topEligibleQueueItem.title). Claim via bus_queue next."
                     })
                 }
             }
@@ -809,8 +989,8 @@ if ($DispatchEvents) {
     ($dispatchedKeys | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath $StatePath -Encoding utf8NoBOM
 }
 
-$quietWindowOpenForRf30 = ($openCodePrCount -eq 0) -and $rf30OpenInProgress
-$readyIntakeAvailable = ($openCodePrCount -lt 3) -and ($readyIssues.Count -gt 0)
+$quietWindowOpenForRf30 = ($effectiveCodeWip -eq 0) -and $rf30OpenInProgress
+$readyIntakeAvailable = ($effectiveCodeWip -lt 2) -and ($readyIssues.Count -gt 0)
 $readyColumnOverloaded = $readyIssues.Count -gt 3
 
 $recommendedOwner = if ($claudeRateLimited) {
@@ -842,10 +1022,13 @@ $report = [pscustomobject]@{
     GeneratedAtUtc            = [DateTimeOffset]::UtcNow.ToString("O")
     ZeroTokensUsed            = $true
     DashboardOnline           = $monitorsOnline
+    PullRequestsDisabled      = $pullRequestsDisabled
     Monitors                  = @($monitorsSummary)
     Hygiene                   = $hygieneResult
     OpenPrCount               = $openPrs.Count
     OpenCodePrCount           = $openCodePrCount
+    ActiveClaimedCodeCount    = $activeClaimedCodeCount
+    EffectiveCodeWip          = $effectiveCodeWip
     ReadyIssuesCount          = $readyIssues.Count
     ReadyIssues               = @($readyIssues | Select-Object Number, Priority, RiskClass, Title)
     QueueSync                 = $queueSyncResult
@@ -870,9 +1053,10 @@ if ($Json) {
 }
 else {
     Write-Host "=== MOBAi Zero-Token Swarm Watchdog ==="
-    Write-Host "Open PRs: $($report.OpenPrCount) (Code WIP: $($report.OpenCodePrCount) / 3) | Ready Issues: $($report.ReadyIssuesCount) (target 2-3) | Auto-healed board items: $($report.AutoHealedBoardItemsCount)"
+    $prStatusLabel = if ($pullRequestsDisabled) { "PR-free mode (disabled)" } else { "Open PRs: $($report.OpenPrCount)" }
+    Write-Host "$prStatusLabel (Effective Code WIP: $($report.EffectiveCodeWip) | Active Claims: $($report.ActiveClaimedCodeCount)) | Ready Issues: $($report.ReadyIssuesCount) (target 2-3) | Auto-healed board items: $($report.AutoHealedBoardItemsCount)"
     if ($effectiveSyncQueue) {
-        Write-Host "Queue Sync -> SchemaValid=$($queueSyncResult.SchemaValid) | Upserted=$($queueSyncResult.UpsertedCount) | Removed=$($queueSyncResult.RemovedCount) | Done=$($queueSyncResult.DoneCount) | meta.code_wip=$($queueSyncResult.CodeWip)"
+        Write-Host "Queue Sync -> PullRequestsDisabled=$($queueSyncResult.PullRequestsDisabled) | SchemaValid=$($queueSyncResult.SchemaValid) | Upserted=$($queueSyncResult.UpsertedCount) | Removed=$($queueSyncResult.RemovedCount) | Done=$($queueSyncResult.DoneCount) | CodeWip=$($queueSyncResult.CodeWip)"
         if ($queueSyncResult.Warning) {
             Write-Host "Queue Sync Warning -> $($queueSyncResult.Warning)"
         }

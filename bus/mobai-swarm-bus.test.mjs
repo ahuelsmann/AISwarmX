@@ -1309,3 +1309,162 @@ console.log('[]');
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('Invoke-SwarmWatchdog supports PR-disabled repos, computes code_wip from active claims, skips PR events, and detects landed commits/Done issues', async () => {
+  const pwshCheck = spawnSync('pwsh', ['--version'], { encoding: 'utf8' });
+  if (pwshCheck.status !== 0) {
+    return;
+  }
+
+  const { dir, dbPath } = createTempDbPath();
+  const localAppDir = path.join(dir, 'localapp');
+  const binDir = path.join(dir, 'bin');
+  fs.mkdirSync(localAppDir, { recursive: true });
+  fs.mkdirSync(binDir, { recursive: true });
+
+  const mockGhScript = path.join(dir, 'mock-gh-pr-free.mjs');
+  fs.writeFileSync(mockGhScript, `
+const args = process.argv.slice(2);
+const mode = process.env.MOCK_PR_FREE_MODE || 'repo_flag';
+const nowIso = new Date().toISOString();
+
+if (args[0] === 'api' && args[1] === 'repos/ahuelsmann/MOBAflow') {
+  if (mode === 'repo_flag') {
+    console.log(JSON.stringify({ has_pull_requests: false }));
+  } else {
+    console.log(JSON.stringify({ has_pull_requests: true }));
+  }
+  process.exit(0);
+}
+
+if (args[0] === 'pr' && args[1] === 'list') {
+  console.error('GraphQL: Pull requests are disabled for this repository');
+  process.exit(1);
+}
+
+if (args[0] === 'api' && args.some((a) => a.startsWith('repos/ahuelsmann/MOBAflow/commits'))) {
+  if (mode === 'landed_commit') {
+    console.log(JSON.stringify([{
+      sha: 'deadbeef1234567890abcdef1234567890abcdef',
+      html_url: 'https://github.com/ahuelsmann/MOBAflow/commit/deadbeef',
+      commit: {
+        message: 'feat: finish undo stack (Closes #960)',
+        committer: { date: nowIso }
+      }
+    }]));
+  } else {
+    console.log('[]');
+  }
+  process.exit(0);
+}
+
+if (args[0] === 'issue' && args[1] === 'view') {
+  const num = Number(args[2]);
+  if (mode === 'landed_done' && num === 961) {
+    console.log(JSON.stringify({ state: 'CLOSED', projectItems: [{ status: 'Done' }] }));
+  } else {
+    console.log(JSON.stringify({ state: 'OPEN', projectItems: [{ status: 'In progress' }] }));
+  }
+  process.exit(0);
+}
+
+if (args[0] === 'api' && args[1] === 'graphql') {
+  const payload = {
+    data: {
+      user: {
+        projectV2: {
+          fields: { nodes: [{ name: 'Status' }, { name: 'Priority' }, { name: 'Risk class' }] },
+          items: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [{
+              id: 'READY_962',
+              fieldValues: { nodes: [
+                { name: 'Ready', field: { name: 'Status' } },
+                { name: 'P1', field: { name: 'Priority' } },
+                { name: 'M', field: { name: 'Risk class' } }
+              ] },
+              content: { __typename: 'Issue', number: 962, title: 'Next Ready Issue', state: 'OPEN' }
+            }]
+          }
+        }
+      }
+    }
+  };
+  if (mode === 'graphql_pr_disabled') {
+    payload.errors = [{ message: 'Pull requests are disabled' }];
+  }
+  console.log(JSON.stringify(payload));
+  process.exit(mode === 'graphql_pr_disabled' ? 1 : 0);
+}
+console.log('[]');
+`, 'utf8');
+  fs.writeFileSync(path.join(binDir, 'gh.cmd'), `@echo off\r\n"${process.execPath}" "${mockGhScript}" %*\r\n`, 'utf8');
+
+  try {
+    const busEnv = { ...process.env, MOBADEV_SWARM_BUS_DB: dbPath };
+    const wdEnv = {
+      ...process.env,
+      LOCALAPPDATA: localAppDir,
+      MOBADEV_SWARM_BUS_DB: dbPath,
+      PATH: `${binDir}${path.delimiter}${process.env.PATH}`
+    };
+
+    // Seed two active claims (#960 M, #961 unclassified)
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'upsert', '--issue-number', '960', '--title', 'Claimed 960', '--priority', '1', '--risk-class', 'M'], busEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'next', '--agent', 'codex'], busEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'upsert', '--issue-number', '961', '--title', 'Claimed 961', '--priority', '1'], busEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'next', '--agent', 'claude-opus'], busEnv);
+
+    // (a) + (b) GraphQL "Pull requests are disabled" / has_pull_requests: false runs reconciliation, computes code_wip from active claims, and emits 0 PR events
+    const res1 = await runProcessAsync('pwsh', [
+      '-NoProfile', '-File', WATCHDOG_SCRIPT,
+      '-SkipHygiene', '-DispatchEvents', '-SyncQueue', '-Json', '-DashboardApiUrl', 'http://127.0.0.1:9'
+    ], { ...wdEnv, MOCK_PR_FREE_MODE: 'graphql_pr_disabled' });
+    assert.equal(res1.status, 0, res1.stderr);
+    const rep1 = JSON.parse(res1.stdout);
+    assert.equal(rep1.PullRequestsDisabled, true);
+    assert.equal(rep1.QueueSync.BoardReadSucceeded, true);
+    assert.equal(rep1.OpenPrCount, 0);
+    assert.equal(rep1.OpenCodePrCount, 0);
+    assert.equal(rep1.ActiveClaimedCodeCount, 2);
+    assert.equal(rep1.EffectiveCodeWip, 2);
+    assert.equal(rep1.QueueSync.CodeWip, 2);
+    assert.equal(rep1.NewEventsDispatched.filter((e) => e.EventType === 'CiOrSonarFailed' || e.EventType === 'AllChecksGreenReady').length, 0);
+
+    // meta.code_wip stays 0 so bus_queue next computes effective_code_wip = 0 + 2 = 2 (no double counting) and refuses #962 (M)
+    const blockedNext = JSON.parse((await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'next', '--agent', 'antigravity-opus'], busEnv)).stdout);
+    assert.equal(blockedNext.effective_code_wip, 2);
+    assert.equal(blockedNext.item, null);
+
+    // (c1) Closes #960 commit on main releases #960 lease and emits NextWorkAvailable
+    const res2 = await runProcessAsync('pwsh', [
+      '-NoProfile', '-File', WATCHDOG_SCRIPT,
+      '-SkipHygiene', '-DispatchEvents', '-SyncQueue', '-Json', '-DashboardApiUrl', 'http://127.0.0.1:9'
+    ], { ...wdEnv, MOCK_PR_FREE_MODE: 'landed_commit' });
+    assert.equal(res2.status, 0, res2.stderr);
+    const rep2 = JSON.parse(res2.stdout);
+    assert.equal(rep2.PullRequestsDisabled, true);
+    assert.equal(rep2.QueueSync.DoneCount, 1);
+    assert.equal(rep2.ActiveClaimedCodeCount, 1);
+    const commitNextEv = rep2.NewEventsDispatched.find((e) => e.EventType === 'NextWorkAvailable');
+    assert.ok(commitNextEv, 'Expected NextWorkAvailable after Closes #960 commit on main');
+    assert.equal(commitNextEv.IssueNumber, 962);
+
+    // (c2) Closed/Done issue #961 releases #961 lease and emits NextWorkAvailable
+    const res3 = await runProcessAsync('pwsh', [
+      '-NoProfile', '-File', WATCHDOG_SCRIPT,
+      '-SkipHygiene', '-DispatchEvents', '-SyncQueue', '-Json', '-DashboardApiUrl', 'http://127.0.0.1:9'
+    ], { ...wdEnv, MOCK_PR_FREE_MODE: 'landed_done' });
+    assert.equal(res3.status, 0, res3.stderr);
+    const rep3 = JSON.parse(res3.stdout);
+    assert.equal(rep3.QueueSync.DoneCount, 1);
+    assert.equal(rep3.ActiveClaimedCodeCount, 0);
+    const doneNextEv = rep3.NewEventsDispatched.find((e) => e.EventType === 'NextWorkAvailable');
+    assert.ok(doneNextEv, 'Expected NextWorkAvailable after #961 closed/Done');
+
+    const inboxCodex = JSON.parse((await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'inbox', '--agent', 'codex'], busEnv)).stdout);
+    assert.ok(inboxCodex.messages.some((m) => m.topic === 'NextWorkAvailable'));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
