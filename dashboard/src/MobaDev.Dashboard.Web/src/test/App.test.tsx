@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as swarmHubClient from '../api/swarmHubClient';
 import { App } from '../App';
 import { deriveActiveAgentsSummary } from '../components/ActiveAgentsStrip';
 import { rankPullRequestsForMain } from '../components/MainLandingTickerCard';
@@ -586,6 +587,7 @@ function stubDashboardFetch(snapshot = createSnapshotFixture()) {
 
 describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     window.localStorage.clear();
     clearMonitorGridCookie();
@@ -1478,5 +1480,174 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       /Local dashboard backend unreachable/i
     );
+  });
+
+  it('merges live SignalR SwarmBusUpdated pushes and updates Live Push badge', async () => {
+    const user = userEvent.setup();
+    let capturedHandlers: swarmHubClient.SwarmHubSubscriptionHandlers | null = null;
+    const hubSpy = vi.spyOn(swarmHubClient, 'subscribeSwarmHub').mockImplementation((handlers) => {
+      capturedHandlers = handlers;
+      handlers.onStateChange?.('live');
+      return () => {};
+    });
+
+    try {
+      const initAt = new Date().toISOString();
+      const fixture = createSnapshotFixture({
+        swarmBus: {
+          generatedAtUtc: initAt,
+          unreadCount: 0,
+          activeLockCount: 0,
+          recentMessages: [],
+          activeLocks: [],
+          source: { status: 'ok', updatedAtUtc: initAt, fromCache: false }
+        }
+      });
+      stubDashboardFetch(fixture);
+      render(<App />);
+
+      await user.click(await screen.findByRole('tab', { name: /Communication/i }));
+      const busRegion = await screen.findByRole('region', { name: 'Swarm Bus Cross-Tool MCP Feed' });
+      expect(within(busRegion).getByText('Live Push')).toBeInTheDocument();
+
+      const pushedAt = new Date().toISOString();
+      act(() => {
+        capturedHandlers?.onSwarmBusUpdated({
+          generatedAtUtc: pushedAt,
+          unreadCount: 3,
+          activeLockCount: 0,
+          recentMessages: [
+            {
+              id: 999,
+              createdAtUtc: pushedAt,
+              sender: 'codex',
+              recipient: 'antigravity-gemini',
+              topic: 'live-signalr-test',
+              body: 'Live push delivered via SignalR',
+              issueNumber: 56,
+              priority: 'high',
+              status: 'unread'
+            }
+          ],
+          activeLocks: [],
+          source: { status: 'ok', updatedAtUtc: pushedAt, fromCache: false }
+        });
+      });
+
+      expect(within(busRegion).getByText('3 Unread')).toBeInTheDocument();
+      expect(within(busRegion).getByText(/live-signalr-test/)).toBeInTheDocument();
+    } finally {
+      hubSpy.mockRestore();
+    }
+  });
+
+  it('retries initial SignalR start failures with backoff and cancels pending retry on dispose', async () => {
+    vi.useFakeTimers();
+    try {
+      const states: swarmHubClient.LiveConnectionState[] = [];
+      let startCalls = 0;
+      let stopCalls = 0;
+      const fakeConn: { -readonly [K in keyof swarmHubClient.SwarmHubConnectionLike]: swarmHubClient.SwarmHubConnectionLike[K] } = {
+        state: 'Disconnected' as never,
+        on: () => {},
+        onreconnecting: () => {},
+        onreconnected: () => {},
+        onclose: () => {},
+        start: async () => {
+          startCalls += 1;
+          if (startCalls === 1) {
+            throw new Error('backend starting');
+          }
+          fakeConn.state = 'Connected' as never;
+        },
+        stop: async () => {
+          stopCalls += 1;
+        }
+      };
+
+      const dispose = swarmHubClient.subscribeSwarmHub(
+        {
+          onSwarmBusUpdated: () => {},
+          onSnapshotUpdated: () => {},
+          onStateChange: (s) => states.push(s)
+        },
+        '/hubs/swarm',
+        {
+          connectionFactory: () => fakeConn,
+          initialRetryBaseMs: 50,
+          maxRetryDelayMs: 200
+        }
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(startCalls).toBe(1);
+      expect(states).toContain('polling');
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60);
+      });
+      expect(startCalls).toBe(2);
+      expect(states[states.length - 1]).toBe('live');
+
+      dispose();
+      expect(stopCalls).toBe(1);
+
+      // Verify pending retry timer is cancelled when disposed after an initial failure.
+      let disposedStartCalls = 0;
+      const failingConn: swarmHubClient.SwarmHubConnectionLike = {
+        state: 0 as never,
+        on: () => {},
+        onreconnecting: () => {},
+        onreconnected: () => {},
+        onclose: () => {},
+        start: async () => {
+          disposedStartCalls += 1;
+          throw new Error('still offline');
+        },
+        stop: async () => {}
+      };
+
+      const disposeEarly = swarmHubClient.subscribeSwarmHub(
+        {
+          onSwarmBusUpdated: () => {},
+          onSnapshotUpdated: () => {}
+        },
+        '/hubs/swarm',
+        {
+          connectionFactory: () => failingConn,
+          initialRetryBaseMs: 50,
+          maxRetryDelayMs: 200
+        }
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(disposedStartCalls).toBe(1);
+      disposeEarly();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(disposedStartCalls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('builds cookie-free SignalR client connections with withCredentials disabled', async () => {
+    const signalr = await import('@microsoft/signalr');
+    const withUrlSpy = vi.spyOn(signalr.HubConnectionBuilder.prototype, 'withUrl');
+    try {
+      const conn = swarmHubClient.buildSwarmHubConnection('http://127.0.0.1:5179/hubs/swarm');
+      expect(conn).toBeDefined();
+      expect(withUrlSpy).toHaveBeenCalledWith('http://127.0.0.1:5179/hubs/swarm', {
+        withCredentials: false
+      });
+    } finally {
+      withUrlSpy.mockRestore();
+    }
   });
 });

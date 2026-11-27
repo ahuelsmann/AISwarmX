@@ -32,6 +32,7 @@ public sealed partial class DashboardSnapshotService
     private SwarmBusResponse? _cachedSwarmBus;
     private string? _cachedChangelogVersion;
     private string? _cachedLocalKey;
+    private long _swarmBusCacheEpoch;
     private DateTimeOffset _localCacheExpiresAt = DateTimeOffset.MinValue;
 
     private PipelineResponse? _cachedPipeline;
@@ -137,8 +138,80 @@ public sealed partial class DashboardSnapshotService
 
     public async Task<SwarmBusResponse> GetSwarmBusAsync(bool forceRefresh, CancellationToken cancellationToken)
     {
-        var snapshot = await GetSnapshotAsync(forceRefresh, cancellationToken).ConfigureAwait(false);
-        return snapshot.SwarmBus ?? await _swarmBusProvider.GetSwarmBusAsync(_optionsMonitor.CurrentValue.ResolvePaths(), cancellationToken).ConfigureAwait(false);
+        if (forceRefresh)
+        {
+            return await RefreshSwarmBusAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var snapshot = await GetSnapshotAsync(forceRefresh: false, cancellationToken).ConfigureAwait(false);
+        return snapshot.SwarmBus ?? await RefreshSwarmBusAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<SwarmBusResponse> RefreshSwarmBusAsync(CancellationToken cancellationToken) =>
+        RefreshSwarmBusAsync(maxAttempts: DefaultMaxRefreshAttempts, cancellationToken);
+
+    internal async Task<SwarmBusResponse> RefreshSwarmBusAsync(int maxAttempts, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxAttempts, 1);
+
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            var refreshed = await TryRefreshActiveSwarmBusAsync(cancellationToken).ConfigureAwait(false);
+            if (refreshed is not null)
+            {
+                return refreshed;
+            }
+        }
+
+        throw new SwarmBusContentionException(
+            $"Swarm bus refresh superseded after {maxAttempts} attempts; retry request.");
+    }
+
+    private const int DefaultMaxRefreshAttempts = 8;
+
+    public async Task<SwarmBusResponse?> TryRefreshActiveSwarmBusAsync(CancellationToken cancellationToken)
+    {
+        DashboardOptions options;
+        ResolvedDashboardPaths paths;
+        string localCacheKey;
+        long observedEpoch;
+
+        await _localLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            options = _optionsMonitor.CurrentValue;
+            paths = options.ResolvePaths();
+            localCacheKey = BuildLocalCacheKey(paths, options);
+            observedEpoch = _swarmBusCacheEpoch;
+        }
+        finally
+        {
+            _localLock.Release();
+        }
+
+        var fresh = await _swarmBusProvider.GetSwarmBusAsync(paths, cancellationToken).ConfigureAwait(false);
+
+        await _localLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var currentOptions = _optionsMonitor.CurrentValue;
+            var currentKey = BuildLocalCacheKey(currentOptions.ResolvePaths(), currentOptions);
+            var sameWorkspace = string.Equals(currentKey, localCacheKey, StringComparison.OrdinalIgnoreCase)
+                && (_cachedLocalKey is null || string.Equals(_cachedLocalKey, localCacheKey, StringComparison.OrdinalIgnoreCase));
+            if (sameWorkspace && observedEpoch == _swarmBusCacheEpoch)
+            {
+                _cachedSwarmBus = fresh;
+                _cachedLocalKey ??= localCacheKey;
+                _swarmBusCacheEpoch++;
+                return fresh;
+            }
+
+            return null;
+        }
+        finally
+        {
+            _localLock.Release();
+        }
     }
 
     public async Task<DashboardSnapshot> GetSnapshotAsync(bool forceRefresh, CancellationToken cancellationToken)
@@ -221,6 +294,7 @@ public sealed partial class DashboardSnapshotService
                 _cachedSwarmBus = swarmBus;
                 _cachedChangelogVersion = changelogVersion;
                 _cachedLocalKey = localCacheKey;
+                _swarmBusCacheEpoch++;
 
                 var ttl = Math.Max(1, options.LocalCacheTtlSeconds);
                 _localCacheExpiresAt = now.AddSeconds(ttl);
@@ -428,3 +502,9 @@ public sealed partial class DashboardSnapshotService
     [GeneratedRegex(@"^##\s+\[(?<ver>[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.\-]+)?)\]", RegexOptions.CultureInvariant)]
     private static partial Regex ChangelogVersionHeadingRegex();
 }
+
+/// <summary>
+/// Raised when bounded <see cref="DashboardSnapshotService.RefreshSwarmBusAsync(CancellationToken)"/> attempts
+/// are repeatedly superseded by concurrent workspace changes or cache updates.
+/// </summary>
+public sealed class SwarmBusContentionException(string message) : Exception(message);

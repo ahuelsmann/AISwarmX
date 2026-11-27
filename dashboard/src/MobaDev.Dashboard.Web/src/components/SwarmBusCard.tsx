@@ -6,6 +6,7 @@ import type { SwarmBusResponse } from '../types/dashboard';
 interface SwarmBusCardProps {
   swarmBus?: SwarmBusResponse | null;
   nowMs: number;
+  liveConnectionState?: 'live' | 'reconnecting' | 'polling';
 }
 
 type StatusFilter = 'all' | 'unread' | 'acked';
@@ -149,7 +150,7 @@ function formatRemainingUtc(iso: string, nowMs: number): string {
   return remMinutesRemainder > 0 ? `in ${remHours}h ${remMinutesRemainder}m` : `in ${remHours}h`;
 }
 
-export function SwarmBusCard({ swarmBus, nowMs }: SwarmBusCardProps) {
+export function SwarmBusCard({ swarmBus, nowMs, liveConnectionState = 'polling' }: SwarmBusCardProps) {
   const styles = useStyles();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
@@ -174,6 +175,22 @@ export function SwarmBusCard({ swarmBus, nowMs }: SwarmBusCardProps) {
             <h2 className={styles.title}>Swarm Bus · Cross-Tool MCP</h2>
             <Badge appearance="tint" color="informative">
               Read-Only Feed
+            </Badge>
+            <Badge
+              appearance="tint"
+              color={
+                liveConnectionState === 'live'
+                  ? 'success'
+                  : liveConnectionState === 'reconnecting'
+                    ? 'warning'
+                    : 'subtle'
+              }
+            >
+              {liveConnectionState === 'live'
+                ? 'Live Push'
+                : liveConnectionState === 'reconnecting'
+                  ? 'Reconnecting…'
+                  : 'Polling Fallback'}
             </Badge>
           </div>
           <div className={styles.badges}>

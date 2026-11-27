@@ -11,6 +11,7 @@ import {
 } from '@fluentui/react-components';
 import { ArrowUp16Regular } from '@fluentui/react-icons';
 import { fetchSnapshot } from './api/dashboardClient';
+import { subscribeSwarmHub, type LiveConnectionState } from './api/swarmHubClient';
 import { ArchitectureDiagramsView } from './components/ArchitectureDiagramsView';
 import { ConfigDocsView } from './components/ConfigDocsView';
 import { GovernanceMatrixView } from './components/GovernanceMatrixView';
@@ -125,6 +126,24 @@ export function App() {
     resolveTheme(readInitialThemePreference())
   );
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [liveConnectionState, setLiveConnectionState] = useState<LiveConnectionState>('polling');
+
+  const mergeIfFresher = (
+    prev: DashboardSnapshot | null,
+    incoming: DashboardSnapshot
+  ): DashboardSnapshot => {
+    const prevBusMs = prev?.swarmBus ? Date.parse(prev.swarmBus.generatedAtUtc) : Number.NaN;
+    const incomingBusMs = incoming.swarmBus ? Date.parse(incoming.swarmBus.generatedAtUtc) : Number.NaN;
+    if (
+      prev?.swarmBus &&
+      !Number.isNaN(prevBusMs) &&
+      (Number.isNaN(incomingBusMs) || prevBusMs > incomingBusMs)
+    ) {
+      return { ...incoming, swarmBus: prev.swarmBus };
+    }
+
+    return incoming;
+  };
 
   useEffect(() => {
     const apply = () => {
@@ -155,7 +174,7 @@ export function App() {
     setRefreshing(true);
     try {
       const data = await fetchSnapshot(forceRefresh, signal);
-      setSnapshot(data);
+      setSnapshot((prev) => mergeIfFresher(prev, data));
       setApiError(null);
       setNowMs(Date.now());
     } catch (error) {
@@ -185,8 +204,22 @@ export function App() {
       setNowMs(Date.now());
     }, 1000);
 
+    const unsubscribeHub = subscribeSwarmHub({
+      onSwarmBusUpdated: (swarmBus) => {
+        setSnapshot((prev) => (prev ? { ...prev, swarmBus } : prev));
+        setNowMs(Date.now());
+      },
+      onSnapshotUpdated: (nextSnapshot) => {
+        setSnapshot((prev) => mergeIfFresher(prev, nextSnapshot));
+        setApiError(null);
+        setNowMs(Date.now());
+      },
+      onStateChange: setLiveConnectionState
+    });
+
     return () => {
       controller.abort();
+      unsubscribeHub();
       window.clearInterval(pollTimer);
       window.clearInterval(clockTimer);
     };
@@ -335,7 +368,11 @@ export function App() {
           )}
 
           {snapshot && activeTab === 'communication' && (
-            <SwarmBusCard swarmBus={snapshot.swarmBus} nowMs={nowMs} />
+            <SwarmBusCard
+              swarmBus={snapshot.swarmBus}
+              nowMs={nowMs}
+              liveConnectionState={liveConnectionState}
+            />
           )}
 
           {snapshot && activeTab === 'architecture' && (

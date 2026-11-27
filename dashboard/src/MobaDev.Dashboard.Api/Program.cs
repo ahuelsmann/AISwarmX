@@ -1,5 +1,6 @@
 using System.Text.Json;
 using MobaDev.Dashboard.Api.Configuration;
+using MobaDev.Dashboard.Api.Hubs;
 using MobaDev.Dashboard.Api.Providers;
 using MobaDev.Dashboard.Api.Security;
 using MobaDev.Dashboard.Api.Services;
@@ -40,6 +41,23 @@ builder.Services.AddCors(cors =>
             .WithMethods(HttpMethods.Get)
             .AllowAnyHeader();
     });
+
+    cors.AddPolicy("LocalSignalROnly", policy =>
+    {
+        policy
+            .WithOrigins(
+                "http://127.0.0.1:5173",
+                "http://localhost:5173",
+                "http://127.0.0.1:5179",
+                "http://localhost:5179")
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+
+builder.Services.AddSignalR().AddJsonProtocol(json =>
+{
+    json.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
 });
 
 builder.Services.AddSingleton<ICommandRunner, ProcessCommandRunner>();
@@ -52,8 +70,47 @@ builder.Services.AddSingleton<PipelineProvider>();
 builder.Services.AddSingleton<WorktreeProvider>();
 builder.Services.AddSingleton<SwarmBusProvider>();
 builder.Services.AddSingleton<DashboardSnapshotService>();
+builder.Services.AddHostedService<SwarmLiveBroadcastService>();
 
 var app = builder.Build();
+
+var allowedLoopbackOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+{
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://127.0.0.1:5179",
+    "http://localhost:5179"
+};
+
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/hubs", StringComparison.OrdinalIgnoreCase) ||
+        context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
+    {
+        var host = context.Request.Host.Host;
+        var isLoopbackHost = string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(host, "::1", StringComparison.OrdinalIgnoreCase);
+        if (!isLoopbackHost)
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return;
+        }
+
+        if (context.Request.Path.StartsWithSegments("/hubs", StringComparison.OrdinalIgnoreCase) &&
+            context.Request.Headers.TryGetValue("Origin", out var originValues))
+        {
+            var origin = originValues.FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(origin) && !allowedLoopbackOrigins.Contains(origin))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
+        }
+    }
+
+    await next();
+});
 
 app.UseCors("LocalFrontendOnly");
 
@@ -140,8 +197,23 @@ api.MapGet("/pipeline", async (DashboardSnapshotService service, bool? refresh, 
 api.MapGet("/hygiene", async (DashboardSnapshotService service, bool? refresh, CancellationToken ct) =>
     Results.Ok(await service.GetHygieneAsync(refresh ?? false, ct)));
 
-api.MapGet("/bus", async (DashboardSnapshotService service, bool? refresh, CancellationToken ct) =>
-    Results.Ok(await service.GetSwarmBusAsync(refresh ?? false, ct)));
+api.MapGet("/bus", async (DashboardSnapshotService service, bool? refresh, HttpResponse response, CancellationToken ct) =>
+{
+    try
+    {
+        return Results.Ok(await service.GetSwarmBusAsync(refresh ?? false, ct));
+    }
+    catch (SwarmBusContentionException ex)
+    {
+        response.Headers.RetryAfter = "1";
+        return Results.Problem(
+            title: "Swarm bus refresh superseded by concurrent workspace change",
+            detail: ex.Message,
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+});
+
+app.MapHub<SwarmDashboardHub>("/hubs/swarm").RequireCors("LocalSignalROnly");
 
 app.Run();
 

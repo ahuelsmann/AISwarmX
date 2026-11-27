@@ -15,4 +15,8 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="11.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\MobaDev.SwarmBus.Core\MobaDev.SwarmBus.Core.csproj" />
+  </ItemGroup>
+
 </Project>

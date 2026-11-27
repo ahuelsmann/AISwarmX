@@ -8,11 +8,11 @@ namespace MobaDev.Dashboard.Api.Providers;
 /// <summary>
 /// Strictly read-only reader for the cross-tool MOBAi Swarm Bus SQLite database (%LOCALAPPDATA%\MOBAdev\swarm-bus.db).
 /// </summary>
-public sealed class SwarmBusProvider
+public class SwarmBusProvider
 {
     private const int RecentMessageLimit = 20;
 
-    public Task<SwarmBusResponse> GetSwarmBusAsync(ResolvedDashboardPaths paths, CancellationToken cancellationToken)
+    public virtual Task<SwarmBusResponse> GetSwarmBusAsync(ResolvedDashboardPaths paths, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var now = DateTimeOffset.UtcNow;

@@ -8,7 +8,11 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      '/api': 'http://127.0.0.1:5179'
+      '/api': 'http://127.0.0.1:5179',
+      '/hubs': {
+        target: 'http://127.0.0.1:5179',
+        ws: true
+      }
     }
   },
   test: {
