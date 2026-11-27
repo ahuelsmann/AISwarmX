@@ -1,0 +1,324 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ahuelsmann/MOBAdev/schemas/swarm.config.schema.json",
+  "title": "MOBAdev Swarm Workspace Configuration",
+  "description": "Multi-project workspace, capability profile, standing agent, Swarm Bus, and dashboard configuration contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "swarmName",
+    "defaultWorkspaceId",
+    "workspaces",
+    "capabilityProfiles",
+    "standingAgents",
+    "bus",
+    "dashboard"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional JSON Schema reference."
+    },
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Configuration contract schema version."
+    },
+    "swarmName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable name of the agent swarm."
+    },
+    "defaultWorkspaceId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9-]+$",
+      "description": "Slug identifier of the default active workspace."
+    },
+    "workspaces": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Configured project workspaces managed by this swarm.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "displayName",
+          "repoPath",
+          "githubRepository",
+          "githubProjectOwner",
+          "githubProjectNumber"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z0-9-]+$",
+            "description": "Unique lowercase slug identifier for the workspace."
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Display name of the workspace."
+          },
+          "repoPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Local repository checkout path (supports ${ENV_VAR} placeholders; relative paths resolve against the swarm installation/config root)."
+          },
+          "githubRepository": {
+            "type": "string",
+            "pattern": "^[^/\\s]+/[^/\\s]+$",
+            "description": "GitHub repository in owner/repo format."
+          },
+          "githubProjectOwner": {
+            "type": "string",
+            "minLength": 1,
+            "description": "GitHub user or organization owning the project board (supports ${ENV_VAR} placeholders)."
+          },
+          "githubProjectNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "GitHub Projects v2 board number."
+          },
+          "codeWipLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 3,
+            "description": "Maximum concurrent open code slices allowed for this workspace."
+          },
+          "lowRiskDocPrefixes": {
+            "type": "array",
+            "description": "Path prefixes eligible for Class L documentation-only handling.",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "scripts": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Optional automation scripts; relative paths resolve against the swarm installation/config root (parent of presets/ when loaded from presets/) and must not traverse parent directories.",
+            "properties": {
+              "hygiene": {
+                "type": "string",
+                "minLength": 1
+              },
+              "watchdog": {
+                "type": "string",
+                "minLength": 1
+              },
+              "qualityGates": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "capabilityProfiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Model capability profiles P1 through P4.",
+      "required": [
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "properties": {
+        "P1": {
+          "$ref": "#/$defs/capabilityProfile"
+        },
+        "P2": {
+          "$ref": "#/$defs/capabilityProfile"
+        },
+        "P3": {
+          "$ref": "#/$defs/capabilityProfile"
+        },
+        "P4": {
+          "$ref": "#/$defs/capabilityProfile"
+        }
+      }
+    },
+    "standingAgents": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Standing head agents coordinating work across tool families.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "displayName",
+          "family",
+          "profile",
+          "role",
+          "wakeAdapter"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z0-9-]+$"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "family": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "openai",
+              "gemini"
+            ]
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "P1",
+              "P2",
+              "P3",
+              "P4"
+            ]
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1
+          },
+          "wakeAdapter": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "codex-queue",
+                  "claude-ephemeral",
+                  "antigravity-http"
+                ]
+              },
+              "threadIdOrEnv": {
+                "type": "string"
+              },
+              "executableOrEnv": {
+                "type": "string"
+              },
+              "endpointOrEnv": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "bus": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Swarm Bus SQLite coordination settings.",
+      "required": [
+        "dbPath",
+        "lockTtlMinutes"
+      ],
+      "properties": {
+        "dbPath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "SQLite database path for Swarm Bus (supports ${ENV_VAR} placeholders)."
+        },
+        "lockTtlMinutes": {
+          "type": "integer",
+          "minimum": 5
+        }
+      }
+    },
+    "dashboard": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Local dashboard HTTP endpoint and caching settings.",
+      "required": [
+        "bindUrl",
+        "staticWebRootPath",
+        "localCacheTtlSeconds",
+        "githubCacheTtlSeconds"
+      ],
+      "properties": {
+        "bindUrl": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:\\d+)?(/.*)?$",
+          "description": "Loopback-only HTTP/HTTPS bind URI (127.0.0.1, localhost, or [::1])."
+        },
+        "staticWebRootPath": {
+          "type": "string",
+          "description": "Static frontend dist directory; relative paths resolve against the swarm installation/config root (parent of presets/ when loaded from presets/)."
+        },
+        "localCacheTtlSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "githubCacheTtlSeconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  },
+  "$defs": {
+    "capabilityProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "description",
+        "allowedModels",
+        "prohibitedModels"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allowedModels": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "not": {
+              "pattern": "[Ff][Aa][Bb][Ll][Ee]"
+            }
+          }
+        },
+        "prohibitedModels": {
+          "type": "array",
+          "allOf": [
+            {
+              "contains": {
+                "const": "Claude Fable 5.2"
+              }
+            },
+            {
+              "contains": {
+                "const": "claude-fable-5-2"
+              }
+            }
+          ],
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}
