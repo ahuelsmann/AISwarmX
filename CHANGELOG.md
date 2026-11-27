@@ -5,6 +5,21 @@ All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Das
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.14.0] - 2026-11-26
+
+### Added & Changed
+- **Swarm Bus Work Queue, Review Claims & State Deduplication (`bus/mobai-swarm-bus.mjs`, `bus/mobai-swarm-bus.test.mjs`):**
+  - Added transactional (`BEGIN IMMEDIATE`) additive SQLite schema migrations (`messages.state`, `messages.wake_ok`, `messages.wake_state`, `messages.wake_attempt_expires_at_utc`, `review_claims`, `work_queue`, `meta`) preserving existing data under concurrent startup.
+  - Added `bus_review_claim` (MCP + `--cli review-claim`) enforcing canonical 40-char lowercase hex `head_sha` and single-holder lease lifecycle (`action: 'claim' | 'complete' | 'release' | 'list'`, configurable `ttl_minutes` defaulting `60`) per `(pr_number, head_sha, role)`.
+  - Added `bus_queue` (MCP + `--cli queue`) supporting `list`, `next` (transactional resume-first + 4h lease renewal, expired lease takeover, priority/oldest order, `effectiveCodeWip = code_wip + activeClaimedCodeCount >= 2` `L`-only gate treating unclassified items as code), `release`, `done`, `upsert`, and `sync-meta`.
+  - Added atomic recipient-scoped `state` deduplication and `wake_state` (`'pending'|'ok'|'failed'`) + `wake_attempt_expires_at_utc` (`120s`) atomic wake reservation on `bus_send` (`--codex-thread-id` support included).
+- **Watchdog Queue Sync & Auto-Wake Events (`scripts/Invoke-SwarmWatchdog.ps1`):**
+  - Added `-SyncQueue` (also implied by `-DispatchEvents` and `-RegisterScheduledTask`) with full GraphQL cursor pagination (`pageInfo`), explicit `$boardReadSucceeded` fail-safe guard (preserving existing `work_queue` and `meta.code_wip` on API/GraphQL errors), Project #1 Priority/Risk schema verification, `work_queue` synchronization (preserving `'claimed'` leases through `In progress` until a linked open PR or terminal `Closed`/`Done`), and file-based `meta.code_wip` calculation.
+  - Added deduplicated `PrMerged` (`NextWorkAvailable`) and `HeadIdleWake` (forwarding `-CodexThreadId` via `--codex-thread-id` and `MOBADEV_CODEX_THREAD_ID`, waking Codex when idle `> 30m` and not `rate_limited` while `code_wip < 3` and queued work exists).
+- **Governance & Review Marker Standardization (`agents/`, `docs/delivery-workflow.md`, `docs/hygiene-and-automation.md`):** Documented cross-family final review (`claude`/`openai`/`gemini`), non-orchestrator dispatcher rule, `<!-- moba-final-review ... base=<40-char sha> ... -->` PR comment marker, `bus_review_claim` lifecycle (`claim`/`complete`/`release`/`list`, `ttl_minutes`), `bus_send` `state` deduplication, and session-start `bus_queue next` resume flow.
+
+---
+
 ## [3.13.0] - 2026-11-26
 
 ### Added & Changed
