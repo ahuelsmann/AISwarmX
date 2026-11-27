@@ -1,8 +1,10 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/MobaDev.Dashboard.Api/MobaDev.Dashboard.Api.csproj" />
+    <Project Path="src/MobaDev.SwarmBus.Core/MobaDev.SwarmBus.Core.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/MobaDev.Dashboard.Api.Tests/MobaDev.Dashboard.Api.Tests.csproj" />
+    <Project Path="tests/MobaDev.SwarmBus.Tests/MobaDev.SwarmBus.Tests.csproj" />
   </Folder>
 </Solution>
