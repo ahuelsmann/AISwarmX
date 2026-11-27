@@ -168,14 +168,11 @@ function pathsOverlap(aRaw, bRaw) {
 }
 
 function tryWakeCodex(messageText, threadIdOverride = null) {
-  const codexExe = process.env.MOBADEV_CODEX_EXE && process.env.MOBADEV_CODEX_EXE.trim()
-    ? process.env.MOBADEV_CODEX_EXE.trim()
-    : path.join(os.homedir(), '.codex', '.sandbox-bin', 'codex.exe');
+  const codexExe = process.env.MOBADEV_CODEX_EXE?.trim()
+    || path.join(os.homedir(), '.codex', '.sandbox-bin', 'codex.exe');
 
   const overrideTrimmed = threadIdOverride ? String(threadIdOverride).trim() : '';
-  const envThread = process.env.MOBADEV_CODEX_THREAD_ID && process.env.MOBADEV_CODEX_THREAD_ID.trim()
-    ? process.env.MOBADEV_CODEX_THREAD_ID.trim()
-    : '';
+  const envThread = process.env.MOBADEV_CODEX_THREAD_ID?.trim() ?? '';
   const threadId = overrideTrimmed || envThread || DEFAULT_CODEX_THREAD_ID;
 
   if (!fs.existsSync(codexExe)) {
@@ -275,8 +272,21 @@ function sendOrDeduplicateInTx(db, params) {
   return { mode: 'inserted', id: Number(info.lastInsertRowid), createdAt };
 }
 
-function dispatchCodexWake(db, messageId, sender, recipient, normalizedPr, topic, body, codexThreadId, wakeCodex = tryWakeCodex) {
-  const prTag = normalizedPr !== null ? ` (PR #${normalizedPr})` : '';
+function parseOptionalNumber(rawValue) {
+  if (rawValue === undefined || rawValue === null || rawValue === '') {
+    return null;
+  }
+  const num = Number(rawValue);
+  return Number.isFinite(num) ? num : null;
+}
+
+function normalizePriority(rawPriority) {
+  const candidate = String(rawPriority ?? 'normal').toLowerCase();
+  return ['low', 'normal', 'high', 'urgent'].includes(candidate) ? candidate : 'normal';
+}
+
+function dispatchCodexWake({ db, messageId, sender, recipient, prNumber, topic, body, codexThreadId, wakeCodex = tryWakeCodex }) {
+  const prTag = prNumber !== null ? ` (PR #${prNumber})` : '';
   const wakeMsg = `[SwarmBus #${messageId}] ${sender} -> ${recipient}${prTag} [${topic}]: ${body}`;
   const wakeRes = wakeCodex(wakeMsg, codexThreadId);
   if (wakeRes.ok) {
@@ -295,18 +305,13 @@ export function handleBusSend(db, args, options = {}) {
     throw new Error('bus_send requires non-empty "from", "to", "topic", and "body".');
   }
 
-  const prNumber = args.pr !== undefined && args.pr !== null && args.pr !== '' ? Number(args.pr) : null;
-  const issueNumber = args.issue !== undefined && args.issue !== null && args.issue !== '' ? Number(args.issue) : null;
-  const replyToId = args.reply_to !== undefined && args.reply_to !== null && args.reply_to !== '' ? Number(args.reply_to) : null;
-  const normalizedPr = Number.isFinite(prNumber) ? prNumber : null;
-  const normalizedIssue = Number.isFinite(issueNumber) ? issueNumber : null;
-  const normalizedReplyTo = Number.isFinite(replyToId) ? replyToId : null;
+  const normalizedPr = parseOptionalNumber(args.pr);
+  const normalizedIssue = parseOptionalNumber(args.issue);
+  const normalizedReplyTo = parseOptionalNumber(args.reply_to);
   const state = args.state !== undefined && args.state !== null && String(args.state).trim() !== ''
     ? String(args.state).trim()
     : null;
-  const priority = ['low', 'normal', 'high', 'urgent'].includes(String(args.priority ?? 'normal').toLowerCase())
-    ? String(args.priority ?? 'normal').toLowerCase()
-    : 'normal';
+  const priority = normalizePriority(args.priority);
 
   const wakeRequested = args.wake === true || args.wake === 'true';
   const recLower = recipient.toLowerCase();
@@ -336,7 +341,17 @@ export function handleBusSend(db, args, options = {}) {
   }
 
   if (txResult.mode === 'retry-wake') {
-    const wakeRes = dispatchCodexWake(db, txResult.id, sender, recipient, normalizedPr, topic, txResult.body, codexThreadId, wakeCodex);
+    const wakeRes = dispatchCodexWake({
+      db,
+      messageId: txResult.id,
+      sender,
+      recipient,
+      prNumber: normalizedPr,
+      topic,
+      body: txResult.body,
+      codexThreadId,
+      wakeCodex
+    });
     return {
       ok: true,
       deduplicated: true,
@@ -349,7 +364,17 @@ export function handleBusSend(db, args, options = {}) {
 
   const wakeResults = [];
   if (wakeTargetMatches) {
-    wakeResults.push(dispatchCodexWake(db, txResult.id, sender, recipient, normalizedPr, topic, body, codexThreadId, wakeCodex));
+    wakeResults.push(dispatchCodexWake({
+      db,
+      messageId: txResult.id,
+      sender,
+      recipient,
+      prNumber: normalizedPr,
+      topic,
+      body,
+      codexThreadId,
+      wakeCodex
+    }));
   }
 
   return {
