@@ -48,16 +48,9 @@ public sealed record SwarmConfig(
             ? DefaultWorkspaceId
             : workspaceId.Trim();
 
-        foreach (var workspace in Workspaces)
-        {
-            if (string.Equals(workspace.Id, targetId, StringComparison.OrdinalIgnoreCase))
-            {
-                return workspace;
-            }
-        }
-
-        throw new SwarmConfigValidationException(
-            $"Workspace '{targetId}' was not found in swarm configuration '{SwarmName}'.");
+        return FindWorkspaceOrNull(targetId)
+            ?? throw new SwarmConfigValidationException(
+                $"Workspace '{targetId}' was not found in swarm configuration '{SwarmName}'.");
     }
 
     /// <summary>
@@ -100,15 +93,8 @@ public sealed record SwarmConfig(
 
     private WorkspaceDefinition? FindWorkspaceOrNull(string workspaceId)
     {
-        foreach (var workspace in Workspaces)
-        {
-            if (string.Equals(workspace.Id, workspaceId, StringComparison.OrdinalIgnoreCase))
-            {
-                return workspace;
-            }
-        }
-
-        return null;
+        return Workspaces.FirstOrDefault(workspace =>
+            string.Equals(workspace.Id, workspaceId, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string ResolveConcretePath(
