@@ -6,25 +6,51 @@ using Xunit;
 
 namespace MobaDev.SwarmBus.Tests;
 
+[Collection("EnvVarTests")]
 public sealed class LegacyMigrationTests
 {
     [Fact]
-    public void DefaultDatabasePathUsesSwarmBusV2ToProtectLiveNodeBus()
+    public void DefaultDatabasePathUsesV2OverrideAndRejectsProtectedLegacyPaths()
     {
-        var originalEnv = Environment.GetEnvironmentVariable("MOBADEV_SWARM_BUS_DB");
+        using var fx = new TempBusFixture();
+        var originalLegacyEnv = Environment.GetEnvironmentVariable("MOBADEV_SWARM_BUS_DB");
+        var originalV2Env = Environment.GetEnvironmentVariable("MOBADEV_SWARM_BUS_V2_DB");
         try
         {
-            Environment.SetEnvironmentVariable("MOBADEV_SWARM_BUS_DB", null);
+            var nodeLiveDb = Path.Combine(fx.RootPath, "node-live", "swarm-bus.db");
+            var customV2Db = Path.Combine(fx.RootPath, "custom", "swarm-bus-v2.db");
+
+            // When MOBADEV_SWARM_BUS_DB is set for Node MCP, C# ResolveDefaultDbPath still uses swarm-bus-v2.db.
+            Environment.SetEnvironmentVariable("MOBADEV_SWARM_BUS_DB", nodeLiveDb);
+            Environment.SetEnvironmentVariable("MOBADEV_SWARM_BUS_V2_DB", null);
+
             var defaultPath = SwarmBusStore.ResolveDefaultDbPath();
             var legacyPath = SwarmBusStore.ResolveLegacyDefaultDbPath();
-
             Assert.EndsWith("swarm-bus-v2.db", defaultPath, StringComparison.OrdinalIgnoreCase);
             Assert.EndsWith("swarm-bus.db", legacyPath, StringComparison.OrdinalIgnoreCase);
-            Assert.NotEqual(legacyPath, defaultPath);
+            Assert.NotEqual(Path.GetFullPath(nodeLiveDb), defaultPath, StringComparer.OrdinalIgnoreCase);
+
+            // Setting MOBADEV_SWARM_BUS_V2_DB overrides C# default path.
+            Environment.SetEnvironmentVariable("MOBADEV_SWARM_BUS_V2_DB", customV2Db);
+            Assert.Equal(Path.GetFullPath(customV2Db), SwarmBusStore.ResolveDefaultDbPath());
+
+            // Writable store must reject both default legacy path and MOBADEV_SWARM_BUS_DB path.
+            Assert.Throws<InvalidOperationException>(() => new SwarmBusStore(legacyPath));
+            Assert.Throws<InvalidOperationException>(() => new SwarmBusStore(nodeLiveDb.ToUpperInvariant() + Path.DirectorySeparatorChar));
+
+            // Pointing MOBADEV_SWARM_BUS_V2_DB at MOBADEV_SWARM_BUS_DB must also be rejected.
+            Environment.SetEnvironmentVariable("MOBADEV_SWARM_BUS_V2_DB", nodeLiveDb);
+            Assert.Throws<InvalidOperationException>(() => new SwarmBusStore());
+
+            // ImportFromLegacyDb rejects importing onto the target DB itself.
+            var v2Store = new SwarmBusStore(customV2Db);
+            v2Store.EnsureInitialized();
+            Assert.Throws<ArgumentException>(() => v2Store.ImportFromLegacyDb(customV2Db));
         }
         finally
         {
-            Environment.SetEnvironmentVariable("MOBADEV_SWARM_BUS_DB", originalEnv);
+            Environment.SetEnvironmentVariable("MOBADEV_SWARM_BUS_DB", originalLegacyEnv);
+            Environment.SetEnvironmentVariable("MOBADEV_SWARM_BUS_V2_DB", originalV2Env);
         }
     }
 

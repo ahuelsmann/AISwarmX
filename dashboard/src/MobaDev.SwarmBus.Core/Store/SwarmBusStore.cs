@@ -18,6 +18,9 @@ public sealed class SwarmBusStoreOptions
 
     /// <summary>
     /// Optional wake dispatcher invoked outside the SQLite write transaction when a wake target matches.
+    /// Implementations should honor the supplied <see cref="CancellationToken"/> and be idempotent under retry/timeout;
+    /// if an implementation ignores cancellation, <see cref="SwarmBusStore"/> stops awaiting after
+    /// <see cref="WakeDispatchTimeout"/> and marks the wake attempt failed.
     /// When omitted, wake attempts remain in <c>pending</c> state for the 120s lease window until resolved.
     /// </summary>
     public Func<SwarmWakeContext, CancellationToken, Task<SwarmWakeResult>>? WakeDispatcher { get; init; }
@@ -42,6 +45,8 @@ public sealed partial class SwarmBusStore
     private const int SqliteBusyErrorCode = 5;
     private const int SqliteLockedErrorCode = 6;
     private const string IsoFormat = "yyyy-MM-ddTHH:mm:ss.fffZ";
+    private const string V2DbEnvVar = "MOBADEV_SWARM_BUS_V2_DB";
+    private const string LegacyDbEnvVar = "MOBADEV_SWARM_BUS_DB";
 
     private const string AllWildcard = "*";
     private const string AllRecipient = "all";
@@ -243,7 +248,10 @@ public sealed partial class SwarmBusStore
 
     public SwarmBusStore(string? dbPath = null, SwarmBusStoreOptions? options = null)
     {
-        _dbPath = string.IsNullOrWhiteSpace(dbPath) ? ResolveDefaultDbPath() : Path.GetFullPath(dbPath.Trim());
+        var resolvedPath = string.IsNullOrWhiteSpace(dbPath) ? ResolveDefaultDbPath() : NormalizePathForComparison(dbPath);
+        ThrowIfProtectedLegacyPath(resolvedPath);
+
+        _dbPath = resolvedPath;
         var resolved = options ?? new SwarmBusStoreOptions();
         _timeProvider = resolved.TimeProvider;
         _wakeDispatcher = resolved.WakeDispatcher;
@@ -256,15 +264,15 @@ public sealed partial class SwarmBusStore
     public string DatabasePath => _dbPath;
 
     /// <summary>
-    /// Resolves the default v2 Swarm Bus database path (<c>MOBADEV_SWARM_BUS_DB</c> or <c>%LOCALAPPDATA%\MOBAdev\swarm-bus-v2.db</c>),
-    /// keeping the live Node MCP <c>swarm-bus.db</c> untouched.
+    /// Resolves the default v2 Swarm Bus database path (<c>MOBADEV_SWARM_BUS_V2_DB</c> or <c>%LOCALAPPDATA%\MOBAdev\swarm-bus-v2.db</c>),
+    /// keeping the live Node MCP <c>swarm-bus.db</c> and <c>MOBADEV_SWARM_BUS_DB</c> untouched.
     /// </summary>
     public static string ResolveDefaultDbPath()
     {
-        var overridePath = Environment.GetEnvironmentVariable("MOBADEV_SWARM_BUS_DB");
+        var overridePath = Environment.GetEnvironmentVariable(V2DbEnvVar);
         if (!string.IsNullOrWhiteSpace(overridePath))
         {
-            return Path.GetFullPath(overridePath.Trim());
+            return NormalizePathForComparison(overridePath);
         }
 
         return Path.Combine(ResolveLocalAppDataDir(), AppFolderName, SwarmBusConstants.DefaultDbFileName);
@@ -275,6 +283,34 @@ public sealed partial class SwarmBusStore
     /// </summary>
     public static string ResolveLegacyDefaultDbPath() =>
         Path.Combine(ResolveLocalAppDataDir(), AppFolderName, SwarmBusConstants.LegacyDbFileName);
+
+    private static string NormalizePathForComparison(string path) =>
+        Path.GetFullPath(path.Trim()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    private static bool PathsEqual(string leftPath, string rightPath)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return string.Equals(
+            NormalizePathForComparison(leftPath),
+            NormalizePathForComparison(rightPath),
+            comparison);
+    }
+
+    private static void ThrowIfProtectedLegacyPath(string targetDbPath)
+    {
+        if (PathsEqual(targetDbPath, ResolveLegacyDefaultDbPath()))
+        {
+            throw new InvalidOperationException(
+                $"SwarmBusStore cannot open the live legacy database '{targetDbPath}' in writable mode. Use '{SwarmBusConstants.DefaultDbFileName}' or '{V2DbEnvVar}', and import via ImportFromLegacyDb.");
+        }
+
+        var legacyEnvPath = Environment.GetEnvironmentVariable(LegacyDbEnvVar);
+        if (!string.IsNullOrWhiteSpace(legacyEnvPath) && PathsEqual(targetDbPath, legacyEnvPath))
+        {
+            throw new InvalidOperationException(
+                $"SwarmBusStore cannot open '{LegacyDbEnvVar}' ('{targetDbPath}') in writable mode. Use '{V2DbEnvVar}' for v2 storage and ImportFromLegacyDb for read-only migration.");
+        }
+    }
 
     private static string ResolveLocalAppDataDir()
     {
@@ -359,7 +395,7 @@ public sealed partial class SwarmBusStore
     /// </summary>
     public LegacyImportResult ImportFromLegacyDb(string legacyDbPath)
     {
-        var fullLegacyPath = ValidateLegacySourcePath(legacyDbPath);
+        var fullLegacyPath = ValidateLegacySourcePath(legacyDbPath, _dbPath);
         var snapshot = ReadLegacySnapshotWithRetry(fullLegacyPath);
         return ExecuteInImmediateTransaction(connection => WriteLegacyImportInTx(connection, fullLegacyPath, snapshot));
     }
@@ -371,7 +407,7 @@ public sealed partial class SwarmBusStore
     public async Task<LegacyImportResult> ImportFromLegacyDbAsync(string legacyDbPath, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var fullLegacyPath = ValidateLegacySourcePath(legacyDbPath);
+        var fullLegacyPath = ValidateLegacySourcePath(legacyDbPath, _dbPath);
         var snapshot = await ExecuteWithBusyRetryAsync(
             _ => Task.FromResult(ReadLegacySnapshot(fullLegacyPath)),
             cancellationToken).ConfigureAwait(false);
@@ -847,10 +883,19 @@ public sealed partial class SwarmBusStore
         });
     }
 
-    private static string ValidateLegacySourcePath(string legacyDbPath)
+    private static string ValidateLegacySourcePath(string legacyDbPath, string targetDbPath)
     {
         var path = RequireNonEmpty(legacyDbPath, "Legacy database path must not be empty.", nameof(legacyDbPath));
-        var fullPath = Path.GetFullPath(path);
+        var fullPath = NormalizePathForComparison(path);
+        if (PathsEqual(fullPath, targetDbPath))
+        {
+            throw new ArgumentException(
+                $"Legacy source database path '{fullPath}' cannot be the same as the target v2 database path.",
+                nameof(legacyDbPath));
+        }
+
+        ThrowIfProtectedLegacyPath(targetDbPath);
+
         if (!File.Exists(fullPath))
         {
             throw new FileNotFoundException($"Legacy Swarm Bus database not found: {fullPath}", fullPath);
@@ -2884,6 +2929,10 @@ public sealed partial class SwarmBusStore
         reserveCmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Invokes the configured wake dispatcher bounded by <see cref="SwarmBusStoreOptions.WakeDispatchTimeout"/>.
+    /// Uses <see cref="Task.WaitAsync(CancellationToken)"/> so a non-cooperative dispatcher cannot block indefinitely.
+    /// </summary>
     private async Task<(SwarmWakeResult Result, bool FenceApplied)> DispatchWakeAsync(
         SwarmWakeContext context,
         string expectedLeaseIso,
@@ -2895,14 +2944,16 @@ public sealed partial class SwarmBusStore
         SwarmWakeResult wakeRes;
         try
         {
-            wakeRes = await _wakeDispatcher!(context, timeoutCts.Token).ConfigureAwait(false);
+            wakeRes = await _wakeDispatcher!(context, timeoutCts.Token)
+                .WaitAsync(timeoutCts.Token)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             await CompleteWakeAttemptAsync(context.MessageId, ok: false, expectedLeaseIso, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is OperationCanceledException or TimeoutException)
         {
             wakeRes = new SwarmWakeResult(
                 Attempted: true,
@@ -3497,6 +3548,8 @@ public sealed partial class SwarmBusStore
 
     private SqliteConnection OpenConnectionCore()
     {
+        ThrowIfProtectedLegacyPath(_dbPath);
+
         var connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = _dbPath,

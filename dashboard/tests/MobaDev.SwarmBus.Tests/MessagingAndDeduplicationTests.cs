@@ -395,4 +395,34 @@ public sealed class MessagingAndDeduplicationTests
         Assert.Equal("failed", msg.WakeState);
         Assert.Null(msg.WakeAttemptExpiresAtUtc);
     }
+
+    [Fact]
+    public async Task NonCooperativeWakeDispatcherIgnoringCancellationStillTimesOutBoundedly()
+    {
+        using var fx = new TempBusFixture();
+        var neverCompletes = new TaskCompletionSource<SwarmWakeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var store = fx.CreateStore(new SwarmBusStoreOptions
+        {
+            WakeDispatchTimeout = TimeSpan.FromMilliseconds(75),
+            WakeDispatcher = (_, _) => neverCompletes.Task
+        });
+
+        var result = await store.SendMessageAsync(new SwarmSendRequest(
+            From: "watchdog",
+            To: "codex",
+            Topic: "NonCooperativeTimeout",
+            Body: "Hung dispatcher test",
+            PrNumber: 603,
+            State: "hang:1",
+            Wake: true)).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal("failed", result.WakeState);
+        Assert.False(result.WakeResults![0].Ok);
+        Assert.Equal("timeout", result.WakeResults[0].Reason);
+
+        var stored = store.GetInbox("codex").Messages.Single(m => m.PrNumber == 603);
+        Assert.Equal("failed", stored.WakeState);
+        Assert.Null(stored.WakeAttemptExpiresAtUtc);
+    }
 }
