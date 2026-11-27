@@ -5,6 +5,13 @@ namespace MobaDev.SwarmBus.Core.Locking;
 /// </summary>
 public static class PathPatternMatcher
 {
+    private readonly record struct DpOverlapSpec(
+        int LengthA,
+        int LengthB,
+        Func<int, bool> IsWildA,
+        Func<int, bool> IsWildB,
+        Func<int, int, bool> PairMatches);
+
     /// <summary>
     /// Normalizes a workspace identifier, defaulting null/whitespace to <c>"default"</c>.
     /// </summary>
@@ -19,52 +26,12 @@ public static class PathPatternMatcher
     /// Normalizes a path pattern: converts <c>\</c> to <c>/</c>, lowercases, trims leading <c>./</c> and <c>/</c>,
     /// trims trailing <c>/</c>, and strips trailing <c>/*</c>.
     /// </summary>
-    public static string NormalizePath(string? rawPath)
-    {
-        var clean = (rawPath ?? string.Empty).Trim().Replace('\\', '/').ToLowerInvariant();
-        while (clean.Contains("//", StringComparison.Ordinal))
-        {
-            clean = clean.Replace("//", "/", StringComparison.Ordinal);
-        }
-
-        while (clean.StartsWith("./", StringComparison.Ordinal))
-        {
-            clean = clean[2..];
-        }
-
-        clean = clean.TrimStart('/').TrimEnd('/');
-        if (clean.EndsWith("/*", StringComparison.Ordinal))
-        {
-            clean = clean[..^2].TrimEnd('/');
-        }
-
-        return clean;
-    }
+    public static string NormalizePath(string? rawPath) => NormalizeCore(rawPath, lowercase: true);
 
     /// <summary>
     /// Normalizes a path for storage while preserving original casing and trimming trailing slashes / <c>/*</c>.
     /// </summary>
-    public static string CanonicalizeForStorage(string? rawPath)
-    {
-        var clean = (rawPath ?? string.Empty).Trim().Replace('\\', '/');
-        while (clean.Contains("//", StringComparison.Ordinal))
-        {
-            clean = clean.Replace("//", "/", StringComparison.Ordinal);
-        }
-
-        while (clean.StartsWith("./", StringComparison.Ordinal))
-        {
-            clean = clean[2..];
-        }
-
-        clean = clean.TrimStart('/').TrimEnd('/');
-        if (clean.EndsWith("/*", StringComparison.Ordinal))
-        {
-            clean = clean[..^2].TrimEnd('/');
-        }
-
-        return clean;
-    }
+    public static string CanonicalizeForStorage(string? rawPath) => NormalizeCore(rawPath, lowercase: false);
 
     /// <summary>
     /// Returns <c>true</c> when two locks in their respective workspaces overlap.
@@ -112,6 +79,33 @@ public static class PathPatternMatcher
         return SegmentArraysOverlap(segsA, segsB);
     }
 
+    private static string NormalizeCore(string? rawPath, bool lowercase)
+    {
+        var clean = (rawPath ?? string.Empty).Trim().Replace('\\', '/');
+        if (lowercase)
+        {
+            clean = clean.ToLowerInvariant();
+        }
+
+        while (clean.Contains("//", StringComparison.Ordinal))
+        {
+            clean = clean.Replace("//", "/", StringComparison.Ordinal);
+        }
+
+        while (clean.StartsWith("./", StringComparison.Ordinal))
+        {
+            clean = clean[2..];
+        }
+
+        clean = clean.TrimStart('/').TrimEnd('/');
+        if (clean.EndsWith("/*", StringComparison.Ordinal))
+        {
+            clean = clean[..^2].TrimEnd('/');
+        }
+
+        return clean;
+    }
+
     private static string[] ToPatternSegments(string normalizedPath, bool hasWildcard)
     {
         var parts = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
@@ -127,46 +121,13 @@ public static class PathPatternMatcher
         return expanded;
     }
 
-    private static bool SegmentArraysOverlap(string[] segsA, string[] segsB)
-    {
-        var n = segsA.Length;
-        var m = segsB.Length;
-        var dp = new bool[n + 1, m + 1];
-        dp[n, m] = true;
-
-        for (var i = n; i >= 0; i--)
-        {
-            for (var j = m; j >= 0; j--)
-            {
-                if (i == n && j == m)
-                {
-                    continue;
-                }
-
-                var aIsStarStar = i < n && string.Equals(segsA[i], "**", StringComparison.Ordinal);
-                var bIsStarStar = j < m && string.Equals(segsB[j], "**", StringComparison.Ordinal);
-
-                if (aIsStarStar && bIsStarStar)
-                {
-                    dp[i, j] = dp[i + 1, j] || dp[i, j + 1];
-                }
-                else if (aIsStarStar)
-                {
-                    dp[i, j] = dp[i + 1, j] || (j < m && dp[i, j + 1]);
-                }
-                else if (bIsStarStar)
-                {
-                    dp[i, j] = dp[i, j + 1] || (i < n && dp[i + 1, j]);
-                }
-                else if (i < n && j < m && SingleSegmentGlobsOverlap(segsA[i], segsB[j]))
-                {
-                    dp[i, j] = dp[i + 1, j + 1];
-                }
-            }
-        }
-
-        return dp[0, 0];
-    }
+    private static bool SegmentArraysOverlap(string[] segsA, string[] segsB) =>
+        DpGridOverlap(new DpOverlapSpec(
+            LengthA: segsA.Length,
+            LengthB: segsB.Length,
+            IsWildA: i => string.Equals(segsA[i], "**", StringComparison.Ordinal),
+            IsWildB: j => string.Equals(segsB[j], "**", StringComparison.Ordinal),
+            PairMatches: (i, j) => SingleSegmentGlobsOverlap(segsA[i], segsB[j])));
 
     private static bool SingleSegmentGlobsOverlap(string segA, string segB)
     {
@@ -180,42 +141,53 @@ public static class PathPatternMatcher
             return false;
         }
 
-        var n = segA.Length;
-        var m = segB.Length;
-        var dp = new bool[n + 1, m + 1];
-        dp[n, m] = true;
+        return DpGridOverlap(new DpOverlapSpec(
+            LengthA: segA.Length,
+            LengthB: segB.Length,
+            IsWildA: i => segA[i] == '*',
+            IsWildB: j => segB[j] == '*',
+            PairMatches: (i, j) => segA[i] == segB[j]));
+    }
 
-        for (var i = n; i >= 0; i--)
+    private static bool DpGridOverlap(DpOverlapSpec spec)
+    {
+        var dp = new bool[spec.LengthA + 1, spec.LengthB + 1];
+        dp[spec.LengthA, spec.LengthB] = true;
+
+        for (var i = spec.LengthA; i >= 0; i--)
         {
-            for (var j = m; j >= 0; j--)
+            for (var j = spec.LengthB; j >= 0; j--)
             {
-                if (i == n && j == m)
+                if (i < spec.LengthA || j < spec.LengthB)
                 {
-                    continue;
-                }
-
-                var aStar = i < n && segA[i] == '*';
-                var bStar = j < m && segB[j] == '*';
-
-                if (aStar && bStar)
-                {
-                    dp[i, j] = dp[i + 1, j] || dp[i, j + 1];
-                }
-                else if (aStar)
-                {
-                    dp[i, j] = dp[i + 1, j] || (j < m && dp[i, j + 1]);
-                }
-                else if (bStar)
-                {
-                    dp[i, j] = dp[i, j + 1] || (i < n && dp[i + 1, j]);
-                }
-                else if (i < n && j < m && segA[i] == segB[j])
-                {
-                    dp[i, j] = dp[i + 1, j + 1];
+                    dp[i, j] = EvaluateDpCell(dp, i, j, spec);
                 }
             }
         }
 
         return dp[0, 0];
+    }
+
+    private static bool EvaluateDpCell(bool[,] dp, int i, int j, DpOverlapSpec spec)
+    {
+        var aWild = i < spec.LengthA && spec.IsWildA(i);
+        var bWild = j < spec.LengthB && spec.IsWildB(j);
+
+        if (aWild && bWild)
+        {
+            return dp[i + 1, j] || dp[i, j + 1];
+        }
+
+        if (aWild)
+        {
+            return dp[i + 1, j] || (j < spec.LengthB && dp[i, j + 1]);
+        }
+
+        if (bWild)
+        {
+            return dp[i, j + 1] || (i < spec.LengthA && dp[i + 1, j]);
+        }
+
+        return i < spec.LengthA && j < spec.LengthB && spec.PairMatches(i, j) && dp[i + 1, j + 1];
     }
 }
