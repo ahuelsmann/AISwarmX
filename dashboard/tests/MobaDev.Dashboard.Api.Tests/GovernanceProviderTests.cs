@@ -118,6 +118,7 @@ public sealed class GovernanceProviderTests
         Assert.Equal(1, result.DriftCount);
         Assert.Equal(1, result.MissingCount);
         Assert.Single(result.Skills);
+        Assert.Equal("AISwarmX", result.Skills[0].SourceRepo);
 
         var syncedRule = Assert.Single(result.Agents, a => a.FileName == "mobaflow-agent-network.md");
         Assert.Equal("synced", syncedRule.SyncStatus);
@@ -175,5 +176,46 @@ public sealed class GovernanceProviderTests
             provider.GetRuleDiffAsync(paths, "Antigravity", "agent", "../secret.md", CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentException>(() =>
             provider.GetRuleDiffAsync(paths, "Antigravity", "agent", "sub/file.md", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GetGovernanceAsync_PrefersDocsDeveloperAiDevelopmentOverLegacyDocsPath()
+    {
+        using var fx = new TempDashboardFixture();
+
+        var legacyDocsDir = Path.Combine(fx.MobaFlowPath, "docs");
+        var developerDocsDir = Path.Combine(legacyDocsDir, "developer");
+        Directory.CreateDirectory(developerDocsDir);
+
+        // Legacy path has outdated model name; RF-30 docs/developer path must take precedence.
+        await File.WriteAllTextAsync(Path.Combine(legacyDocsDir, "AI-DEVELOPMENT.md"), """
+            ## Capability profiles and models
+
+            | Profile | Active models and clients | Strengths and typical assignments |
+            | --- | --- | --- |
+            | `P1` Legacy | **Legacy Model** | Legacy |
+            """);
+
+        await File.WriteAllTextAsync(Path.Combine(developerDocsDir, "AI-DEVELOPMENT.md"), """
+            ## Capability profiles and models
+
+            | Profile | Active models and clients | Strengths and typical assignments |
+            | --- | --- | --- |
+            | `P1` Depth, Architecture & Safety | **Opus 5.5** | Deep architecture and safety |
+            | `P2` Repo, Build & Fact Precision | **GPT-6.2 Sol** | Build and CI precision |
+            """);
+
+        var provider = new GovernanceProvider();
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
+            fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
+
+        var result = await provider.GetGovernanceAsync(paths, CancellationToken.None);
+
+        Assert.Equal("ok", result.Source.Status);
+        Assert.Equal(2, result.Profiles.Count);
+        Assert.Contains(result.Profiles, p => p.Profile == "P1" && p.Models.Contains("Opus 5.5", StringComparison.Ordinal));
+        Assert.Contains(result.Profiles, p => p.Profile == "P2" && p.Models.Contains("GPT-6.2 Sol", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Profiles, p => p.Models.Contains("Legacy Model", StringComparison.Ordinal));
     }
 }

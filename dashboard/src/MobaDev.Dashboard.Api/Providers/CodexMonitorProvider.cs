@@ -10,16 +10,17 @@ using MobaDev.Dashboard.Api.Security;
 namespace MobaDev.Dashboard.Api.Providers;
 
 /// <summary>
-/// Reads standing MOBAi ChatGPT Codex (formerly GPT Head / Codex Monitor) metadata read-only from
+/// Reads standing AiSwarmX ChatGPT Codex (formerly MOBAi ChatGPT Codex / GPT Head / Codex Monitor) metadata read-only from
 /// ~/.codex/state_5.sqlite, automation.toml, and session rollout tail telemetry (usage/rate-limit signals only).
 /// </summary>
 public sealed partial class CodexMonitorProvider
 {
     private const int TailReadBytes = 64 * 1024;
     private const string MonitorId = "codex-monitor";
-    private const string DisplayName = "MOBAi ChatGPT Codex";
+    private const string DisplayName = "AiSwarmX ChatGPT Codex";
     private const string LegacyHeadDisplayName = "GPT Head";
     private const string LegacyMonitorDisplayName = "Codex Monitor";
+    private const string AiSwarmXNamespacePrefix = "AiSwarmX ";
     private const string MobaNamespacePrefix = "MOBAi ";
     private const string MobaAltPrefix = "MOBA ";
     private const string Role = "Technical Director & CPM";
@@ -113,7 +114,7 @@ public sealed partial class CodexMonitorProvider
             var activeSubAgentsByModel = CountThreadsByModel(activeSubThreads, selected.Model ?? "gpt-6.2-sol");
 
             var notice = standingThreads.Count > 1
-                ? $"{standingThreads.Count} non-archived MOBAi Codex threads active (target: 1)."
+                ? $"{standingThreads.Count} non-archived AiSwarmX Codex threads active (target: 1)."
                 : null;
             if (!string.IsNullOrEmpty(rateLimitResetLabel))
             {
@@ -164,7 +165,8 @@ public sealed partial class CodexMonitorProvider
             return false;
         }
 
-        return trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
+        return trimmed.StartsWith(AiSwarmXNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
                trimmed.StartsWith(MobaAltPrefix, StringComparison.OrdinalIgnoreCase) ||
                string.Equals(trimmed, LegacyHeadDisplayName, StringComparison.OrdinalIgnoreCase) ||
                string.Equals(trimmed, LegacyMonitorDisplayName, StringComparison.OrdinalIgnoreCase);
@@ -192,7 +194,16 @@ public sealed partial class CodexMonitorProvider
 
         if (string.Equals(trimmed, DisplayName, StringComparison.OrdinalIgnoreCase))
         {
-            return 5;
+            return 7;
+        }
+
+        if (trimmed.StartsWith(AiSwarmXNamespacePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed.Contains("ChatGPT", StringComparison.OrdinalIgnoreCase) ||
+                   trimmed.Contains("Codex", StringComparison.OrdinalIgnoreCase) ||
+                   trimmed.Contains("GPT", StringComparison.OrdinalIgnoreCase)
+                ? 6
+                : 5;
         }
 
         if (trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase))

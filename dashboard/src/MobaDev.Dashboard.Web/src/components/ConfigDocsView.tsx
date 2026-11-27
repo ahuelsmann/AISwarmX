@@ -248,7 +248,7 @@ export function ConfigDocsView({
   }, [catalog, filterText]);
 
   const activeDoc = selectedPath ? contentCache[selectedPath] : undefined;
-  const headingLabel = 'MOBAdev Config Files';
+  const headingLabel = 'AISwarmX Config Files';
 
   return (
     <div className={styles.layout}>

@@ -9,16 +9,17 @@ using MobaDev.Dashboard.Api.Security;
 namespace MobaDev.Dashboard.Api.Providers;
 
 /// <summary>
-/// Reads standing MOBAi Antigravity Root Head metadata (MOBAi Antigravity Gemini &amp; MOBAi Antigravity Opus)
+/// Reads standing AiSwarmX Antigravity Root Head metadata (AiSwarmX Antigravity Gemini &amp; AiSwarmX Antigravity Opus)
 /// read-only from ~/.gemini/antigravity/conversation_summaries.db and transcript tail model tags.
 /// </summary>
 public sealed partial class AntigravityMonitorProvider
 {
     private const int TailReadBytes = 512 * 1024;
     private const string ArgonMonitorId = "antigravity-monitor";
-    private const string ArgonDisplayName = "MOBAi Antigravity Gemini";
+    private const string ArgonDisplayName = "AiSwarmX Antigravity Gemini";
     private const string LegacyArgonHeadName = "Argon Head";
     private const string LegacyDisplayName = "Antigravity Monitor";
+    private const string AiSwarmXNamespacePrefix = "AiSwarmX ";
     private const string MobaNamespacePrefix = "MOBAi ";
     private const string MobaAltPrefix = "MOBA ";
     private const string ArgonRole = "Head of AI Strategy";
@@ -27,7 +28,8 @@ public sealed partial class AntigravityMonitorProvider
     private const string LegacyDesktopModel = "Orchestrator (Neon)";
 
     private const string OpusMonitorId = "antigravity-opus-head";
-    private const string OpusDisplayName = "MOBAi Antigravity Opus";
+    private const string OpusDisplayName = "AiSwarmX Antigravity Opus";
+    private const string LegacyMobaiOpusDisplayName = "MOBAi Antigravity Opus";
     private const string LegacyOpusHeadName = "Opus Head";
     private const string OpusRole = "Acting COO & Opus Orchestrator";
     private const string OpusProfile = "P1";
@@ -119,7 +121,7 @@ public sealed partial class AntigravityMonitorProvider
 
             var extraSessionCount = Math.Max(0, summaryData.MobaDesktopConversations.Count - (argonSelected is not null ? 1 : 0) - (opusSelected is not null ? 1 : 0));
             var extraNotice = summaryData.MobaDesktopConversations.Count > 2
-                ? $"{summaryData.MobaDesktopConversations.Count} MOBAi Antigravity sessions found in summaries (target: 2: {ArgonDisplayName} + {OpusDisplayName})."
+                ? $"{summaryData.MobaDesktopConversations.Count} AiSwarmX Antigravity sessions found in summaries (target: 2: {ArgonDisplayName} + {OpusDisplayName})."
                 : null;
 
             var candidateIds = BuildCandidateRootIds(argonSelected?.Id, opusSelected?.Id);
@@ -873,7 +875,8 @@ public sealed partial class AntigravityMonitorProvider
             return false;
         }
 
-        return trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
+        return trimmed.StartsWith(AiSwarmXNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
                trimmed.StartsWith(MobaAltPrefix, StringComparison.OrdinalIgnoreCase) ||
                string.Equals(trimmed, LegacyArgonHeadName, StringComparison.OrdinalIgnoreCase) ||
                string.Equals(trimmed, LegacyDisplayName, StringComparison.OrdinalIgnoreCase) ||
@@ -885,7 +888,8 @@ public sealed partial class AntigravityMonitorProvider
         var trimmed = title.Trim();
         return string.Equals(trimmed, OpusDisplayName, StringComparison.OrdinalIgnoreCase) ||
                string.Equals(trimmed, LegacyOpusHeadName, StringComparison.OrdinalIgnoreCase) ||
-               ((trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
+               ((trimmed.StartsWith(AiSwarmXNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
+                 trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
                  trimmed.StartsWith(MobaAltPrefix, StringComparison.OrdinalIgnoreCase)) &&
                 trimmed.Contains("Opus", StringComparison.OrdinalIgnoreCase));
     }
@@ -894,6 +898,16 @@ public sealed partial class AntigravityMonitorProvider
     {
         var trimmed = title.Trim();
         if (string.Equals(trimmed, OpusDisplayName, StringComparison.OrdinalIgnoreCase))
+        {
+            return 6;
+        }
+
+        if (trimmed.StartsWith(AiSwarmXNamespacePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return 5;
+        }
+
+        if (string.Equals(trimmed, LegacyMobaiOpusDisplayName, StringComparison.OrdinalIgnoreCase))
         {
             return 4;
         }
@@ -916,7 +930,17 @@ public sealed partial class AntigravityMonitorProvider
         var trimmed = title.Trim();
         if (string.Equals(trimmed, ArgonDisplayName, StringComparison.OrdinalIgnoreCase))
         {
-            return 5;
+            return 7;
+        }
+
+        if (trimmed.StartsWith(AiSwarmXNamespacePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed.Contains("Gemini", StringComparison.OrdinalIgnoreCase) ||
+                   trimmed.Contains("Carbon", StringComparison.OrdinalIgnoreCase) ||
+                   trimmed.Contains("Argon", StringComparison.OrdinalIgnoreCase) ||
+                   trimmed.Contains("Neon", StringComparison.OrdinalIgnoreCase)
+                ? 6
+                : 5;
         }
 
         if (trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase))

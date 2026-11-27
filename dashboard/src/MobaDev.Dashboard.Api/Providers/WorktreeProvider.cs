@@ -113,9 +113,22 @@ public sealed class WorktreeProvider
             .GroupBy(p => p.Branch, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First().Number, StringComparer.OrdinalIgnoreCase);
 
-        var flowLocalTask = ReadLocalBranchesAsync(paths.MobaFlowRepoPath, "MOBAflow", openPrByBranch, cancellationToken);
-        var flowRemoteTask = ReadRemoteOriginBranchesAsync(paths.MobaFlowRepoPath, "MOBAflow", openPrByBranch, cancellationToken);
-        var devLocalTask = ReadLocalBranchesAsync(paths.MobaDevRepoPath, "MOBAdev", openPrByBranch: null, cancellationToken);
+        var pathComparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var sameRepo = !string.IsNullOrWhiteSpace(paths.MobaFlowRepoPath)
+            && !string.IsNullOrWhiteSpace(paths.MobaDevRepoPath)
+            && string.Equals(
+                Path.GetFullPath(paths.MobaFlowRepoPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                Path.GetFullPath(paths.MobaDevRepoPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                pathComparison);
+
+        var primaryLabel = sameRepo ? "AISwarmX" : "MOBAflow";
+        var flowLocalTask = ReadLocalBranchesAsync(paths.MobaFlowRepoPath, primaryLabel, openPrByBranch, cancellationToken);
+        var flowRemoteTask = ReadRemoteOriginBranchesAsync(paths.MobaFlowRepoPath, primaryLabel, openPrByBranch, cancellationToken);
+        var devLocalTask = sameRepo
+            ? Task.FromResult(new List<BranchHygieneInfo>())
+            : ReadLocalBranchesAsync(paths.MobaDevRepoPath, "AISwarmX", openPrByBranch: null, cancellationToken);
 
         await Task.WhenAll(flowLocalTask, flowRemoteTask, devLocalTask).ConfigureAwait(false);
 

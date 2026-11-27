@@ -764,7 +764,7 @@ public sealed class PipelineAndWorktreeProviderTests
         Assert.Equal("stale", goneLocal.Status);
         Assert.True(goneLocal.UpstreamGone);
 
-        var devStale = Assert.Single(branches, b => b.Repository == "MOBAdev" && b.Name == "ui/old-dev-branch");
+        var devStale = Assert.Single(branches, b => b.Repository == "AISwarmX" && b.Name == "ui/old-dev-branch");
         Assert.Equal("stale", devStale.Status);
         Assert.True(devStale.UpstreamGone);
 
@@ -887,6 +887,306 @@ public sealed class PipelineAndWorktreeProviderTests
         var snapshot = await snapshotService.GetSnapshotAsync(forceRefresh: true, CancellationToken.None);
         Assert.Equal(1, snapshot.Hygiene.StaleWorktreeCount);
         Assert.Equal(1, snapshot.WarningCount);
+    }
+
+    [Theory]
+    [InlineData("Pull requests are disabled for this repository.", null)]
+    [InlineData("HTTP 410: Gone (https://api.github.com/repos/ahuelsmann/MOBAdev/pulls)", null)]
+    [InlineData("HTTP 404: Not Found (https://api.github.com/repos/ahuelsmann/MOBAdev/pulls)", "false")]
+    public async Task PipelineProvider_ReturnsOkWithActiveIssuesWhenPullRequestsAreDisabled(
+        string prDisabledStdErr,
+        string? metadataHasPullRequests)
+    {
+        var graphQlJson = """
+            {
+              "data": {
+                "user": {
+                  "projectV2": {
+                    "items": {
+                      "nodes": [
+                        {
+                          "fieldValues": {
+                            "nodes": [
+                              { "name": "Ready", "field": { "name": "Status" } },
+                              { "name": "M", "field": { "name": "Risk class" } }
+                            ]
+                          },
+                          "content": {
+                            "__typename": "Issue",
+                            "number": 57,
+                            "title": "Workspace configuration contract",
+                            "url": "https://github.com/ahuelsmann/MOBAdev/issues/57",
+                            "state": "OPEN",
+                            "updatedAt": "2026-11-27T09:00:00Z"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        var runner = new FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("pr"))
+            {
+                return new CommandResult(1, string.Empty, prDisabledStdErr);
+            }
+
+            if (fileName == "gh" && args.Contains("api") && args.Contains("repos/ahuelsmann/MOBAdev"))
+            {
+                return metadataHasPullRequests is null
+                    ? new CommandResult(1, string.Empty, "unexpected metadata query")
+                    : new CommandResult(0, metadataHasPullRequests, string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("graphql"))
+            {
+                return new CommandResult(0, graphQlJson, string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("issue"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            return new CommandResult(1, string.Empty, "unexpected");
+        });
+
+        var options = new DashboardOptions
+        {
+            GitHubRepository = "ahuelsmann/MOBAdev",
+            GitHubProjectOwner = "ahuelsmann",
+            GitHubProjectNumber = 1
+        };
+
+        var provider = new PipelineProvider(runner);
+        var result = await provider.GetPipelineAsync(options, CancellationToken.None);
+
+        Assert.Equal("ok", result.Source.Status);
+        Assert.Contains("Pull requests are disabled", result.Source.Notice, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(result.PullRequests);
+        Assert.Empty(result.RecentlyMerged);
+        Assert.True(result.ProjectBoardAvailable);
+        var issue = Assert.Single(result.ActiveIssues);
+        Assert.Equal(57, issue.Number);
+        Assert.Equal("Ready", issue.KanbanStatus);
+    }
+
+    [Theory]
+    [InlineData(0, "true")]
+    [InlineData(1, "HTTP 404: Not Found")]
+    public async Task PipelineProvider_TreatsAmbiguous404OnPullsAsUnavailableWhenMetadataDoesNotConfirmDisabled(
+        int metadataExitCode,
+        string metadataOutput)
+    {
+        var runner = new FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("pr"))
+            {
+                return new CommandResult(1, string.Empty, "HTTP 404: Not Found (https://api.github.com/repos/ahuelsmann/typo-repo/pulls)");
+            }
+
+            if (fileName == "gh" && args.Contains("api") && args.Contains("repos/ahuelsmann/typo-repo"))
+            {
+                return metadataExitCode == 0
+                    ? new CommandResult(0, metadataOutput, string.Empty)
+                    : new CommandResult(metadataExitCode, string.Empty, metadataOutput);
+            }
+
+            if (fileName == "gh" && (args.Contains("graphql") || args.Contains("issue")))
+            {
+                return new CommandResult(1, string.Empty, "not found");
+            }
+
+            return new CommandResult(1, string.Empty, "unexpected");
+        });
+
+        var options = new DashboardOptions
+        {
+            GitHubRepository = "ahuelsmann/typo-repo",
+            GitHubProjectOwner = "ahuelsmann",
+            GitHubProjectNumber = 1
+        };
+
+        var provider = new PipelineProvider(runner);
+        var result = await provider.GetPipelineAsync(options, CancellationToken.None);
+
+        Assert.Equal("unavailable", result.Source.Status);
+        Assert.Equal("ahuelsmann/typo-repo", result.Repository);
+        Assert.Empty(result.PullRequests);
+        Assert.Empty(result.ActiveIssues);
+        Assert.False(result.ProjectBoardAvailable);
+    }
+
+    [Fact]
+    public async Task PipelineProvider_AndSnapshotService_IsolateCachesAcrossWorkspaceSwitches()
+    {
+        using var fx = new TempDashboardFixture();
+        var workspaceA = new DashboardOptions
+        {
+            MobaDevRepoPath = fx.MobaDevPath,
+            MobaFlowRepoPath = fx.MobaFlowPath,
+            ClaudeHomePath = fx.ClaudeHomePath,
+            CodexHomePath = fx.CodexHomePath,
+            AntigravityHomePath = fx.AntigravityHomePath,
+            GeminiConfigPath = fx.GeminiConfigPath,
+            SwarmBusDbPath = Path.Combine(fx.RootPath, "swarm-bus.db"),
+            GitHubRepository = "ahuelsmann/MOBAflow",
+            GitHubProjectOwner = "ahuelsmann",
+            GitHubProjectNumber = 1,
+            LocalCacheTtlSeconds = 60,
+            GitHubCacheTtlSeconds = 60
+        };
+
+        var workspaceB = new DashboardOptions
+        {
+            MobaDevRepoPath = fx.MobaDevPath,
+            MobaFlowRepoPath = fx.MobaDevPath,
+            ClaudeHomePath = fx.ClaudeHomePath,
+            CodexHomePath = fx.CodexHomePath,
+            AntigravityHomePath = fx.AntigravityHomePath,
+            GeminiConfigPath = fx.GeminiConfigPath,
+            SwarmBusDbPath = Path.Combine(fx.RootPath, "swarm-bus.db"),
+            GitHubRepository = "ahuelsmann/MOBAdev",
+            GitHubProjectOwner = "ahuelsmann",
+            GitHubProjectNumber = 2,
+            LocalCacheTtlSeconds = 60,
+            GitHubCacheTtlSeconds = 60
+        };
+
+        var flowPrJson = """
+            [
+              {
+                "number": 492,
+                "title": "feat: flow PR",
+                "url": "https://github.com/ahuelsmann/MOBAflow/pull/492",
+                "headRefName": "codex/flow-pr",
+                "isDraft": false,
+                "mergeStateStatus": "CLEAN",
+                "autoMergeRequest": null,
+                "updatedAt": "2026-11-27T08:00:00Z",
+                "body": "",
+                "statusCheckRollup": []
+              }
+            ]
+            """;
+
+        var runner = new FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("ahuelsmann/MOBAflow"))
+            {
+                return args.Contains("open")
+                    ? new CommandResult(0, flowPrJson, string.Empty)
+                    : new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("ahuelsmann/MOBAdev"))
+            {
+                return new CommandResult(1, string.Empty, "network offline");
+            }
+
+            if (fileName == "gh" && args.Contains("issue"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("graphql"))
+            {
+                return new CommandResult(1, string.Empty, "missing scope");
+            }
+
+            if (fileName == "git")
+            {
+                return new CommandResult(0, string.Empty, string.Empty);
+            }
+
+            return new CommandResult(1, string.Empty, "unexpected");
+        });
+
+        var optionsMonitor = new MutableOptionsMonitor<DashboardOptions>(workspaceA);
+        var snapshotService = new MobaDev.Dashboard.Api.Services.DashboardSnapshotService(
+            optionsMonitor,
+            new ClaudeMonitorProvider(),
+            new CodexMonitorProvider(),
+            new AntigravityMonitorProvider(),
+            new GovernanceProvider(),
+            new ConfigDocsProvider(),
+            new PipelineProvider(runner),
+            new WorktreeProvider(runner),
+            new SwarmBusProvider());
+
+        var firstSnapshot = await snapshotService.GetSnapshotAsync(forceRefresh: false, CancellationToken.None);
+        Assert.Equal("ahuelsmann/MOBAflow", firstSnapshot.Pipeline.Repository);
+        Assert.Equal("ok", firstSnapshot.Pipeline.Source.Status);
+        Assert.Single(firstSnapshot.Pipeline.PullRequests);
+
+        // Switch workspace dynamically while forceRefresh is false and GitHub fails for the new workspace.
+        optionsMonitor.Set(workspaceB);
+        var switchedSnapshot = await snapshotService.GetSnapshotAsync(forceRefresh: false, CancellationToken.None);
+
+        Assert.Equal("ahuelsmann/MOBAdev", switchedSnapshot.Pipeline.Repository);
+        Assert.Equal("unavailable", switchedSnapshot.Pipeline.Source.Status);
+        Assert.False(switchedSnapshot.Pipeline.Source.FromCache);
+        Assert.Empty(switchedSnapshot.Pipeline.PullRequests);
+    }
+
+    [Fact]
+    public async Task WorktreeProvider_WhenWorkspaceMatchesInstallationPath_ScansOnceAsAISwarmXWithoutDuplicates()
+    {
+        var tempRoot = Directory.CreateTempSubdirectory("aiswarmx-same-repo-");
+        try
+        {
+            var gitCalls = 0;
+            var runner = new FakeCommandRunner((_, args) =>
+            {
+                Interlocked.Increment(ref gitCalls);
+                if (args.Any(a => a.Contains("refs/heads", StringComparison.Ordinal)))
+                {
+                    return new CommandResult(0, "main|\nfeature/stale|[gone]", string.Empty);
+                }
+
+                if (args.Any(a => a.Contains("refs/remotes/origin", StringComparison.Ordinal)))
+                {
+                    return new CommandResult(0, "origin/HEAD\norigin/main\norigin/feature/old", string.Empty);
+                }
+
+                return new CommandResult(0, string.Empty, string.Empty);
+            });
+
+            var provider = new WorktreeProvider(runner);
+            var paths = new DashboardOptions
+            {
+                MobaFlowRepoPath = tempRoot.FullName,
+                MobaDevRepoPath = tempRoot.FullName + Path.DirectorySeparatorChar
+            }.ResolvePaths();
+
+            var (branches, staleLocalCount, staleRemoteCount) =
+                await provider.GetBranchHygieneAsync(paths, [], CancellationToken.None);
+
+            Assert.Equal(2, gitCalls);
+            Assert.Equal(1, staleLocalCount);
+            Assert.Equal(1, staleRemoteCount);
+            Assert.Equal(2, branches.Count);
+            Assert.All(branches, b => Assert.Equal("AISwarmX", b.Repository));
+            Assert.Single(branches, b => b.Scope == "local" && b.Name == "feature/stale");
+            Assert.Single(branches, b => b.Scope == "remote" && b.Name == "feature/old");
+        }
+        finally
+        {
+            tempRoot.Delete(recursive: true);
+        }
+    }
+
+    private sealed class MutableOptionsMonitor<T>(T value) : Microsoft.Extensions.Options.IOptionsMonitor<T>
+    {
+        private T _current = value;
+        public T CurrentValue => _current;
+        public T Get(string? name) => _current;
+        public void Set(T next) => _current = next;
+        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 
     private sealed class StaticOptionsMonitor<T>(T value) : Microsoft.Extensions.Options.IOptionsMonitor<T>

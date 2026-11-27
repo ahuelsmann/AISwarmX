@@ -63,7 +63,7 @@ function contrastRatio(rgbA: Rgb, rgbB: Rgb): number {
   return (bright + 0.05) / (dark + 0.05);
 }
 
-describe('MOBAdev 2-Axis Color System & Accessibility Gates', () => {
+describe('AISwarmX 2-Axis Color System & Accessibility Gates', () => {
   it('meets WCAG AA text (>= 4.5:1) and UI (>= 3.0:1) contrast across all Light & Dark surfaces', () => {
     const failures: string[] = [];
 

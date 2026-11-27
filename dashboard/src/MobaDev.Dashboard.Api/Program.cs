@@ -7,15 +7,21 @@ using MobaDev.Dashboard.Api.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 var dashboardSection = builder.Configuration.GetSection(DashboardOptions.SectionName);
-var configuredOptions = dashboardSection.Get<DashboardOptions>() ?? new DashboardOptions();
-var safeBindUrl = LoopbackBindingGuard.EnsureLoopbackUrl(configuredOptions.BindUrl);
-
 if (!string.Equals(builder.Environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase))
 {
+    var startupExplicitKeys = DashboardOptions.CaptureExplicitOverrideKeys(builder.Configuration);
+    var startupOptions = (dashboardSection.Get<DashboardOptions>() ?? new DashboardOptions())
+        .ResolveWithSwarmConfig(explicitOverrideKeys: startupExplicitKeys);
+    var safeBindUrl = LoopbackBindingGuard.EnsureLoopbackUrl(startupOptions.BindUrl);
     builder.WebHost.UseUrls(safeBindUrl);
 }
 
 builder.Services.Configure<DashboardOptions>(dashboardSection);
+builder.Services.Configure<DashboardOptions>(options =>
+{
+    var explicitKeys = DashboardOptions.CaptureExplicitOverrideKeys(builder.Configuration);
+    options.ApplySwarmConfigInPlace(explicitOverrideKeys: explicitKeys);
+});
 builder.Services.ConfigureHttpJsonOptions(json =>
 {
     json.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
@@ -51,7 +57,11 @@ var app = builder.Build();
 
 app.UseCors("LocalFrontendOnly");
 
-var resolvedPaths = configuredOptions.ResolvePaths();
+var effectiveOptions = app.Services
+    .GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<DashboardOptions>>()
+    .CurrentValue;
+LoopbackBindingGuard.EnsureLoopbackUrl(effectiveOptions.BindUrl);
+var resolvedPaths = effectiveOptions.ResolvePaths();
 if (!string.IsNullOrWhiteSpace(resolvedPaths.StaticWebRootPath) &&
     Directory.Exists(resolvedPaths.StaticWebRootPath))
 {

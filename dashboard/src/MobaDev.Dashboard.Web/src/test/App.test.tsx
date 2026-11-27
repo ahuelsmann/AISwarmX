@@ -7,6 +7,7 @@ import { rankPullRequestsForMain } from '../components/MainLandingTickerCard';
 import {
   clearMonitorGridCookie,
   formatQuotaPauseSuffix,
+  LEGACY_MONITOR_GRID_COOKIE,
   MONITOR_GRID_COOKIE,
   readMonitorGridCookie
 } from '../components/MonitorCards';
@@ -48,7 +49,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
       monitors: [
         {
           id: 'claude-monitor',
-          displayName: 'MOBAi Claude Opus',
+          displayName: 'AiSwarmX Claude Opus',
           role: 'Chief Operating Officer (COO)',
           profile: 'P1',
           tool: 'Claude Code',
@@ -63,7 +64,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
         },
         {
           id: 'codex-monitor',
-          displayName: 'MOBAi ChatGPT Codex',
+          displayName: 'AiSwarmX ChatGPT Codex',
           role: 'Technical Director & CPM',
           profile: 'P2',
           tool: 'ChatGPT Codex',
@@ -78,7 +79,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
         },
         {
           id: 'antigravity-monitor',
-          displayName: 'MOBAi Antigravity Gemini',
+          displayName: 'AiSwarmX Antigravity Gemini',
           role: 'Head of AI Strategy',
           profile: 'P3',
           tool: 'Antigravity',
@@ -93,7 +94,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
         },
         {
           id: 'antigravity-opus-head',
-          displayName: 'MOBAi Antigravity Opus',
+          displayName: 'AiSwarmX Antigravity Opus',
           role: 'Acting COO & Opus Orchestrator',
           profile: 'P1',
           tool: 'Antigravity',
@@ -169,7 +170,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
         {
           name: 'mobaflow-delivery-handoff',
           description: 'Structured delivery handoff',
-          sourceRepo: 'MOBAdev',
+          sourceRepo: 'AISwarmX',
           relativePath: 'skills/mobaflow-delivery-handoff/SKILL.md'
         }
       ],
@@ -447,7 +448,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           linkedPrNumber: null
         },
         {
-          repository: 'MOBAdev',
+          repository: 'AISwarmX',
           name: 'ui/old-dev',
           scope: 'local',
           status: 'stale',
@@ -498,27 +499,27 @@ function createDiffFixture(): RuleDiffResponse {
 function stubDashboardFetch(snapshot = createSnapshotFixture()) {
   const nowIso = new Date().toISOString();
 
-  const mobaDevCatalog: ConfigDocsCatalogResponse = {
+  const aiswarmxCatalog: ConfigDocsCatalogResponse = {
     generatedAtUtc: nowIso,
-    scope: 'mobadev',
-    repository: 'ahuelsmann/MOBAdev',
+    scope: 'aiswarmx',
+    repository: 'ahuelsmann/AISwarmX',
     source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false },
     files: [
       {
-        scope: 'mobadev',
+        scope: 'aiswarmx',
         relativePath: 'manifest.md',
         fileName: 'manifest.md',
         group: 'Core',
-        repository: 'ahuelsmann/MOBAdev',
+        repository: 'ahuelsmann/AISwarmX',
         sizeBytes: 120,
         lastModifiedUtc: nowIso
       },
       {
-        scope: 'mobadev',
+        scope: 'aiswarmx',
         relativePath: 'docs/delivery-workflow.md',
         fileName: 'delivery-workflow.md',
         group: 'Docs',
-        repository: 'ahuelsmann/MOBAdev',
+        repository: 'ahuelsmann/AISwarmX',
         sizeBytes: 240,
         lastModifiedUtc: nowIso
       }
@@ -526,24 +527,24 @@ function stubDashboardFetch(snapshot = createSnapshotFixture()) {
   };
 
   const docContents: Record<string, ConfigDocContentResponse> = {
-    'mobadev::manifest.md': {
-      scope: 'mobadev',
+    'aiswarmx::manifest.md': {
+      scope: 'aiswarmx',
       relativePath: 'manifest.md',
       fileName: 'manifest.md',
       group: 'Core',
-      repository: 'ahuelsmann/MOBAdev',
+      repository: 'ahuelsmann/AISwarmX',
       sizeBytes: 120,
       lineCount: 4,
       lastModifiedUtc: nowIso,
       truncated: false,
-      content: '# MOBAdev Manifest\n\nCentral configuration baseline for `MOBAdev`.'
+      content: '# AISwarmX Manifest\n\nCentral configuration baseline for `AISwarmX`.'
     },
-    'mobadev::docs/delivery-workflow.md': {
-      scope: 'mobadev',
+    'aiswarmx::docs/delivery-workflow.md': {
+      scope: 'aiswarmx',
       relativePath: 'docs/delivery-workflow.md',
       fileName: 'delivery-workflow.md',
       group: 'Docs',
-      repository: 'ahuelsmann/MOBAdev',
+      repository: 'ahuelsmann/AISwarmX',
       sizeBytes: 240,
       lineCount: 3,
       lastModifiedUtc: nowIso,
@@ -574,7 +575,7 @@ function stubDashboardFetch(snapshot = createSnapshotFixture()) {
       if (url.startsWith('/api/docs')) {
         return {
           ok: true,
-          json: async () => mobaDevCatalog
+          json: async () => aiswarmxCatalog
         };
       }
 
@@ -583,7 +584,7 @@ function stubDashboardFetch(snapshot = createSnapshotFixture()) {
   );
 }
 
-describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
+describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     window.localStorage.clear();
@@ -599,7 +600,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     render(<App />);
 
     expect(
-      await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' })
+      await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' })
     ).toBeInTheDocument();
     expect(screen.getByText('v3.8.3')).toBeInTheDocument();
     expect(
@@ -617,21 +618,21 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     );
     expect(within(triadBar).getByText('3 Busy / Recent')).toBeInTheDocument();
 
-    const codexSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for MOBAi ChatGPT Codex');
+    const codexSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for AiSwarmX ChatGPT Codex');
     expect(within(codexSubs).getByText('GPT-6.2 Sol:')).toBeInTheDocument();
     expect(within(codexSubs).getByText('GPT-6.2 Astra:')).toBeInTheDocument();
 
-    const claudeSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for MOBAi Claude Opus');
+    const claudeSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for AiSwarmX Claude Opus');
     expect(within(claudeSubs).getByText('Opus 5.5:')).toBeInTheDocument();
     expect(within(claudeSubs).getByText('Sonnet 5.5:')).toBeInTheDocument();
     expect(within(claudeSubs).getByText('Haiku 4.5:')).toBeInTheDocument();
 
-    const geminiSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for MOBAi Antigravity Gemini');
+    const geminiSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for AiSwarmX Antigravity Gemini');
     expect(within(geminiSubs).getByText('Carbon:')).toBeInTheDocument();
     expect(within(geminiSubs).getByText('Hydrogen:')).toBeInTheDocument();
     expect(within(geminiSubs).getByText('GPT-OSS 120B:')).toBeInTheDocument();
 
-    const opusSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for MOBAi Antigravity Opus');
+    const opusSubs = within(monitorSectionPreview).getByLabelText('Sub-agents for AiSwarmX Antigravity Opus');
     expect(within(opusSubs).getByText('Opus 5.5:')).toBeInTheDocument();
     expect(within(opusSubs).getByText('Sonnet 5.5:')).toBeInTheDocument();
     expect(within(opusSubs).queryByText('Haiku 4.5:')).not.toBeInTheDocument();
@@ -658,17 +659,17 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
       'Open PRs (1)'
     ]);
 
-    // Row 1: Compact monitor cards ordered MOBAi ChatGPT Codex -> MOBAi Claude Opus -> MOBAi Antigravity Gemini -> MOBAi Antigravity Opus
+    // Row 1: Compact monitor cards ordered AiSwarmX ChatGPT Codex -> AiSwarmX Claude Opus -> AiSwarmX Antigravity Gemini -> AiSwarmX Antigravity Opus
     const monitorSection = screen.getByRole('region', { name: 'Live Monitor Status' });
     expect(
       within(monitorSection)
         .getAllByRole('heading', { level: 2 })
         .map((h) => h.textContent)
     ).toEqual([
-      'MOBAi ChatGPT Codex',
-      'MOBAi Claude Opus',
-      'MOBAi Antigravity Gemini',
-      'MOBAi Antigravity Opus'
+      'AiSwarmX ChatGPT Codex',
+      'AiSwarmX Claude Opus',
+      'AiSwarmX Antigravity Gemini',
+      'AiSwarmX Antigravity Opus'
     ]);
     expect(screen.getByText(/Reset: 12am \(Europe\/Berlin\)/)).toBeInTheDocument();
     expect(screen.getByText('Active · Hourly')).toBeInTheDocument();
@@ -724,7 +725,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(screen.getByText(/missing read:project scope/i)).toBeInTheDocument();
 
     // Branch Hygiene card shows local/remote stale counts and active branches
-    const branchCard = screen.getByLabelText('Branch Hygiene MOBAflow and MOBAdev');
+    const branchCard = screen.getByLabelText('Branch Hygiene MOBAflow and AISwarmX');
     expect(within(branchCard).getByText('3 Stale')).toBeInTheDocument();
     expect(within(branchCard).getByText('claude/old-merged-branch')).toBeInTheDocument();
     expect(within(branchCard).getByText('ui/old-dev')).toBeInTheDocument();
@@ -778,7 +779,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
 
     // Expand read-only diff preview
     await user.click(screen.getByRole('button', { name: 'Show Diff' }));
-    expect(await screen.findByText('Target (MOBAdev) vs. Actual (Local)')).toBeInTheDocument();
+    expect(await screen.findByText('Target (AISwarmX) vs. Actual (Local)')).toBeInTheDocument();
     expect(screen.getByText('+1 added')).toBeInTheDocument();
     expect(screen.getByText('-1 removed')).toBeInTheDocument();
     expect(screen.getByText('Line Old')).toBeInTheDocument();
@@ -811,16 +812,16 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     stubDashboardFetch();
 
     render(<App />);
-    await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+    await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' });
 
     const configTab = screen.getByRole('tab', { name: 'Configuration' });
     expect(configTab.querySelector('svg')).toBeNull();
     await user.click(configTab);
-    expect(await screen.findByRole('heading', { name: 'MOBAdev Manifest' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'AISwarmX Manifest' })).toBeInTheDocument();
     expect(screen.getByText(/Central configuration baseline for/)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Raw' }));
-    expect(screen.getByText(/# MOBAdev Manifest/)).toBeInTheDocument();
+    expect(screen.getByText(/# AISwarmX Manifest/)).toBeInTheDocument();
     },
     10_000
   );
@@ -866,7 +867,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
       stubDashboardFetch();
 
       render(<App />);
-      await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+      await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' });
 
       const pipelineSection = screen.getByLabelText('Task and PR Pipeline MOBAflow');
       expect(within(pipelineSection).getByText('Ready: 0')).toBeInTheDocument();
@@ -926,7 +927,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     stubDashboardFetch(snap);
 
     render(<App />);
-    await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+    await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' });
 
     const pipelineSection = screen.getByLabelText('Task and PR Pipeline MOBAflow');
     expect(
@@ -943,7 +944,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
       stubDashboardFetch();
 
       render(<App />);
-      await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+      await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' });
 
       await user.click(screen.getByRole('tab', { name: 'Architecture' }));
 
@@ -971,14 +972,14 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
         })
       ).toBeInTheDocument();
 
-      await user.click(screen.getByRole('button', { name: 'Select MOBAi ChatGPT Codex' }));
-      expect(screen.getByText(/MOBAi ChatGPT Codex · P2/)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Select AiSwarmX ChatGPT Codex' }));
+      expect(screen.getByText(/AiSwarmX ChatGPT Codex · P2/)).toBeInTheDocument();
 
-      await user.click(screen.getByRole('button', { name: 'Select MOBAi Antigravity Opus' }));
-      expect(screen.getByText(/MOBAi Antigravity Opus · P1/)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Select AiSwarmX Antigravity Opus' }));
+      expect(screen.getByText(/AiSwarmX Antigravity Opus · P1/)).toBeInTheDocument();
 
-      await user.click(screen.getByRole('button', { name: 'Select MOBAi Antigravity Gemini' }));
-      expect(screen.getByText(/MOBAi Antigravity Gemini · P3/)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Select AiSwarmX Antigravity Gemini' }));
+      expect(screen.getByText(/AiSwarmX Antigravity Gemini · P3/)).toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: 'Select lifecycle stage 2. Ready' }));
       expect(screen.getByText('Stage 2 · Ready (Human Maintainer Trigger)')).toBeInTheDocument();
@@ -994,10 +995,10 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     stubDashboardFetch(snap);
 
     render(<App />);
-    await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+    await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' });
 
     const monitorSection = screen.getByRole('region', { name: 'Live Monitor Status' });
-    const claudeSubs = within(monitorSection).getByLabelText('Sub-agents for MOBAi Claude Opus');
+    const claudeSubs = within(monitorSection).getByLabelText('Sub-agents for AiSwarmX Claude Opus');
     const zeroChip = within(claudeSubs).getByText('Opus 5.5:').parentElement as HTMLElement;
     expect(zeroChip.style.opacity).toBe('0.48');
     expect(zeroChip.style.color).not.toBe('');
@@ -1015,7 +1016,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     stubDashboardFetch();
 
     render(<App />);
-    await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+    await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' });
 
     const backToTopLink = screen.getByRole('link', { name: /Back to top/i });
     expect(backToTopLink).toBeInTheDocument();
@@ -1035,14 +1036,14 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     stubDashboardFetch(snap);
 
     render(<App />);
-    await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+    await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' });
 
     const monitorSection = screen.getByRole('region', { name: 'Live Monitor Status' });
-    const codexSubs = within(monitorSection).getByLabelText('Sub-agents for MOBAi ChatGPT Codex');
+    const codexSubs = within(monitorSection).getByLabelText('Sub-agents for AiSwarmX ChatGPT Codex');
     expect(within(codexSubs).getByText('GPT-6.2 Sol:').parentElement?.style.opacity).toBe('1');
 
     const geminiSubs = within(monitorSection).getByLabelText(
-      'Sub-agents for MOBAi Antigravity Gemini'
+      'Sub-agents for AiSwarmX Antigravity Gemini'
     );
     const hydrogenChip = within(geminiSubs).getByText('Hydrogen:').parentElement as HTMLElement;
     expect(hydrogenChip.style.opacity).toBe('1');
@@ -1053,7 +1054,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(carbonChip.style.opacity).toBe('0.48');
     expect(carbonChip.style.color).not.toBe('');
 
-    const opusSubs = within(monitorSection).getByLabelText('Sub-agents for MOBAi Antigravity Opus');
+    const opusSubs = within(monitorSection).getByLabelText('Sub-agents for AiSwarmX Antigravity Opus');
     expect(within(opusSubs).getByText('Opus 5.5:').parentElement?.style.opacity).toBe('1');
     expect(within(opusSubs).getByText('Sonnet 5.5:').parentElement?.style.opacity).toBe('0.48');
   });
@@ -1063,7 +1064,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     stubDashboardFetch();
 
     const { unmount } = render(<App />);
-    await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+    await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' });
 
     const monitorSection = screen.getByRole('region', { name: 'Live Monitor Status' });
     for (let idx = 0; idx < 6; idx += 1) {
@@ -1072,21 +1073,21 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
 
     expect(
       within(within(monitorSection).getByTestId('monitor-slot-3')).getByRole('heading', {
-        name: 'MOBAi Antigravity Opus'
+        name: 'AiSwarmX Antigravity Opus'
       })
     ).toBeInTheDocument();
     expect(within(monitorSection).getByTestId('monitor-slot-4')).toBeEmptyDOMElement();
     expect(within(monitorSection).getByTestId('monitor-slot-5')).toBeEmptyDOMElement();
 
-    // Move MOBAi Antigravity Opus (slot 3) to empty slot 5 via click-move button
+    // Move AiSwarmX Antigravity Opus (slot 3) to empty slot 5 via click-move button
     await user.click(
-      within(monitorSection).getByRole('button', { name: 'Move MOBAi Antigravity Opus' })
+      within(monitorSection).getByRole('button', { name: 'Move AiSwarmX Antigravity Opus' })
     );
     await user.click(within(monitorSection).getByRole('button', { name: 'Place in grid slot 6' }));
 
     expect(
       within(within(monitorSection).getByTestId('monitor-slot-5')).getByRole('heading', {
-        name: 'MOBAi Antigravity Opus'
+        name: 'AiSwarmX Antigravity Opus'
       })
     ).toBeInTheDocument();
     expect(within(monitorSection).getByTestId('monitor-slot-3')).toBeEmptyDOMElement();
@@ -1100,7 +1101,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
       'antigravity-opus-head'
     ]);
 
-    // Drag & drop swap: drag MOBAi Claude Opus (slot 1) onto MOBAi Antigravity Gemini (slot 2)
+    // Drag & drop swap: drag AiSwarmX Claude Opus (slot 1) onto AiSwarmX Antigravity Gemini (slot 2)
     const slot1 = within(monitorSection).getByTestId('monitor-slot-1');
     const slot2 = within(monitorSection).getByTestId('monitor-slot-2');
     const claudeCard = slot1.querySelector('[draggable="true"]') as HTMLElement;
@@ -1132,21 +1133,21 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     // Unmount and remount cleanly -> restores layout from cookie
     unmount();
     render(<App />);
-    await screen.findByRole('heading', { name: 'MOBAdev Agent Swarm Gen#3' });
+    await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' });
     const reloadedSection = screen.getByRole('region', { name: 'Live Monitor Status' });
     expect(
       within(within(reloadedSection).getByTestId('monitor-slot-1')).getByRole('heading', {
-        name: 'MOBAi Antigravity Gemini'
+        name: 'AiSwarmX Antigravity Gemini'
       })
     ).toBeInTheDocument();
     expect(
       within(within(reloadedSection).getByTestId('monitor-slot-2')).getByRole('heading', {
-        name: 'MOBAi Claude Opus'
+        name: 'AiSwarmX Claude Opus'
       })
     ).toBeInTheDocument();
     expect(
       within(within(reloadedSection).getByTestId('monitor-slot-5')).getByRole('heading', {
-        name: 'MOBAi Antigravity Opus'
+        name: 'AiSwarmX Antigravity Opus'
       })
     ).toBeInTheDocument();
 
@@ -1155,7 +1156,7 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
     expect(readMonitorGridCookie()).toBeNull();
     expect(
       within(within(reloadedSection).getByTestId('monitor-slot-3')).getByRole('heading', {
-        name: 'MOBAi Antigravity Opus'
+        name: 'AiSwarmX Antigravity Opus'
       })
     ).toBeInTheDocument();
   }, 10_000);
@@ -1437,6 +1438,33 @@ describe('MOBAdev Agent Swarm Gen#3 Dashboard', () => {
 
     await user.click(screen.getByRole('tab', { name: /Architecture/i }));
     expect(await screen.findAllByText('Idle')).not.toHaveLength(0);
+  });
+
+  it('falls back to legacy mobadev-theme localStorage and mobadev_monitor_grid_v1 cookie', async () => {
+    window.localStorage.setItem('mobadev-theme', 'light');
+    const legacyLayout = [
+      'antigravity-opus-head',
+      'codex-monitor',
+      'claude-monitor',
+      'antigravity-monitor',
+      null,
+      null
+    ];
+    document.cookie = `${LEGACY_MONITOR_GRID_COOKIE}=${encodeURIComponent(JSON.stringify(legacyLayout))}; path=/`;
+
+    stubDashboardFetch();
+    render(<App />);
+    await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' });
+
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(window.localStorage.getItem('aiswarmx-theme')).toBe('light');
+
+    const monitorSection = screen.getByRole('region', { name: 'Live Monitor Status' });
+    expect(
+      within(within(monitorSection).getByTestId('monitor-slot-0')).getByRole('heading', {
+        name: 'AiSwarmX Antigravity Opus'
+      })
+    ).toBeInTheDocument();
   });
 
   it('degrades gracefully when backend is unreachable', async () => {

@@ -30,7 +30,8 @@ import type {
 } from './types/dashboard';
 
 const POLL_INTERVAL_MS = 15_000;
-const THEME_STORAGE_KEY = 'mobadev-theme';
+const THEME_STORAGE_KEY = 'aiswarmx-theme';
+const LEGACY_THEME_STORAGE_KEY = 'mobadev-theme';
 
 const useStyles = makeStyles({
   appShell: {
@@ -82,7 +83,9 @@ const useStyles = makeStyles({
 
 function readInitialThemePreference(): ThemePreference {
   try {
-    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    const stored =
+      window.localStorage.getItem(THEME_STORAGE_KEY) ??
+      window.localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
     if (stored === 'light' || stored === 'dark' || stored === 'system') {
       return stored;
     }
@@ -262,7 +265,7 @@ export function App() {
           warningBreakdown={warningBreakdown}
           onJumpToWarning={handleJumpToWarning}
           changelogVersion={snapshot?.changelogVersion}
-          onOpenChangelog={() => handleOpenDoc('mobadev', 'CHANGELOG.md')}
+          onOpenChangelog={() => handleOpenDoc('aiswarmx', 'CHANGELOG.md')}
           generatedAtUtc={snapshot?.generatedAtUtc}
           nowMs={nowMs}
           refreshing={refreshing}
@@ -356,10 +359,14 @@ export function App() {
 
           {activeTab === 'mobadev-docs' && (
             <ConfigDocsView
-              key="mobadev"
-              scope="mobadev"
+              key="aiswarmx"
+              scope="aiswarmx"
               isDark={isDark}
-              requestedPath={requestedDoc?.scope === 'mobadev' ? requestedDoc.path : null}
+              requestedPath={
+                requestedDoc?.scope === 'aiswarmx' || requestedDoc?.scope === 'mobadev'
+                  ? requestedDoc.path
+                  : null
+              }
               onConsumeRequestedPath={() => setRequestedDoc(null)}
             />
           )}

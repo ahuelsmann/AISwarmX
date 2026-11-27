@@ -52,9 +52,13 @@ if ($Mode -eq "ScopedFix") {
 
     try {
         $monResp = Invoke-RestMethod -Uri "http://127.0.0.1:5179/api/monitors" -TimeoutSec 3 -ErrorAction Stop
-        $claudeDesktop = @($monResp.monitors) | Where-Object { $_.displayName -eq "MOBAi Claude Opus" } | Select-Object -First 1
+        $claudeDesktop = @($monResp.monitors) | Where-Object { $_.id -eq "claude-monitor" } | Select-Object -First 1
+        if ($null -eq $claudeDesktop) {
+            $claudeDesktop = @($monResp.monitors) | Where-Object { $_.displayName -in @("AiSwarmX Claude Opus", "MOBAi Claude Opus") } | Select-Object -First 1
+        }
         if ($null -ne $claudeDesktop -and $claudeDesktop.state -eq "busy" -and -not $Force) {
-            throw "MOBAi Claude Opus Desktop session is currently 'busy'. Re-run with -Force only if working in a strictly disjoint worktree."
+            $sessionLabel = if ($claudeDesktop.displayName) { $claudeDesktop.displayName } else { "AiSwarmX Claude Opus" }
+            throw "$sessionLabel Desktop session is currently 'busy'. Re-run with -Force only if working in a strictly disjoint worktree."
         }
     }
     catch {

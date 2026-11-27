@@ -410,12 +410,12 @@ export function HygieneAndSyncPanel({
         )}
       </Card>
 
-      {/* Branch Hygiene (MOBAflow & MOBAdev) */}
+      {/* Branch Hygiene (MOBAflow & AISwarmX) */}
       <Card
         id="section-branches"
         className={styles.card}
         appearance="filled"
-        aria-label="Branch Hygiene MOBAflow and MOBAdev"
+        aria-label="Branch Hygiene MOBAflow and AISwarmX"
       >
         <div className={styles.header}>
           <div className={styles.titleGroup}>
@@ -452,7 +452,7 @@ export function HygieneAndSyncPanel({
 
         {visibleBranches.length === 0 ? (
           <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-            Only main branches present across MOBAflow and MOBAdev.
+            Only main branches present across MOBAflow and AISwarmX.
           </Text>
         ) : (
           <div className={styles.list}>

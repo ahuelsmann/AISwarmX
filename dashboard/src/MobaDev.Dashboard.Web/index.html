@@ -3,11 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MOBAdev Agent Swarm Gen#3 — Read-Only Cockpit</title>
+    <title>AISwarmX — Autonomous Dev Engine Gen3.5</title>
     <script>
       (function () {
         try {
-          var pref = localStorage.getItem('mobadev-theme') || 'system';
+          var pref =
+            localStorage.getItem('aiswarmx-theme') ||
+            localStorage.getItem('mobadev-theme') ||
+            'system';
           var resolved =
             pref === 'light' || pref === 'dark'
               ? pref

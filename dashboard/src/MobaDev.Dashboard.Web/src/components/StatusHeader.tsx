@@ -304,7 +304,7 @@ export function StatusHeader({
       <div className={styles.inner}>
         <div className={styles.topRow}>
           <div className={styles.brandGroup}>
-            <h1 className={styles.title}>MOBAdev Agent Swarm Gen#3</h1>
+            <h1 className={styles.title}>AISwarmX — Autonomous Dev Engine Gen3.5</h1>
             {changelogVersion && (
               <Button
                 size="small"

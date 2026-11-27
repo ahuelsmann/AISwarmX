@@ -249,10 +249,10 @@ public sealed class MonitorProvidersTests
         var claude = await new ClaudeMonitorProvider().GetMonitorAsync(paths, CancellationToken.None);
         var antigravityHeads = await new AntigravityMonitorProvider().GetMonitorsAsync(paths, CancellationToken.None);
 
-        Assert.Equal("MOBAi ChatGPT Codex", gpt.DisplayName);
-        Assert.Equal("MOBAi Claude Opus", claude.DisplayName);
+        Assert.Equal("AiSwarmX ChatGPT Codex", gpt.DisplayName);
+        Assert.Equal("AiSwarmX Claude Opus", claude.DisplayName);
         Assert.Equal(2, antigravityHeads.Count);
-        Assert.Equal("MOBAi Antigravity Gemini", antigravityHeads[0].DisplayName);
+        Assert.Equal("AiSwarmX Antigravity Gemini", antigravityHeads[0].DisplayName);
         Assert.Equal("Orchestrator · Gemini 4 Argon", antigravityHeads[0].Model);
         Assert.Equal("busy", antigravityHeads[0].State);
         Assert.Equal(1, antigravityHeads[0].ActiveSessionCount);
@@ -261,7 +261,7 @@ public sealed class MonitorProvidersTests
         Assert.Equal(1, antigravityHeads[0].ActiveSubAgentsByModel!["Gemini 4 Hydrogen"]);
         Assert.Null(antigravityHeads[0].Source.Notice);
 
-        Assert.Equal("MOBAi Antigravity Opus", antigravityHeads[1].DisplayName);
+        Assert.Equal("AiSwarmX Antigravity Opus", antigravityHeads[1].DisplayName);
         Assert.Equal("Orchestrator · Claude Opus 5.5", antigravityHeads[1].Model);
         Assert.Equal("standby", antigravityHeads[1].State);
         Assert.Equal(1, antigravityHeads[1].ActiveSessionCount);
@@ -388,24 +388,24 @@ public sealed class MonitorProvidersTests
         var claude = await new ClaudeMonitorProvider().GetMonitorAsync(paths, CancellationToken.None);
         var antigravityHeads = await new AntigravityMonitorProvider().GetMonitorsAsync(paths, CancellationToken.None);
 
-        Assert.Equal("MOBAi ChatGPT Codex", codex.DisplayName);
+        Assert.Equal("AiSwarmX ChatGPT Codex", codex.DisplayName);
         Assert.Equal(1, codex.ActiveSessionCount);
         Assert.Equal(0, codex.ActiveSubAgentCount);
         Assert.Null(codex.Source.Notice);
 
-        Assert.Equal("MOBAi Claude Opus", claude.DisplayName);
+        Assert.Equal("AiSwarmX Claude Opus", claude.DisplayName);
         Assert.Equal(1, claude.ActiveSessionCount);
         Assert.Equal(0, claude.ActiveSubAgentCount);
         Assert.Null(claude.Source.Notice);
 
         Assert.Equal(2, antigravityHeads.Count);
-        Assert.Equal("MOBAi Antigravity Gemini", antigravityHeads[0].DisplayName);
+        Assert.Equal("AiSwarmX Antigravity Gemini", antigravityHeads[0].DisplayName);
         Assert.Equal("Orchestrator · Gemini 4 Carbon", antigravityHeads[0].Model);
         Assert.Equal(1, antigravityHeads[0].ActiveSessionCount);
         Assert.Equal(0, antigravityHeads[0].ActiveSubAgentCount);
         Assert.Null(antigravityHeads[0].Source.Notice);
 
-        Assert.Equal("MOBAi Antigravity Opus", antigravityHeads[1].DisplayName);
+        Assert.Equal("AiSwarmX Antigravity Opus", antigravityHeads[1].DisplayName);
         Assert.Equal(1, antigravityHeads[1].ActiveSessionCount);
         Assert.Equal(0, antigravityHeads[1].ActiveSubAgentCount);
         Assert.Null(antigravityHeads[1].Source.Notice);
@@ -454,14 +454,14 @@ public sealed class MonitorProvidersTests
         var heads = await new AntigravityMonitorProvider().GetMonitorsAsync(paths, CancellationToken.None);
 
         Assert.Equal(2, heads.Count);
-        Assert.Equal("MOBAi Antigravity Gemini", heads[0].DisplayName);
+        Assert.Equal("AiSwarmX Antigravity Gemini", heads[0].DisplayName);
         Assert.Equal("Orchestrator · Gemini 4 Carbon", heads[0].Model);
         Assert.Equal(2, heads[0].ActiveSubAgentCount);
         Assert.NotNull(heads[0].ActiveSubAgentsByModel);
         Assert.Equal(1, heads[0].ActiveSubAgentsByModel!["Claude Opus 5.5"]);
         Assert.Equal(1, heads[0].ActiveSubAgentsByModel!["GPT-OSS 120B"]);
 
-        Assert.Equal("MOBAi Antigravity Opus", heads[1].DisplayName);
+        Assert.Equal("AiSwarmX Antigravity Opus", heads[1].DisplayName);
         Assert.Equal(0, heads[1].ActiveSubAgentCount);
     }
 
@@ -808,6 +808,82 @@ public sealed class MonitorProvidersTests
 
         // Time-only without any anchor fails deterministically
         Assert.False(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("4pm (UTC)", null, out _));
+    }
+
+    [Fact]
+    public async Task Providers_SupportDualPrefixMatchingAndPreferAiSwarmXOverLegacyMobai()
+    {
+        using var fx = new TempDashboardFixture();
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
+            fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
+
+        var olderEpoch = DateTimeOffset.UtcNow.AddMinutes(-20).ToUnixTimeSeconds();
+        var newerEpoch = DateTimeOffset.UtcNow.AddSeconds(-10).ToUnixTimeSeconds();
+        var olderMs = DateTimeOffset.UtcNow.AddMinutes(-20).ToUnixTimeMilliseconds();
+        var newerMs = DateTimeOffset.UtcNow.AddSeconds(-10).ToUnixTimeMilliseconds();
+        var olderIso = DateTimeOffset.UtcNow.AddMinutes(-20).ToString("O");
+        var newerIso = DateTimeOffset.UtcNow.AddSeconds(-10).ToString("O");
+
+        // 1. Codex: older "aiswarmx ChatGPT Codex" (case-insensitive) beats newer "MOBAi ChatGPT Codex" and "MOBA Codex"
+        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.CodexHomePath, "state_5.sqlite"), $"""
+            CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, model TEXT, archived INTEGER, updated_at INTEGER);
+            INSERT INTO threads VALUES ('t-legacy', 'MOBAi ChatGPT Codex', 'gpt-6.1-sol', 0, {newerEpoch});
+            INSERT INTO threads VALUES ('t-alt', 'MOBA Codex', 'gpt-6.1-sol', 0, {newerEpoch});
+            INSERT INTO threads VALUES ('t-aiswarmx', 'aiswarmx ChatGPT Codex', 'gpt-6.2-sol', 0, {olderEpoch});
+            """);
+
+        // 2. Claude: older "AiSwarmX Claude Opus" beats newer "MOBAi Claude Opus"
+        var claudeSessionsDir = Path.Combine(fx.ClaudeHomePath, "sessions");
+        Directory.CreateDirectory(claudeSessionsDir);
+        await File.WriteAllTextAsync(Path.Combine(claudeSessionsDir, "4001.json"), $$"""
+            { "sessionId": "aaaa1111-1111-1111-1111-111111111111", "name": "MOBAi Claude Opus", "status": "busy", "updatedAt": {{newerMs}} }
+            """);
+        await File.WriteAllTextAsync(Path.Combine(claudeSessionsDir, "4002.json"), $$"""
+            { "sessionId": "bbbb2222-2222-2222-2222-222222222222", "name": "AiSwarmX Claude Opus", "status": "idle", "updatedAt": {{olderMs}} }
+            """);
+
+        // 3. Antigravity: older "AiSwarmX Antigravity Gemini" & "aiswarmx antigravity opus" beat newer "MOBAi ..." sessions
+        TempDashboardFixture.CreateSqliteDb(Path.Combine(fx.AntigravityHomePath, "conversation_summaries.db"), $"""
+            CREATE TABLE conversation_summaries (
+                conversation_id TEXT PRIMARY KEY,
+                title TEXT,
+                status TEXT,
+                last_modified_time TEXT,
+                source TEXT
+            );
+            INSERT INTO conversation_summaries VALUES ('gem-legacy', 'MOBAi Antigravity Gemini', 'CASCADE_RUN_STATUS_IDLE', '{newerIso}', '');
+            INSERT INTO conversation_summaries VALUES ('gem-aiswarmx', 'AiSwarmX Antigravity Gemini', 'CASCADE_RUN_STATUS_RUNNING', '{olderIso}', '');
+            INSERT INTO conversation_summaries VALUES ('opus-legacy', 'MOBAi Antigravity Opus', 'CASCADE_RUN_STATUS_RUNNING', '{newerIso}', '');
+            INSERT INTO conversation_summaries VALUES ('opus-aiswarmx', 'aiswarmx antigravity opus', 'CASCADE_RUN_STATUS_IDLE', '{olderIso}', '');
+            """);
+
+        var gemLogs = Path.Combine(fx.AntigravityHomePath, "brain", "gem-aiswarmx", ".system_generated", "logs");
+        var opusLogs = Path.Combine(fx.AntigravityHomePath, "brain", "opus-aiswarmx", ".system_generated", "logs");
+        Directory.CreateDirectory(gemLogs);
+        Directory.CreateDirectory(opusLogs);
+        await File.WriteAllTextAsync(Path.Combine(gemLogs, "transcript.jsonl"), "{\"model\":\"gemini-4-carbon-medium\"}\n");
+        await File.WriteAllTextAsync(Path.Combine(opusLogs, "transcript.jsonl"), "{\"model\":\"claude-opus-5-5-medium\"}\n");
+
+        var codex = await new CodexMonitorProvider().GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("AiSwarmX ChatGPT Codex", codex.DisplayName);
+        Assert.Equal("gpt-6.2-sol", codex.Model);
+        Assert.Equal("standby", codex.State);
+        Assert.Equal(3, codex.ActiveSessionCount);
+
+        var claude = await new ClaudeMonitorProvider().GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("AiSwarmX Claude Opus", claude.DisplayName);
+        Assert.Equal("standby", claude.State);
+        Assert.Equal(2, claude.ActiveSessionCount);
+
+        var agHeads = await new AntigravityMonitorProvider().GetMonitorsAsync(paths, CancellationToken.None);
+        Assert.Equal(2, agHeads.Count);
+        Assert.Equal("AiSwarmX Antigravity Gemini", agHeads[0].DisplayName);
+        Assert.Equal("Orchestrator · Gemini 4 Carbon", agHeads[0].Model);
+        Assert.Equal("idle", agHeads[0].State);
+        Assert.Equal("AiSwarmX Antigravity Opus", agHeads[1].DisplayName);
+        Assert.Equal("Orchestrator · Claude Opus 5.5", agHeads[1].Model);
+        Assert.Equal("standby", agHeads[1].State);
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider

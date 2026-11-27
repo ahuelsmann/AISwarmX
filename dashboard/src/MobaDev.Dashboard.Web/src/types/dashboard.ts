@@ -117,7 +117,7 @@ export interface RuleDiffResponse {
   lines: DiffLineInfo[];
 }
 
-export type ConfigDocsScope = 'mobadev';
+export type ConfigDocsScope = 'aiswarmx' | 'mobadev';
 
 export interface ConfigDocItem {
   scope: ConfigDocsScope | string;

@@ -26,25 +26,39 @@ public sealed class ConfigDocsProviderTests
             fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
             fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
 
-        var mobaDevCatalog = await provider.GetCatalogAsync(paths, "mobadev", CancellationToken.None);
-        Assert.Equal("ok", mobaDevCatalog.Source.Status);
-        Assert.Equal("ahuelsmann/MOBAdev", mobaDevCatalog.Repository);
-        Assert.Contains(mobaDevCatalog.Files, f => f.RelativePath == "manifest.md");
-        Assert.Contains(mobaDevCatalog.Files, f => f.RelativePath == "CHANGELOG.md");
-        Assert.Contains(mobaDevCatalog.Files, f => f.RelativePath == "agents/antigravity/rules/mobaflow-agent-network.md");
-        Assert.DoesNotContain(mobaDevCatalog.Files, f => f.FileName == "unlisted-notes.md");
-        Assert.DoesNotContain(mobaDevCatalog.Files, f => f.FileName == ".env");
+        var aiswarmxCatalog = await provider.GetCatalogAsync(paths, "aiswarmx", CancellationToken.None);
+        Assert.Equal("ok", aiswarmxCatalog.Source.Status);
+        Assert.Equal("aiswarmx", aiswarmxCatalog.Scope);
+        Assert.Equal("ahuelsmann/AISwarmX", aiswarmxCatalog.Repository);
+        Assert.Contains(aiswarmxCatalog.Files, f => f.RelativePath == "manifest.md");
+        Assert.Contains(aiswarmxCatalog.Files, f => f.RelativePath == "CHANGELOG.md");
+        Assert.Contains(aiswarmxCatalog.Files, f => f.RelativePath == "agents/antigravity/rules/mobaflow-agent-network.md");
+        Assert.DoesNotContain(aiswarmxCatalog.Files, f => f.FileName == "unlisted-notes.md");
+        Assert.DoesNotContain(aiswarmxCatalog.Files, f => f.FileName == ".env");
 
-        var doc = await provider.GetDocumentContentAsync(paths, "mobadev", "manifest.md", CancellationToken.None);
+        var legacyAliasCatalog = await provider.GetCatalogAsync(paths, "mobadev", CancellationToken.None);
+        Assert.Equal("ok", legacyAliasCatalog.Source.Status);
+        Assert.Equal("aiswarmx", legacyAliasCatalog.Scope);
+        Assert.Equal("ahuelsmann/AISwarmX", legacyAliasCatalog.Repository);
+        Assert.Contains(legacyAliasCatalog.Files, f => f.RelativePath == "manifest.md");
+
+        var doc = await provider.GetDocumentContentAsync(paths, "aiswarmx", "manifest.md", CancellationToken.None);
         Assert.NotNull(doc);
+        Assert.Equal("aiswarmx", doc.Scope);
+        Assert.Equal("ahuelsmann/AISwarmX", doc.Repository);
         Assert.Contains("# MOBAdev Manifest", doc.Content);
         Assert.False(doc.Truncated);
 
-        var unlisted = await provider.GetDocumentContentAsync(paths, "mobadev", "unlisted-notes.md", CancellationToken.None);
+        var legacyDoc = await provider.GetDocumentContentAsync(paths, "mobadev", "manifest.md", CancellationToken.None);
+        Assert.NotNull(legacyDoc);
+        Assert.Equal("aiswarmx", legacyDoc.Scope);
+        Assert.Equal("ahuelsmann/AISwarmX", legacyDoc.Repository);
+
+        var unlisted = await provider.GetDocumentContentAsync(paths, "aiswarmx", "unlisted-notes.md", CancellationToken.None);
         Assert.Null(unlisted);
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
-            provider.GetDocumentContentAsync(paths, "mobadev", "../secret.md", CancellationToken.None));
+            provider.GetDocumentContentAsync(paths, "aiswarmx", "../secret.md", CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentException>(() =>
             provider.GetCatalogAsync(paths, "mobaflow", CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentException>(() =>

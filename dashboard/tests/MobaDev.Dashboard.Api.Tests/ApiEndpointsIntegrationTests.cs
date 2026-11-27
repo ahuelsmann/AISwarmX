@@ -96,7 +96,7 @@ public sealed class ApiEndpointsIntegrationTests
             ["codex-monitor", "claude-monitor", "antigravity-monitor", "antigravity-opus-head"],
             snapshot.Monitors.Monitors.Select(m => m.Id));
         Assert.Equal(
-            ["MOBAi ChatGPT Codex", "MOBAi Claude Opus", "MOBAi Antigravity Gemini", "MOBAi Antigravity Opus"],
+            ["AiSwarmX ChatGPT Codex", "AiSwarmX Claude Opus", "AiSwarmX Antigravity Gemini", "AiSwarmX Antigravity Opus"],
             snapshot.Monitors.Monitors.Select(m => m.DisplayName));
         Assert.NotNull(snapshot.Monitors.Summary);
         Assert.Equal(4, snapshot.Monitors.Summary.StandingMonitorsTotal);
@@ -117,13 +117,22 @@ public sealed class ApiEndpointsIntegrationTests
         var badDiffRes = await client.GetAsync("/api/governance/diff?tool=Antigravity&kind=agent&fileName=../secret.md");
         Assert.Equal(HttpStatusCode.BadRequest, badDiffRes.StatusCode);
 
-        var docsRes = await client.GetAsync("/api/docs?scope=mobadev");
+        var docsRes = await client.GetAsync("/api/docs?scope=aiswarmx");
         Assert.Equal(HttpStatusCode.OK, docsRes.StatusCode);
         var catalog = await docsRes.Content.ReadFromJsonAsync<ConfigDocsCatalogResponse>();
         Assert.NotNull(catalog);
+        Assert.Equal("aiswarmx", catalog.Scope);
+        Assert.Equal("ahuelsmann/AISwarmX", catalog.Repository);
         Assert.Contains(catalog.Files, f => f.RelativePath == "manifest.md");
 
-        var docContentRes = await client.GetAsync("/api/docs/content?scope=mobadev&path=manifest.md");
+        var legacyDocsRes = await client.GetAsync("/api/docs?scope=mobadev");
+        Assert.Equal(HttpStatusCode.OK, legacyDocsRes.StatusCode);
+        var legacyCatalog = await legacyDocsRes.Content.ReadFromJsonAsync<ConfigDocsCatalogResponse>();
+        Assert.NotNull(legacyCatalog);
+        Assert.Equal("aiswarmx", legacyCatalog.Scope);
+        Assert.Equal("ahuelsmann/AISwarmX", legacyCatalog.Repository);
+
+        var docContentRes = await client.GetAsync("/api/docs/content?scope=aiswarmx&path=manifest.md");
         Assert.Equal(HttpStatusCode.OK, docContentRes.StatusCode);
         var docContent = await docContentRes.Content.ReadFromJsonAsync<ConfigDocContentResponse>();
         Assert.NotNull(docContent);
@@ -135,5 +144,83 @@ public sealed class ApiEndpointsIntegrationTests
         // Strictly read-only: POST must be rejected
         using var postRes = await client.PostAsJsonAsync("/api/snapshot", new { });
         Assert.Equal(HttpStatusCode.MethodNotAllowed, postRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task WebApplicationFactory_AppliesSwarmConfigWorkspaceAndPreservesExplicitOverrides()
+    {
+        using var fx = new TempDashboardFixture();
+        var repoRoot = FindWorktreeRoot();
+        var presetPath = Path.Combine(repoRoot, "presets", "mobaflow.swarm.json");
+
+        var runner = new PipelineAndWorktreeProviderTests.FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("pr"))
+            {
+                return new CommandResult(1, string.Empty, "Pull requests are disabled for this repository.");
+            }
+
+            if (fileName == "gh" && args.Contains("graphql"))
+            {
+                return new CommandResult(1, string.Empty, "missing scope");
+            }
+
+            if (fileName == "gh" && args.Contains("issue"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            return new CommandResult(1, string.Empty, "unexpected");
+        });
+
+        await using var factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Testing");
+                builder.ConfigureAppConfiguration((_, config) =>
+                {
+                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Dashboard:SwarmConfigPath"] = presetPath,
+                        ["Dashboard:WorkspaceId"] = "mobadev",
+                        ["Dashboard:MobaDevRepoPath"] = fx.MobaDevPath,
+                        ["Dashboard:MobaFlowRepoPath"] = fx.MobaFlowPath,
+                        ["Dashboard:ClaudeHomePath"] = fx.ClaudeHomePath,
+                        ["Dashboard:CodexHomePath"] = fx.CodexHomePath,
+                        ["Dashboard:AntigravityHomePath"] = fx.AntigravityHomePath,
+                        ["Dashboard:GeminiConfigPath"] = fx.GeminiConfigPath
+                    });
+                });
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<ICommandRunner>();
+                    services.AddSingleton<ICommandRunner>(runner);
+                });
+            });
+
+        using var client = factory.CreateClient();
+        var pipelineRes = await client.GetAsync("/api/pipeline");
+        Assert.Equal(HttpStatusCode.OK, pipelineRes.StatusCode);
+        var pipeline = await pipelineRes.Content.ReadFromJsonAsync<PipelineResponse>();
+        Assert.NotNull(pipeline);
+        Assert.Equal("ahuelsmann/MOBAdev", pipeline.Repository);
+        Assert.Equal("ok", pipeline.Source.Status);
+        Assert.Empty(pipeline.PullRequests);
+    }
+
+    private static string FindWorktreeRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "presets", "mobaflow.swarm.json")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate worktree root containing presets/mobaflow.swarm.json.");
     }
 }

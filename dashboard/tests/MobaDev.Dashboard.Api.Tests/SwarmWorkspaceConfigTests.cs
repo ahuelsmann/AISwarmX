@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Configuration;
 using MobaDev.Dashboard.Api.Configuration;
 using Xunit;
 
@@ -287,6 +288,139 @@ public sealed partial class SwarmWorkspaceConfigTests
         Assert.NotEqual(presetJson, overlapJson);
         Assert.Throws<SwarmConfigValidationException>(() =>
             SwarmWorkspaceConfigLoader.Parse(overlapJson, repoRoot, new Dictionary<string, string?>()));
+    }
+
+    [Fact]
+    public void DashboardOptions_ResolveWithSwarmConfig_SupportsExplicitPathEnvSwitchingAndOverrides()
+    {
+        var repoRoot = FindWorktreeRoot();
+        var presetPath = Path.Combine(repoRoot, "presets", "mobaflow.swarm.json");
+        var syntheticRepos = Path.Combine(Path.GetTempPath(), "synthetic-slice2-repos");
+        var syntheticAppData = Path.Combine(Path.GetTempPath(), "synthetic-slice2-appdata");
+
+        var env = new Dictionary<string, string?>
+        {
+            ["MOBADEV_SWARM_CONFIG"] = presetPath,
+            ["MOBADEV_SWARM_WORKSPACE"] = "mobadev",
+            ["SWARM_REPOS_ROOT"] = syntheticRepos,
+            ["LOCALAPPDATA"] = syntheticAppData
+        };
+
+        var resolvedFromEnv = new DashboardOptions().ResolveWithSwarmConfig(env);
+        Assert.Equal(presetPath, resolvedFromEnv.SwarmConfigPath);
+        Assert.Equal("mobadev", resolvedFromEnv.WorkspaceId);
+        Assert.Equal("ahuelsmann/MOBAdev", resolvedFromEnv.GitHubRepository);
+        Assert.Equal(Path.GetFullPath($"{syntheticRepos}/MOBAdev"), resolvedFromEnv.MobaFlowRepoPath);
+        Assert.Equal(repoRoot, resolvedFromEnv.MobaDevRepoPath);
+        Assert.Equal(Path.GetFullPath($"{syntheticAppData}/MOBAdev/swarm-bus.db"), resolvedFromEnv.SwarmBusDbPath);
+
+        // Explicit caller overrides must be preserved even when SwarmConfigPath is active
+        var withOverrides = new DashboardOptions
+        {
+            SwarmConfigPath = presetPath,
+            WorkspaceId = "mobadev",
+            BindUrl = "http://localhost:5199",
+            MobaFlowRepoPath = Path.Combine(syntheticRepos, "CustomOverride"),
+            GitHubRepository = "custom-org/custom-repo",
+            GitHubProjectNumber = 42,
+            LocalCacheTtlSeconds = 15
+        }.ResolveWithSwarmConfig(env);
+
+        Assert.Equal("http://localhost:5199", withOverrides.BindUrl);
+        Assert.Equal(Path.Combine(syntheticRepos, "CustomOverride"), withOverrides.MobaFlowRepoPath);
+        Assert.Equal("custom-org/custom-repo", withOverrides.GitHubRepository);
+        Assert.Equal(42, withOverrides.GitHubProjectNumber);
+        Assert.Equal(15, withOverrides.LocalCacheTtlSeconds);
+    }
+
+    [Fact]
+    public void DashboardOptions_ResolveWithSwarmConfig_AutoDiscoversLocalSwarmConfigAndPresetFallback()
+    {
+        using var fx = new TempDashboardFixture();
+        var repoRoot = FindWorktreeRoot();
+        var presetJson = File.ReadAllText(Path.Combine(repoRoot, "presets", "mobaflow.swarm.json"));
+
+        // Preserves explicit MobaFlowRepoPath when only presets/mobaflow.swarm.json fallback exists
+        var explicitOnly = new DashboardOptions
+        {
+            MobaDevRepoPath = repoRoot,
+            MobaFlowRepoPath = fx.MobaFlowPath
+        }.ResolveWithSwarmConfig(new Dictionary<string, string?>());
+
+        Assert.Equal(fx.MobaFlowPath, explicitOnly.MobaFlowRepoPath);
+        Assert.Equal("ahuelsmann/MOBAflow", explicitOnly.GitHubRepository);
+
+        // Auto-discovers swarm.config.json in MobaDevRepoPath
+        File.WriteAllText(Path.Combine(fx.MobaDevPath, "swarm.config.json"), presetJson);
+        var autoDiscovered = new DashboardOptions
+        {
+            MobaDevRepoPath = fx.MobaDevPath,
+            WorkspaceId = "mobadev"
+        }.ResolveWithSwarmConfig(new Dictionary<string, string?>());
+
+        Assert.Equal("ahuelsmann/MOBAdev", autoDiscovered.GitHubRepository);
+        Assert.Equal(fx.MobaDevPath, autoDiscovered.MobaDevRepoPath);
+    }
+
+    [Fact]
+    public void DashboardOptions_CaptureExplicitOverrideKeys_PreservesValuesEqualToDefaults()
+    {
+        using var fx = new TempDashboardFixture();
+        var repoRoot = FindWorktreeRoot();
+        var presetJson = File.ReadAllText(Path.Combine(repoRoot, "presets", "mobaflow.swarm.json"));
+        var customJson = presetJson
+            .Replace("\"githubProjectNumber\": 1", "\"githubProjectNumber\": 42")
+            .Replace("\"bindUrl\": \"http://127.0.0.1:5179\"", "\"bindUrl\": \"http://localhost:5199\"");
+
+        var configPath = Path.Combine(fx.RootPath, "custom.swarm.json");
+        File.WriteAllText(configPath, customJson);
+
+        // Baseline appsettings.json defines defaults (GitHubProjectNumber=1, BindUrl=127.0.0.1:5179);
+        // an explicit in-memory override equal to those defaults MUST still take precedence over SwarmConfig.
+        var baselineAppSettings = Path.Combine(fx.RootPath, "appsettings.json");
+        File.WriteAllText(baselineAppSettings, """
+            {
+              "Dashboard": {
+                "BindUrl": "http://127.0.0.1:5179",
+                "GitHubRepository": "ahuelsmann/MOBAflow",
+                "GitHubProjectNumber": 1,
+                "GitHubProjectOwner": "ahuelsmann"
+              }
+            }
+            """);
+
+        var configuration = new ConfigurationBuilder()
+            .AddJsonFile(baselineAppSettings, optional: false)
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Dashboard:SwarmConfigPath"] = configPath,
+                ["Dashboard:GitHubProjectNumber"] = "1",
+                ["Dashboard:BindUrl"] = "http://127.0.0.1:5179"
+            })
+            .Build();
+
+        var explicitKeys = DashboardOptions.CaptureExplicitOverrideKeys(configuration);
+        var options = configuration.GetSection(DashboardOptions.SectionName).Get<DashboardOptions>()!
+            .ResolveWithSwarmConfig(new Dictionary<string, string?>(), explicitKeys);
+
+        Assert.Equal(1, options.GitHubProjectNumber);
+        Assert.Equal("http://127.0.0.1:5179", options.BindUrl);
+
+        // Without explicit override in higher-precedence provider, appsettings.json baseline yields to SwarmConfig (42 / 5199).
+        var baselineOnlyConfig = new ConfigurationBuilder()
+            .AddJsonFile(baselineAppSettings, optional: false)
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Dashboard:SwarmConfigPath"] = configPath
+            })
+            .Build();
+
+        var baselineExplicitKeys = DashboardOptions.CaptureExplicitOverrideKeys(baselineOnlyConfig);
+        var fromSwarm = baselineOnlyConfig.GetSection(DashboardOptions.SectionName).Get<DashboardOptions>()!
+            .ResolveWithSwarmConfig(new Dictionary<string, string?>(), baselineExplicitKeys);
+
+        Assert.Equal(42, fromSwarm.GitHubProjectNumber);
+        Assert.Equal("http://localhost:5199", fromSwarm.BindUrl);
     }
 
     private static void AssertObjectMatchesSchema(JsonElement instanceObj, JsonElement schemaObj)

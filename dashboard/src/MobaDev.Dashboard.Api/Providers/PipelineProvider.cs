@@ -13,7 +13,7 @@ public sealed partial class PipelineProvider
 {
     private readonly ICommandRunner _commandRunner;
     private readonly object _fallbackLock = new();
-    private PipelineResponse? _lastSuccessfulResponse;
+    private readonly Dictionary<string, PipelineResponse> _lastSuccessfulResponses = new(StringComparer.OrdinalIgnoreCase);
 
     public PipelineProvider(ICommandRunner commandRunner)
     {
@@ -55,9 +55,13 @@ public sealed partial class PipelineProvider
         await Task.WhenAll(openPrTask, mergedPrTask, projectTask, issuesTask).ConfigureAwait(false);
 
         var openResult = openPrTask.Result;
-        if (!openResult.Succeeded)
+        var pullRequestsDisabled = await IsPullRequestsDisabledAsync(
+            openResult,
+            options.GitHubRepository,
+            cancellationToken).ConfigureAwait(false);
+        if (!openResult.Succeeded && !pullRequestsDisabled)
         {
-            return BuildUnavailableOrCached(options.GitHubRepository, now, openResult);
+            return BuildUnavailableOrCached(options, now, openResult);
         }
 
         var (projectAvailable, projectNotice, projectStatuses, kanbanItems) = projectTask.Result;
@@ -66,16 +70,19 @@ public sealed partial class PipelineProvider
         try
         {
             var mergedResult = mergedPrTask.Result;
+            var openJson = openResult.Succeeded ? openResult.StdOut : "[]";
             var mergedJson = mergedResult.Succeeded ? mergedResult.StdOut : null;
-            var knownPrNumbers = CollectPrNumbers(openResult.StdOut, mergedJson);
+            var knownPrNumbers = CollectPrNumbers(openJson, mergedJson);
 
-            var openPullRequests = ParsePullRequests(
-                openResult.StdOut,
-                isMergedList: false,
-                options.GitHubRepository,
-                projectStatuses,
-                issuesByNumber,
-                knownPrNumbers);
+            var openPullRequests = openResult.Succeeded
+                ? ParsePullRequests(
+                    openResult.StdOut,
+                    isMergedList: false,
+                    options.GitHubRepository,
+                    projectStatuses,
+                    issuesByNumber,
+                    knownPrNumbers)
+                : [];
 
             var recentlyMerged = mergedResult.Succeeded
                 ? ParseMergedSafe(mergedResult.StdOut, options.GitHubRepository, issuesByNumber, knownPrNumbers)
@@ -93,6 +100,10 @@ public sealed partial class PipelineProvider
                 ? $"https://github.com/users/{options.GitHubProjectOwner}/projects/{options.GitHubProjectNumber}"
                 : null;
 
+            var sourceNotice = pullRequestsDisabled
+                ? "Pull requests are disabled on this repository; showing issues and project board only."
+                : null;
+
             var response = new PipelineResponse(
                 GeneratedAtUtc: now,
                 Repository: options.GitHubRepository,
@@ -102,11 +113,12 @@ public sealed partial class PipelineProvider
                 ProjectBoardAvailable: projectAvailable,
                 ProjectBoardNotice: projectNotice,
                 ProjectBoardUrl: projectBoardUrl,
-                Source: new SourceHealth("ok", now));
+                Source: new SourceHealth("ok", now, sourceNotice));
 
+            var cacheKey = BuildCacheKey(options);
             lock (_fallbackLock)
             {
-                _lastSuccessfulResponse = response;
+                _lastSuccessfulResponses[cacheKey] = response;
             }
 
             return response;
@@ -114,21 +126,76 @@ public sealed partial class PipelineProvider
         catch (JsonException ex)
         {
             return BuildUnavailableOrCached(
-                options.GitHubRepository,
+                options,
                 now,
                 new CommandResult(-1, string.Empty, ex.Message));
         }
     }
 
-    private PipelineResponse BuildUnavailableOrCached(
+    private async Task<bool> IsPullRequestsDisabledAsync(
+        CommandResult result,
         string repository,
+        CancellationToken cancellationToken)
+    {
+        var (definitelyDisabled, needs404Confirmation) = ClassifyPullRequestsError(result);
+        if (definitelyDisabled)
+        {
+            return true;
+        }
+
+        if (!needs404Confirmation || string.IsNullOrWhiteSpace(repository))
+        {
+            return false;
+        }
+
+        var metadataResult = await _commandRunner.RunAsync(
+            "gh",
+            ["api", $"repos/{repository.Trim()}", "--jq", ".has_pull_requests"],
+            workingDirectory: null,
+            timeout: TimeSpan.FromSeconds(8),
+            cancellationToken).ConfigureAwait(false);
+
+        return metadataResult.Succeeded &&
+               string.Equals(metadataResult.StdOut.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static (bool DefinitelyDisabled, bool Needs404Confirmation) ClassifyPullRequestsError(CommandResult result)
+    {
+        if (result.Succeeded || result.NotFound || result.TimedOut || string.IsNullOrWhiteSpace(result.StdErr))
+        {
+            return (false, false);
+        }
+
+        var err = result.StdErr;
+        if (err.Contains("Pull requests are disabled", StringComparison.OrdinalIgnoreCase) ||
+            err.Contains("Pull requests have been disabled", StringComparison.OrdinalIgnoreCase) ||
+            err.Contains("disabled pull requests", StringComparison.OrdinalIgnoreCase))
+        {
+            return (true, false);
+        }
+
+        var mentionsPullsEndpoint = err.Contains("/pulls", StringComparison.OrdinalIgnoreCase);
+        if (err.Contains("HTTP 410", StringComparison.OrdinalIgnoreCase) ||
+            (mentionsPullsEndpoint && err.Contains("410", StringComparison.Ordinal)))
+        {
+            return (true, false);
+        }
+
+        var has404 = err.Contains("HTTP 404", StringComparison.OrdinalIgnoreCase) ||
+                     (mentionsPullsEndpoint && err.Contains("404", StringComparison.Ordinal));
+        return (false, has404);
+    }
+
+    private PipelineResponse BuildUnavailableOrCached(
+        DashboardOptions options,
         DateTimeOffset now,
         CommandResult failedResult)
     {
         PipelineResponse? cached;
+        var cacheKey = BuildCacheKey(options);
         lock (_fallbackLock)
         {
-            cached = _lastSuccessfulResponse;
+            _lastSuccessfulResponses.TryGetValue(cacheKey, out cached);
         }
 
         var reason = failedResult.NotFound
@@ -152,7 +219,7 @@ public sealed partial class PipelineProvider
 
         return new PipelineResponse(
             GeneratedAtUtc: now,
-            Repository: repository,
+            Repository: options.GitHubRepository,
             PullRequests: [],
             RecentlyMerged: [],
             ActiveIssues: [],
@@ -160,6 +227,11 @@ public sealed partial class PipelineProvider
             ProjectBoardNotice: null,
             ProjectBoardUrl: null,
             Source: new SourceHealth("unavailable", now, reason));
+    }
+
+    private static string BuildCacheKey(DashboardOptions options)
+    {
+        return $"{options.GitHubRepository?.Trim()}|{options.GitHubProjectOwner?.Trim()}|{options.GitHubProjectNumber}";
     }
 
     private const string ActiveKanbanGraphQlQuery =

@@ -9,7 +9,7 @@ using MobaDev.Dashboard.Api.Security;
 namespace MobaDev.Dashboard.Api.Providers;
 
 /// <summary>
-/// Reads standing MOBAi Claude Opus (formerly Claude Head / Claude Monitor) metadata from ~/.claude/sessions/*.json
+/// Reads standing AiSwarmX Claude Opus (formerly MOBAi Claude Opus / Claude Head / Claude Monitor) metadata from ~/.claude/sessions/*.json
 /// and only model/rate-limit metadata from the tail of the active session transcript without ever exposing chat text.
 /// </summary>
 public sealed partial class ClaudeMonitorProvider
@@ -17,9 +17,10 @@ public sealed partial class ClaudeMonitorProvider
     private const int TailReadBytes = 64 * 1024;
     private static readonly TimeSpan SubAgentActiveWindow = TimeSpan.FromMinutes(2);
     private const string MonitorId = "claude-monitor";
-    private const string DisplayName = "MOBAi Claude Opus";
+    private const string DisplayName = "AiSwarmX Claude Opus";
     private const string LegacyHeadDisplayName = "Claude Head";
     private const string LegacyMonitorDisplayName = "Claude Monitor";
+    private const string AiSwarmXNamespacePrefix = "AiSwarmX ";
     private const string MobaNamespacePrefix = "MOBAi ";
     private const string MobaAltPrefix = "MOBA ";
     private const string Role = "Chief Operating Officer (COO)";
@@ -122,7 +123,7 @@ public sealed partial class ClaudeMonitorProvider
             effectiveThreshold);
 
         var notice = sessions.Count > 1
-            ? $"{sessions.Count} active MOBAi Claude sessions detected (target: 1)."
+            ? $"{sessions.Count} active AiSwarmX Claude sessions detected (target: 1)."
             : null;
 
         return Task.FromResult(new MonitorInfo(
@@ -938,7 +939,8 @@ public sealed partial class ClaudeMonitorProvider
 
     private static bool IsMobaSessionName(string trimmedName)
     {
-        return trimmedName.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
+        return trimmedName.StartsWith(AiSwarmXNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
+               trimmedName.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase) ||
                trimmedName.StartsWith(MobaAltPrefix, StringComparison.OrdinalIgnoreCase) ||
                string.Equals(trimmedName, LegacyHeadDisplayName, StringComparison.OrdinalIgnoreCase) ||
                string.Equals(trimmedName, LegacyMonitorDisplayName, StringComparison.OrdinalIgnoreCase);
@@ -954,7 +956,12 @@ public sealed partial class ClaudeMonitorProvider
 
         if (string.Equals(trimmed, DisplayName, StringComparison.OrdinalIgnoreCase))
         {
-            return 5;
+            return 7;
+        }
+
+        if (trimmed.StartsWith(AiSwarmXNamespacePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed.Contains("Claude", StringComparison.OrdinalIgnoreCase) ? 6 : 5;
         }
 
         if (trimmed.StartsWith(MobaNamespacePrefix, StringComparison.OrdinalIgnoreCase))

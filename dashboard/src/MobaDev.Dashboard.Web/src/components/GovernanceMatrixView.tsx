@@ -319,7 +319,7 @@ export function GovernanceMatrixView({
                 appearance="subtle"
                 icon={<ArrowRight16Regular />}
                 iconPosition="after"
-                onClick={() => onOpenDoc('mobadev', 'manifest.md')}
+                onClick={() => onOpenDoc('aiswarmx', 'manifest.md')}
               >
                 Manifest
               </Button>
@@ -328,7 +328,7 @@ export function GovernanceMatrixView({
                 appearance="subtle"
                 icon={<ArrowRight16Regular />}
                 iconPosition="after"
-                onClick={() => onOpenDoc('mobadev', 'docs/delivery-workflow.md')}
+                onClick={() => onOpenDoc('aiswarmx', 'docs/delivery-workflow.md')}
               >
                 Delivery Workflow
               </Button>
@@ -354,14 +354,14 @@ export function GovernanceMatrixView({
         <MessageBar intent="success">
           <MessageBarBody>
             <strong>In Sync:</strong> All {governance.syncedCount} local agents and rules match the
-            MOBAdev target baseline.
+            AISwarmX target baseline.
           </MessageBarBody>
         </MessageBar>
       ) : (
         <MessageBar intent="warning">
           <MessageBarBody>
             <strong>Drift Detected:</strong> {governance.driftCount} drift(s) and{' '}
-            {governance.missingCount} missing mapping(s) between local machine (Actual) and MOBAdev
+            {governance.missingCount} missing mapping(s) between local machine (Actual) and AISwarmX
             (Target).
           </MessageBarBody>
         </MessageBar>
@@ -432,7 +432,7 @@ export function GovernanceMatrixView({
             <CheckmarkCircle16Regular style={{ width: 22, height: 22 }} aria-hidden="true" />
             <Text weight="semibold">No matching entries for active filters</Text>
             <Text size={200}>
-              All local rules match MOBAdev or matching rows are hidden by current filters.
+              All local rules match AISwarmX or matching rows are hidden by current filters.
             </Text>
           </div>
         ) : (
@@ -669,7 +669,7 @@ export function GovernanceMatrixView({
             </div>
           </Card>
 
-          <Card className={styles.card} appearance="filled" aria-label="Versioned Skills in MOBAdev">
+          <Card className={styles.card} appearance="filled" aria-label="Versioned Skills in AISwarmX">
             <div className={styles.cardHeader}>
               <h2 className={styles.title}>Skills ({governance.skills.length})</h2>
             </div>
@@ -737,7 +737,7 @@ function RuleDiffPreview({
     <div className={styles.diffContainer} aria-label={`Read-only diff for ${diff.fileName}`}>
       <div className={styles.diffHeader}>
         <Text size={200} weight="semibold">
-          Target (MOBAdev) vs. Actual (Local)
+          Target (AISwarmX) vs. Actual (Local)
         </Text>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <Badge appearance="tint" color="success" shape="rounded" size="small" className="tabular">

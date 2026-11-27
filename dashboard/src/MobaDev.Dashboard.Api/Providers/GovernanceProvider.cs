@@ -8,7 +8,7 @@ using MobaDev.Dashboard.Api.Security;
 namespace MobaDev.Dashboard.Api.Providers;
 
 /// <summary>
-/// Reads capability profiles, roles, risk classes, skills, and local-vs-MOBAdev drift status
+/// Reads capability profiles, roles, risk classes, skills, and local-vs-AISwarmX drift status
 /// strictly from repository and allowed user config Markdown files.
 /// </summary>
 public sealed partial class GovernanceProvider
@@ -32,7 +32,7 @@ public sealed partial class GovernanceProvider
         if (profiles.Count == 0 && roles.Count == 0)
         {
             sourceStatus = "degraded";
-            notice = "MOBAflow governance documents not found; showing MOBAdev inventory only.";
+            notice = "MOBAflow governance documents not found; showing AISwarmX inventory only.";
         }
 
         return Task.FromResult(new GovernanceResponse(
@@ -50,8 +50,8 @@ public sealed partial class GovernanceProvider
 
     private static List<CapabilityProfileInfo> ParseProfiles(string mobaFlowRepoPath)
     {
-        var filePath = Path.Combine(mobaFlowRepoPath, "docs", "AI-DEVELOPMENT.md");
-        if (!File.Exists(filePath) || !PathWhitelistGuard.IsAllowedFilePath(filePath))
+        var filePath = ResolveAiDevelopmentDocPath(mobaFlowRepoPath);
+        if (filePath is null)
         {
             return [];
         }
@@ -81,6 +81,23 @@ public sealed partial class GovernanceProvider
         }
 
         return result;
+    }
+
+    private static string? ResolveAiDevelopmentDocPath(string mobaFlowRepoPath)
+    {
+        if (string.IsNullOrWhiteSpace(mobaFlowRepoPath))
+        {
+            return null;
+        }
+
+        var candidates = new[]
+        {
+            Path.Combine(mobaFlowRepoPath, "docs", "developer", "AI-DEVELOPMENT.md"),
+            Path.Combine(mobaFlowRepoPath, "docs", "AI-DEVELOPMENT.md")
+        };
+
+        return candidates.FirstOrDefault(path =>
+            File.Exists(path) && PathWhitelistGuard.IsAllowedFilePath(path));
     }
 
     private static string SanitizeDeprecatedModels(string models)
@@ -274,7 +291,7 @@ public sealed partial class GovernanceProvider
                     (not null, not null) when repoHash == localHash => ("synced", (string?)null),
                     (not null, not null) => ("drift", DescribeDrift(repoContent!, localContent!, paths.MobaFlowRepoPath)),
                     (not null, null) => ("missing_local", "Not installed locally"),
-                    (null, not null) => ("missing_repo", "Missing in MOBAdev backup"),
+                    (null, not null) => ("missing_repo", "Missing in AISwarmX backup"),
                     _ => ("missing_local", "Source missing")
                 };
 
@@ -327,7 +344,7 @@ public sealed partial class GovernanceProvider
             skills.Add(new SkillInfo(
                 Name: !string.IsNullOrWhiteSpace(name) ? name : dirName,
                 Description: description ?? string.Empty,
-                SourceRepo: "MOBAdev",
+                SourceRepo: "AISwarmX",
                 RelativePath: $"skills/{dirName}/SKILL.md"));
         }
 

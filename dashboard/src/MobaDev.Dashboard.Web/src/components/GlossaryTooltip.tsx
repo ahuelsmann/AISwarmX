@@ -11,7 +11,7 @@ const GLOSSARY_ENTRIES: Record<string, string> = {
   M: 'Risk Class M (Medium): Product features, UI, audio, or MOBAnews. Requires companion review plus P3 UI/UX check for user-facing slices.',
   L: 'Risk Class L (Low): Documentation, wiki, or small non-behavioral fixes. Requires final P1 review plus cross-family check.',
   Drift:
-    'Difference between the local configuration file on this machine (Actual) and the versioned baseline in MOBAdev (Target).',
+    'Difference between the local configuration file on this machine (Actual) and the versioned baseline in AISwarmX (Target).',
   Worktree:
     'Separate Git working directory for an isolated branch so parallel tasks stay cleanly separated.',
   CLEAN: 'Branch can be merged cleanly without conflicts or missing commits from main.',

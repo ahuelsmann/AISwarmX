@@ -6,7 +6,7 @@ using MobaDev.Dashboard.Api.Security;
 namespace MobaDev.Dashboard.Api.Providers;
 
 /// <summary>
-/// Strictly allow-listed, read-only provider for MOBAdev configuration files and MOBAflow instructions.
+/// Strictly allow-listed, read-only provider for AISwarmX configuration files and MOBAflow instructions.
 /// Never accesses files outside predefined Markdown catalogs or files blocked by <see cref="PathWhitelistGuard"/>.
 /// </summary>
 public sealed class ConfigDocsProvider
@@ -92,19 +92,20 @@ public sealed class ConfigDocsProvider
 
     private static string NormalizeScope(string scope)
     {
-        if (string.Equals(scope, "mobadev", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(scope, "aiswarmx", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(scope, "mobadev", StringComparison.OrdinalIgnoreCase))
         {
-            return "mobadev";
+            return "aiswarmx";
         }
 
-        throw new ArgumentException("Unsupported config docs scope. Expected 'mobadev'.", nameof(scope));
+        throw new ArgumentException("Unsupported config docs scope. Expected 'aiswarmx' (or legacy 'mobadev').", nameof(scope));
     }
 
     private static (string Repository, string RepoRoot, List<CatalogEntry> Entries) DiscoverAllowListedFiles(
         ResolvedDashboardPaths paths,
         string scope)
     {
-        var repo = "ahuelsmann/MOBAdev";
+        var repo = "ahuelsmann/AISwarmX";
         var root = paths.MobaDevRepoPath;
         var entries = new List<CatalogEntry>();
         if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))

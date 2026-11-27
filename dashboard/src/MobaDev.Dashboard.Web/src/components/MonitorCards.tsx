@@ -46,7 +46,8 @@ import {
   resolveToolTone
 } from './RoleAndModelIcons';
 
-export const MONITOR_GRID_COOKIE = 'mobadev_monitor_grid_v1';
+export const MONITOR_GRID_COOKIE = 'aiswarmx_monitor_grid_v1';
+export const LEGACY_MONITOR_GRID_COOKIE = 'mobadev_monitor_grid_v1';
 export const MONITOR_GRID_SLOT_COUNT = 6;
 export const DEFAULT_MONITOR_SLOTS: (string | null)[] = [
   'codex-monitor',
@@ -251,13 +252,13 @@ const MONITOR_DISPLAY_ORDER = [
   'antigravity-opus-head'
 ];
 
-export function readMonitorGridCookie(): (string | null)[] | null {
+function readCookieSlots(cookieName: string): (string | null)[] | null {
   try {
     if (typeof document === 'undefined' || !document.cookie) {
       return null;
     }
 
-    const prefix = `${MONITOR_GRID_COOKIE}=`;
+    const prefix = `${cookieName}=`;
     const parts = document.cookie.split(';');
     for (const part of parts) {
       const trimmed = part.trim();
@@ -287,6 +288,10 @@ export function readMonitorGridCookie(): (string | null)[] | null {
   return null;
 }
 
+export function readMonitorGridCookie(): (string | null)[] | null {
+  return readCookieSlots(MONITOR_GRID_COOKIE) ?? readCookieSlots(LEGACY_MONITOR_GRID_COOKIE);
+}
+
 export function writeMonitorGridCookie(slots: (string | null)[]): void {
   try {
     if (typeof document === 'undefined') {
@@ -313,6 +318,7 @@ export function clearMonitorGridCookie(): void {
     }
 
     document.cookie = `${MONITOR_GRID_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
+    document.cookie = `${LEGACY_MONITOR_GRID_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
   } catch {
     // Ignore restricted cookie write errors.
   }
@@ -423,16 +429,16 @@ export function formatQuotaPauseSuffix(monitors: MonitorInfo[]): string {
 
 function resolveMonitorMandate(monitor: MonitorInfo): string {
   if (monitor.id === 'antigravity-opus-head' || /antigravity opus|opus head/i.test(monitor.displayName)) {
-    return 'MOBAi Antigravity Opus (P1 Opus 5.5) · Acting COO & Sub-Agent Swarm Spawner';
+    return 'AiSwarmX Antigravity Opus (P1 Opus 5.5) · Acting COO & Sub-Agent Swarm Spawner';
   }
   if (monitor.id === 'antigravity-monitor' || /antigravity gemini|argon head/i.test(monitor.displayName)) {
-    return 'MOBAi Antigravity Gemini (P3) · AI Strategy, UI/UX & Sub-Agent Swarm Spawner';
+    return 'AiSwarmX Antigravity Gemini (P3) · AI Strategy, UI/UX & Sub-Agent Swarm Spawner';
   }
   if (monitor.id === 'claude-monitor' || /claude/i.test(monitor.displayName)) {
-    return 'MOBAi Claude Opus (P1 COO) · Kanban Single-Writer & Swarm Spawner';
+    return 'AiSwarmX Claude Opus (P1 COO) · Kanban Single-Writer & Swarm Spawner';
   }
   if (monitor.id === 'codex-monitor' || /chatgpt|gpt head|codex/i.test(monitor.displayName)) {
-    return 'MOBAi ChatGPT Codex (P2 TD & CPM) · Architecture Veto & Cross-Family Swarm Spawner';
+    return 'AiSwarmX ChatGPT Codex (P2 TD & CPM) · Architecture Veto & Cross-Family Swarm Spawner';
   }
   return monitor.role;
 }

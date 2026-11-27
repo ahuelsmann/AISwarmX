@@ -188,31 +188,31 @@ export function ArchitectureDiagramsView({
       title: 'Decision & Steering Triad (4 Standing Master / Root Heads)',
       badge: `4/4 Root Heads · Code WIP ${openPrCount}/3`,
       tone: openPrCount > 3 ? 'danger' : 'ok',
-      body: 'Standing coordination layer across MOBAi ChatGPT Codex (P2 Technical Director & CPM), MOBAi Claude Opus (P1 COO), MOBAi Antigravity Opus (P1 Acting COO & Opus Orchestrator), and MOBAi Antigravity Gemini (P3 Head of AI Strategy & UI/UX). All 4 Root Heads can spawn and steer arbitrary multi-model sub-agent swarms.'
+      body: 'Standing coordination layer across AiSwarmX ChatGPT Codex (P2 Technical Director & CPM), AiSwarmX Claude Opus (P1 COO), AiSwarmX Antigravity Opus (P1 Acting COO & Opus Orchestrator), and AiSwarmX Antigravity Gemini (P3 Head of AI Strategy & UI/UX). All 4 Root Heads can spawn and steer arbitrary multi-model sub-agent swarms.'
     },
     'codex-monitor': {
-      title: `MOBAi ChatGPT Codex · P2 (${codexMon?.model ?? 'gpt-6.2-sol'})`,
+      title: `AiSwarmX ChatGPT Codex · P2 (${codexMon?.model ?? 'gpt-6.2-sol'})`,
       badge: `${stateLabelShort(codexMon?.state ?? 'offline')} · Sub-agents: ${codexMon?.activeSubAgentCount ?? 0}`,
       tone: stateToStatusKey(codexMon?.state ?? 'offline'),
       body: 'Master/Root ChatGPT Codex session running as Technical Director & CPM. Tracks Kanban slices, dispatches Codex Writer / Reviewer sub-agents in isolated worktrees, and runs read-only P2 cross-family reviews.'
     },
     'claude-monitor': {
-      title: `MOBAi Claude Opus · P1 (${claudeMon?.model ?? 'Claude Opus 5.5'})`,
+      title: `AiSwarmX Claude Opus · P1 (${claudeMon?.model ?? 'Claude Opus 5.5'})`,
       badge: `${stateLabelShort(claudeMon?.state ?? 'offline')} · Sub-agents: ${claudeMon?.activeSubAgentCount ?? 0}`,
       tone: stateToStatusKey(claudeMon?.state ?? 'offline'),
       body: 'Master/Root Claude Code session acting as Chief Operating Officer (COO) & Kanban single-writer. Spawns fresh P1 sub-agents for deep architectural implementation and clean-context Final Reviews.'
     },
     'antigravity-opus-head': {
-      title: `MOBAi Antigravity Opus · P1 (${opusMon?.model ?? 'Orchestrator · Claude Opus 5.5'})`,
+      title: `AiSwarmX Antigravity Opus · P1 (${opusMon?.model ?? 'Orchestrator · Claude Opus 5.5'})`,
       badge: `${stateLabelShort(opusMon?.state ?? 'offline')} · Sub-agents: ${opusMon?.activeSubAgentCount ?? 0}`,
       tone: stateToStatusKey(opusMon?.state ?? 'offline'),
       body: 'Master/Root Antigravity Orchestrator running Claude Opus under Google AI Ultra. Acts as P1 Acting COO / Architecture Lead & Fresh P1 Final Reviewer with full sub-agent swarm spawning.'
     },
     'antigravity-monitor': {
-      title: `MOBAi Antigravity Gemini · P3 (${agMon?.model ?? 'Orchestrator · Gemini 4 Argon'})`,
+      title: `AiSwarmX Antigravity Gemini · P3 (${agMon?.model ?? 'Orchestrator · Gemini 4 Argon'})`,
       badge: `${stateLabelShort(agMon?.state ?? 'offline')} · Sub-agents: ${agMon?.activeSubAgentCount ?? 0}`,
       tone: stateToStatusKey(agMon?.state ?? 'offline'),
-      body: 'Master/Root Antigravity Orchestrator running Gemini (Carbon/Neon/Argon). Acts as Head of AI Strategy, UI/UX Architecture Lead (WinUI 3, MAUI, MOBAdev cockpit), and multi-model sub-agent swarm coordinator.'
+      body: 'Master/Root Antigravity Orchestrator running Gemini (Carbon/Neon/Argon). Acts as Head of AI Strategy, UI/UX Architecture Lead (WinUI 3, MAUI, AISwarmX cockpit), and multi-model sub-agent swarm coordinator.'
     },
     subagents: {
       title: 'Ephemeral Runtime Sub-Agents (Spawned per Task / PR)',
@@ -224,7 +224,7 @@ export function ArchitectureDiagramsView({
       title: 'Repositories & GitHub Project Source of Truth',
       badge: `${openPrCount} Open PRs · ${activeIssues.length} Active Issues`,
       tone: snapshot.warningCount > 0 ? 'warn' : 'ok',
-      body: 'All decisions, locks, checks, and evidence converge back into MOBAflow, MOBAdev, and the GitHub Kanban board so no work exists only in private chat history.'
+      body: 'All decisions, locks, checks, and evidence converge back into MOBAflow, AISwarmX, and the GitHub Kanban board so no work exists only in private chat history.'
     }
   };
 
@@ -287,7 +287,7 @@ export function ArchitectureDiagramsView({
       id: 'codex-monitor',
       x: 22,
       cx: 124,
-      title: 'MOBAi ChatGPT Codex',
+      title: 'AiSwarmX ChatGPT Codex',
       subtitle: 'Technical Director & CPM',
       profile: 'P2 · ChatGPT Codex',
       identityColors: p2Colors,
@@ -297,7 +297,7 @@ export function ArchitectureDiagramsView({
       id: 'claude-monitor',
       x: 246,
       cx: 348,
-      title: 'MOBAi Claude Opus',
+      title: 'AiSwarmX Claude Opus',
       subtitle: 'Chief Operating Officer',
       profile: 'P1 · Claude Code',
       identityColors: p1Colors,
@@ -307,7 +307,7 @@ export function ArchitectureDiagramsView({
       id: 'antigravity-opus-head',
       x: 470,
       cx: 572,
-      title: 'MOBAi Antigravity Opus',
+      title: 'AiSwarmX Antigravity Opus',
       subtitle: 'Acting COO · Opus Root',
       profile: 'P1 · Antigravity Opus',
       identityColors: p1Colors,
@@ -317,7 +317,7 @@ export function ArchitectureDiagramsView({
       id: 'antigravity-monitor',
       x: 694,
       cx: 796,
-      title: 'MOBAi Antigravity Gemini',
+      title: 'AiSwarmX Antigravity Gemini',
       subtitle: 'AI Strategy & UI/UX',
       profile: 'P3 · Antigravity Gemini',
       identityColors: p3Colors,
@@ -904,7 +904,7 @@ export function ArchitectureDiagramsView({
                 fontSize="11.5"
                 fontWeight="600"
               >
-                Live Source of Truth: MOBAflow ({snapshot.hygiene.worktrees.length} Worktrees) · MOBAdev (Rules &amp; Dashboard) · GitHub Project Kanban
+                Live Source of Truth: MOBAflow ({snapshot.hygiene.worktrees.length} Worktrees) · AISwarmX (Rules &amp; Dashboard) · GitHub Project Kanban
               </text>
             </g>
           </svg>
