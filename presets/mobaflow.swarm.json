@@ -69,7 +69,8 @@
         "claude-fable-5-2",
         "GPT-6 Astra",
         "gpt-6-astra",
-        "GPT-6.1 Sol"
+        "GPT-6.1 Sol",
+        "gpt-6-1-sol"
       ]
     },
     "P3": {
@@ -82,7 +83,9 @@
         "Claude Fable 5.2",
         "claude-fable-5-2",
         "Gemini 4 Argon",
-        "Gemini 4 Neon"
+        "gemini-4-argon",
+        "Gemini 4 Neon",
+        "gemini-4-neon"
       ]
     },
     "P4": {

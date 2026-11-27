@@ -1,10 +1,11 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using MobaDev.Dashboard.Api.Configuration;
 using Xunit;
 
 namespace MobaDev.Dashboard.Api.Tests;
 
-public sealed class SwarmWorkspaceConfigTests
+public sealed partial class SwarmWorkspaceConfigTests
 {
     [Fact]
     public void LoadFromFile_LoadsPresetConfigWithMultiProjectWorkspacesProfilesAndAgents()
@@ -19,6 +20,7 @@ public sealed class SwarmWorkspaceConfigTests
         Assert.Equal("1.0", config.SchemaVersion);
         Assert.False(string.IsNullOrWhiteSpace(config.SwarmName));
         Assert.Equal("mobaflow", config.DefaultWorkspaceId);
+        Assert.Equal(repoRoot, config.BaseDirectory);
 
         Assert.Equal(2, config.Workspaces.Count);
 
@@ -29,8 +31,10 @@ public sealed class SwarmWorkspaceConfigTests
         Assert.Equal(1, mobaFlow.GitHubProjectNumber);
         Assert.Equal(3, mobaFlow.CodeWipLimit);
         Assert.Equal(["docs/", "specs/", "plans/"], mobaFlow.LowRiskDocPrefixes);
-        Assert.Equal("scripts/Invoke-RepoHygiene.ps1", mobaFlow.Scripts?.Hygiene);
-        Assert.Equal("scripts/Invoke-SwarmWatchdog.ps1", mobaFlow.Scripts?.Watchdog);
+        Assert.Equal(Path.Combine(repoRoot, "scripts", "Invoke-RepoHygiene.ps1"), mobaFlow.Scripts?.Hygiene);
+        Assert.Equal(Path.Combine(repoRoot, "scripts", "Invoke-SwarmWatchdog.ps1"), mobaFlow.Scripts?.Watchdog);
+        Assert.True(File.Exists(mobaFlow.Scripts?.Hygiene));
+        Assert.True(File.Exists(mobaFlow.Scripts?.Watchdog));
 
         var mobaDev = config.GetWorkspace("mobadev");
         Assert.Equal("mobadev", mobaDev.Id);
@@ -58,6 +62,9 @@ public sealed class SwarmWorkspaceConfigTests
 
         Assert.True(config.Bus.LockTtlMinutes >= 5);
         Assert.Equal("http://127.0.0.1:5179", config.Dashboard.BindUrl);
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(repoRoot, "dashboard", "src", "MobaDev.Dashboard.Web", "dist")),
+            config.Dashboard.StaticWebRootPath);
     }
 
     [Fact]
@@ -74,44 +81,48 @@ public sealed class SwarmWorkspaceConfigTests
         var presetRoot = presetDoc.RootElement;
 
         Assert.Equal("https://json-schema.org/draft/2020-12/schema", schemaRoot.GetProperty("$schema").GetString());
-        Assert.False(schemaRoot.GetProperty("additionalProperties").GetBoolean());
+        AssertObjectMatchesSchema(presetRoot, schemaRoot);
 
-        var schemaRootProps = GetPropertyNames(schemaRoot.GetProperty("properties"));
-        var schemaRootRequired = GetStringArray(schemaRoot.GetProperty("required"));
-        foreach (var presetProp in presetRoot.EnumerateObject())
-        {
-            Assert.Contains(presetProp.Name, schemaRootProps);
-        }
-
-        foreach (var requiredProp in schemaRootRequired)
-        {
-            Assert.True(presetRoot.TryGetProperty(requiredProp, out _), $"Preset missing required root property '{requiredProp}'.");
-        }
-
+        // Workspaces array items
         var workspaceSchema = schemaRoot.GetProperty("properties").GetProperty("workspaces").GetProperty("items");
-        Assert.False(workspaceSchema.GetProperty("additionalProperties").GetBoolean());
-
-        var workspaceSchemaProps = GetPropertyNames(workspaceSchema.GetProperty("properties"));
-        var workspaceRequired = GetStringArray(workspaceSchema.GetProperty("required"));
-
+        var scriptsSchema = workspaceSchema.GetProperty("properties").GetProperty("scripts");
         foreach (var workspace in presetRoot.GetProperty("workspaces").EnumerateArray())
         {
-            foreach (var prop in workspace.EnumerateObject())
+            AssertObjectMatchesSchema(workspace, workspaceSchema);
+            if (workspace.TryGetProperty("scripts", out var scripts))
             {
-                Assert.Contains(prop.Name, workspaceSchemaProps);
-            }
-
-            foreach (var requiredProp in workspaceRequired)
-            {
-                Assert.True(workspace.TryGetProperty(requiredProp, out _), $"Workspace missing required property '{requiredProp}'.");
+                AssertObjectMatchesSchema(scripts, scriptsSchema);
             }
         }
+
+        // Capability profiles P1-P4
+        var profilesSchema = schemaRoot.GetProperty("properties").GetProperty("capabilityProfiles");
+        var profileDefSchema = schemaRoot.GetProperty("$defs").GetProperty("capabilityProfile");
+        var presetProfiles = presetRoot.GetProperty("capabilityProfiles");
+        AssertObjectMatchesSchema(presetProfiles, profilesSchema);
+        foreach (var profileProp in presetProfiles.EnumerateObject())
+        {
+            AssertObjectMatchesSchema(profileProp.Value, profileDefSchema);
+        }
+
+        // Standing agents and wakeAdapter
+        var agentSchema = schemaRoot.GetProperty("properties").GetProperty("standingAgents").GetProperty("items");
+        var wakeAdapterSchema = agentSchema.GetProperty("properties").GetProperty("wakeAdapter");
+        foreach (var agent in presetRoot.GetProperty("standingAgents").EnumerateArray())
+        {
+            AssertObjectMatchesSchema(agent, agentSchema);
+            AssertObjectMatchesSchema(agent.GetProperty("wakeAdapter"), wakeAdapterSchema);
+        }
+
+        // Bus and dashboard sections
+        AssertObjectMatchesSchema(presetRoot.GetProperty("bus"), schemaRoot.GetProperty("properties").GetProperty("bus"));
+        AssertObjectMatchesSchema(presetRoot.GetProperty("dashboard"), schemaRoot.GetProperty("properties").GetProperty("dashboard"));
     }
 
     [Theory]
     [InlineData("presets/mobaflow.swarm.json")]
     [InlineData("schemas/swarm.config.schema.json")]
-    public void RepositoryArtifacts_DoNotContainPersonalPathsOrThreadUuids(string relativePath)
+    public void RepositoryArtifacts_DoNotContainPersonalPathsOrGuidLiterals(string relativePath)
     {
         var repoRoot = FindWorktreeRoot();
         var fullPath = Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -120,7 +131,7 @@ public sealed class SwarmWorkspaceConfigTests
         Assert.DoesNotContain(@"C:\Users\", content, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("/Users/", content, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("/home/", content, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("01a14504-bd6c-7a50-b715-1a2f2ec76467", content, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotMatch(GuidPatternRegex(), content);
     }
 
     [Fact]
@@ -152,51 +163,150 @@ public sealed class SwarmWorkspaceConfigTests
         var codex = config.StandingAgents.Single(a => a.Id == "codex");
         Assert.Equal("thread-test-123", codex.WakeAdapter.ThreadIdOrEnv);
         Assert.Equal("codex.exe", codex.WakeAdapter.ExecutableOrEnv);
+        Assert.Equal("http://127.0.0.1:4242", config.StandingAgents.Single(a => a.Id == "antigravity-gemini").WakeAdapter.EndpointOrEnv);
 
-        var mobaDevOptions = config.ToDashboardOptions("mobadev", env);
+        var mobaDevOptions = config.ToDashboardOptions("mobadev");
         Assert.Equal("http://127.0.0.1:5179", mobaDevOptions.BindUrl);
         Assert.Equal("ahuelsmann/MOBAdev", mobaDevOptions.GitHubRepository);
         Assert.Equal("ahuelsmann", mobaDevOptions.GitHubProjectOwner);
         Assert.Equal(1, mobaDevOptions.GitHubProjectNumber);
-        Assert.Equal(mobaDev.RepoPath, mobaDevOptions.MobaDevRepoPath);
-        Assert.Equal(mobaFlow.RepoPath, mobaDevOptions.MobaFlowRepoPath);
+        Assert.Equal(repoRoot, mobaDevOptions.MobaDevRepoPath);
+        Assert.Equal(mobaDev.RepoPath, mobaDevOptions.MobaFlowRepoPath);
         Assert.Equal(config.Bus.DbPath, mobaDevOptions.SwarmBusDbPath);
         Assert.Equal(8, mobaDevOptions.LocalCacheTtlSeconds);
         Assert.Equal(45, mobaDevOptions.GitHubCacheTtlSeconds);
         Assert.Equal(
-            Path.GetFullPath(Path.Combine(Path.GetDirectoryName(presetPath)!, "dashboard", "src", "MobaDev.Dashboard.Web", "dist")),
+            Path.GetFullPath(Path.Combine(repoRoot, "dashboard", "src", "MobaDev.Dashboard.Web", "dist")),
             mobaDevOptions.StaticWebRootPath);
 
-        var defaultOptions = config.ToDashboardOptions(environmentVariables: env);
+        var defaultOptions = config.ToDashboardOptions();
         Assert.Equal("ahuelsmann/MOBAflow", defaultOptions.GitHubRepository);
+        Assert.Equal(mobaFlow.RepoPath, defaultOptions.MobaFlowRepoPath);
     }
 
     [Fact]
-    public void Parse_ThrowsValidationExceptionOnInvalidConfigurations()
+    public void ToDashboardOptions_ArbitraryThirdWorkspaceMapsSelectedRepoPath()
+    {
+        var repoRoot = FindWorktreeRoot();
+        var presetJson = File.ReadAllText(Path.Combine(repoRoot, "presets", "mobaflow.swarm.json"));
+        var customJson = presetJson.Replace(
+            "\"id\": \"mobadev\"",
+            "\"id\": \"third-app\"")
+            .Replace(
+            "\"repoPath\": \"${SWARM_REPOS_ROOT}/MOBAdev\"",
+            "\"repoPath\": \"${SWARM_REPOS_ROOT}/ThirdApp\"")
+            .Replace(
+            "\"githubRepository\": \"ahuelsmann/MOBAdev\"",
+            "\"githubRepository\": \"ahuelsmann/ThirdApp\"");
+
+        var rootFake = Path.Combine(Path.GetTempPath(), "synthetic-repos-third");
+        var env = new Dictionary<string, string?>
+        {
+            ["SWARM_REPOS_ROOT"] = rootFake,
+            ["LOCALAPPDATA"] = Path.Combine(Path.GetTempPath(), "synthetic-localappdata-third")
+        };
+
+        var config = SwarmWorkspaceConfigLoader.Parse(customJson, repoRoot, env);
+        var options = config.ToDashboardOptions("third-app");
+
+        Assert.Equal("ahuelsmann/ThirdApp", options.GitHubRepository);
+        Assert.Equal(Path.GetFullPath($"{rootFake}/ThirdApp"), options.MobaFlowRepoPath);
+        Assert.Equal(repoRoot, options.MobaDevRepoPath);
+    }
+
+    [Fact]
+    public void Parse_DoesNotExpandDisallowedMetadataFields()
+    {
+        var repoRoot = FindWorktreeRoot();
+        var presetJson = File.ReadAllText(Path.Combine(repoRoot, "presets", "mobaflow.swarm.json"));
+        var modified = presetJson.Replace(
+            "\"swarmName\": \"MOBAflow Agent Swarm\"",
+            "\"swarmName\": \"${UNEXPANDED_SWARM_NAME}\"");
+
+        var config = SwarmWorkspaceConfigLoader.Parse(
+            modified,
+            repoRoot,
+            new Dictionary<string, string?> { ["UNEXPANDED_SWARM_NAME"] = "ShouldNotExpand" });
+
+        Assert.Equal("${UNEXPANDED_SWARM_NAME}", config.SwarmName);
+    }
+
+    [Theory]
+    [InlineData("\"defaultWorkspaceId\": \"mobaflow\"", "\"defaultWorkspaceId\": \"unknown-ws\"")]
+    [InlineData("\"defaultWorkspaceId\": \"mobaflow\"", "\"defaultWorkspaceId\": \"\"")]
+    [InlineData("\"id\": \"mobadev\"", "\"id\": \"mobaflow\"")]
+    [InlineData("\"githubRepository\": \"ahuelsmann/MOBAdev\"", "\"githubRepository\": \"not-a-repo-slug\"")]
+    [InlineData("\"bindUrl\": \"http://127.0.0.1:5179\"", "\"bindUrl\": \"http://0.0.0.0:5179\"")]
+    [InlineData("\"bindUrl\": \"http://127.0.0.1:5179\"", "\"bindUrl\": \"${UNRESOLVED_BIND_URL}\"")]
+    [InlineData("\"schemaVersion\": \"1.0\"", "\"schemaVersion\": \"2.0\"")]
+    [InlineData("\"codeWipLimit\": 3", "\"codeWipLimit\": 0")]
+    [InlineData("\"codeWipLimit\": 3", "\"codeWipLimit\": 11")]
+    [InlineData("\"lockTtlMinutes\": 30", "\"lockTtlMinutes\": 4")]
+    [InlineData("\"swarmName\": \"MOBAflow Agent Swarm\"", "\"SwarmName\": \"MOBAflow Agent Swarm\"")]
+    [InlineData("\"swarmName\": \"MOBAflow Agent Swarm\"", "\"swarmName\": \"MOBAflow Agent Swarm\", \"unexpectedProp\": true")]
+    [InlineData("\"P4\": {", "\"P4_removed\": {")]
+    [InlineData("\"Opus 5.5\"", "\"Claude Fable 5.2\"")]
+    [InlineData("\"claude-fable-5-2\"", "\"claude-other-model\"")]
+    [InlineData("\"repoPath\": \"${SWARM_REPOS_ROOT}/MOBAdev\"", "\"repoPath\": \"../escape/MOBAdev\"")]
+    [InlineData("\"dbPath\": \"${LOCALAPPDATA}/MOBAdev/swarm-bus.db\"", "\"dbPath\": \"sub/../../swarm-bus.db\"")]
+    [InlineData("\"staticWebRootPath\": \"dashboard/src/MobaDev.Dashboard.Web/dist\"", "\"staticWebRootPath\": \"../outside/dist\"")]
+    [InlineData("\"hygiene\": \"scripts/Invoke-RepoHygiene.ps1\"", "\"hygiene\": \"../../evil.ps1\"")]
+    [InlineData("\"threadIdOrEnv\": \"${MOBADEV_CODEX_THREAD_ID}\"", "\"threadIdOrEnv\": \"\"")]
+    [InlineData("\"endpointOrEnv\": \"${MOBADEV_ANTIGRAVITY_ENDPOINT}\"", "\"endpointOrEnv\": \"http://192.168.1.50:4242\"")]
+    public void Parse_ThrowsValidationExceptionOnInvalidReplacement(string target, string replacement)
+    {
+        var repoRoot = FindWorktreeRoot();
+        var presetJson = File.ReadAllText(Path.Combine(repoRoot, "presets", "mobaflow.swarm.json"));
+        var invalidJson = presetJson.Replace(target, replacement);
+
+        Assert.NotEqual(presetJson, invalidJson);
+        Assert.Throws<SwarmConfigValidationException>(() =>
+            SwarmWorkspaceConfigLoader.Parse(invalidJson, repoRoot, new Dictionary<string, string?>()));
+    }
+
+    [Fact]
+    public void Parse_ThrowsValidationExceptionOnExpandedNonLoopbackBindUrlAndOverlappingModels()
     {
         var repoRoot = FindWorktreeRoot();
         var presetJson = File.ReadAllText(Path.Combine(repoRoot, "presets", "mobaflow.swarm.json"));
 
-        var missingDefaultWorkspace = presetJson.Replace("\"defaultWorkspaceId\": \"mobaflow\"", "\"defaultWorkspaceId\": \"unknown-ws\"");
-        Assert.Throws<SwarmConfigValidationException>(() => SwarmWorkspaceConfigLoader.Parse(missingDefaultWorkspace));
-
-        var blankDefaultWorkspace = presetJson.Replace("\"defaultWorkspaceId\": \"mobaflow\"", "\"defaultWorkspaceId\": \"\"");
-        Assert.Throws<SwarmConfigValidationException>(() => SwarmWorkspaceConfigLoader.Parse(blankDefaultWorkspace));
-
-        var duplicateWorkspaces = presetJson.Replace("\"id\": \"mobadev\"", "\"id\": \"mobaflow\"");
-        Assert.Throws<SwarmConfigValidationException>(() => SwarmWorkspaceConfigLoader.Parse(duplicateWorkspaces));
-
-        var invalidGitHubRepo = presetJson.Replace("\"githubRepository\": \"ahuelsmann/MOBAdev\"", "\"githubRepository\": \"not-a-repo-slug\"");
-        Assert.Throws<SwarmConfigValidationException>(() => SwarmWorkspaceConfigLoader.Parse(invalidGitHubRepo));
-
-        var nonLoopbackBindUrl = presetJson.Replace("\"bindUrl\": \"http://127.0.0.1:5179\"", "\"bindUrl\": \"http://0.0.0.0:5179\"");
-        Assert.Throws<SwarmConfigValidationException>(() => SwarmWorkspaceConfigLoader.Parse(nonLoopbackBindUrl));
-
-        var envExpandedNonLoopback = presetJson.Replace("\"bindUrl\": \"http://127.0.0.1:5179\"", "\"bindUrl\": \"${TEST_BIND_URL}\"");
+        var envBindJson = presetJson.Replace("\"bindUrl\": \"http://127.0.0.1:5179\"", "\"bindUrl\": \"${TEST_BIND_URL}\"");
         Assert.Throws<SwarmConfigValidationException>(() =>
             SwarmWorkspaceConfigLoader.Parse(
-                envExpandedNonLoopback,
-                environmentVariables: new Dictionary<string, string?> { ["TEST_BIND_URL"] = "http://0.0.0.0:5179" }));
+                envBindJson,
+                repoRoot,
+                new Dictionary<string, string?> { ["TEST_BIND_URL"] = "http://0.0.0.0:5179" }));
+
+        var overlapJson = presetJson.Replace(
+            "\"prohibitedModels\": [\n        \"Claude Fable 5.2\",",
+            "\"prohibitedModels\": [\n        \"Opus 5.5\",\n        \"Claude Fable 5.2\",")
+            .Replace(
+            "\"prohibitedModels\": [\r\n        \"Claude Fable 5.2\",",
+            "\"prohibitedModels\": [\r\n        \"Opus 5.5\",\r\n        \"Claude Fable 5.2\",");
+
+        Assert.NotEqual(presetJson, overlapJson);
+        Assert.Throws<SwarmConfigValidationException>(() =>
+            SwarmWorkspaceConfigLoader.Parse(overlapJson, repoRoot, new Dictionary<string, string?>()));
+    }
+
+    private static void AssertObjectMatchesSchema(JsonElement instanceObj, JsonElement schemaObj)
+    {
+        Assert.False(schemaObj.GetProperty("additionalProperties").GetBoolean());
+
+        var schemaProps = GetPropertyNames(schemaObj.GetProperty("properties"));
+        var schemaRequired = schemaObj.TryGetProperty("required", out var reqEl)
+            ? GetStringArray(reqEl)
+            : [];
+
+        foreach (var prop in instanceObj.EnumerateObject())
+        {
+            Assert.Contains(prop.Name, schemaProps);
+        }
+
+        foreach (var requiredProp in schemaRequired)
+        {
+            Assert.True(instanceObj.TryGetProperty(requiredProp, out _), $"Object missing required property '{requiredProp}'.");
+        }
     }
 
     private static string FindWorktreeRoot()
@@ -225,4 +335,7 @@ public sealed class SwarmWorkspaceConfigTests
     {
         return arrayElement.EnumerateArray().Select(e => e.GetString()!).ToList();
     }
+
+    [GeneratedRegex(@"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")]
+    private static partial Regex GuidPatternRegex();
 }

@@ -33,7 +33,8 @@ public sealed record SwarmConfig(
     IReadOnlyDictionary<string, CapabilityProfileDefinition> CapabilityProfiles,
     IReadOnlyList<StandingAgentDefinition> StandingAgents,
     SwarmBusConfig Bus,
-    DashboardEndpointConfig Dashboard)
+    DashboardEndpointConfig Dashboard,
+    string? BaseDirectory = null)
 {
     /// <summary>
     /// Returns the workspace matching <paramref name="workspaceId"/>, or the configured
@@ -57,37 +58,29 @@ public sealed record SwarmConfig(
     /// Maps this swarm configuration and the selected workspace into <see cref="DashboardOptions"/>
     /// for consumption by dashboard providers and hosting setup.
     /// </summary>
-    public DashboardOptions ToDashboardOptions(
-        string? workspaceId = null,
-        IReadOnlyDictionary<string, string?>? environmentVariables = null)
+    /// <remarks>
+    /// All <c>${VAR_NAME}</c> expansion happens once during <see cref="SwarmWorkspaceConfigLoader.Parse"/>;
+    /// paths that still retain unresolved optional placeholders map to <see cref="string.Empty"/> so
+    /// <see cref="DashboardOptions.ResolvePaths"/> can apply machine defaults cleanly.
+    /// </remarks>
+    public DashboardOptions ToDashboardOptions(string? workspaceId = null)
     {
         var selected = GetWorkspace(workspaceId);
-        var mobaDevWorkspace = FindWorkspaceOrNull("mobadev");
-        var mobaFlowWorkspace = FindWorkspaceOrNull("mobaflow");
-
-        var mobaDevRepoPath = ResolveConcretePath(mobaDevWorkspace?.RepoPath, environmentVariables);
-        var mobaFlowRepoPath = ResolveConcretePath(mobaFlowWorkspace?.RepoPath, environmentVariables);
-        if (string.IsNullOrEmpty(mobaFlowRepoPath) &&
-            !string.Equals(selected.Id, "mobadev", StringComparison.OrdinalIgnoreCase))
-        {
-            mobaFlowRepoPath = ResolveConcretePath(selected.RepoPath, environmentVariables);
-        }
-
-        var staticWebRootPath = ResolveConcretePath(Dashboard.StaticWebRootPath, environmentVariables);
-        var swarmBusDbPath = ResolveConcretePath(Bus.DbPath, environmentVariables);
+        var selectedRepoPath = ConcretePathOrEmpty(selected.RepoPath);
+        var mobaDevRepoPath = ResolveMobaDevInstallationPath(selectedRepoPath);
 
         return new DashboardOptions
         {
             BindUrl = Dashboard.BindUrl,
             MobaDevRepoPath = mobaDevRepoPath,
-            MobaFlowRepoPath = mobaFlowRepoPath,
+            MobaFlowRepoPath = selectedRepoPath,
             GitHubRepository = selected.GitHubRepository,
             GitHubProjectOwner = selected.GitHubProjectOwner,
             GitHubProjectNumber = selected.GitHubProjectNumber,
             LocalCacheTtlSeconds = Dashboard.LocalCacheTtlSeconds,
             GitHubCacheTtlSeconds = Dashboard.GitHubCacheTtlSeconds,
-            StaticWebRootPath = staticWebRootPath,
-            SwarmBusDbPath = swarmBusDbPath
+            StaticWebRootPath = ConcretePathOrEmpty(Dashboard.StaticWebRootPath),
+            SwarmBusDbPath = ConcretePathOrEmpty(Bus.DbPath)
         };
     }
 
@@ -97,22 +90,35 @@ public sealed record SwarmConfig(
             string.Equals(workspace.Id, workspaceId, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static string ResolveConcretePath(
-        string? path,
-        IReadOnlyDictionary<string, string?>? environmentVariables)
+    private string ResolveMobaDevInstallationPath(string selectedRepoPath)
     {
-        if (string.IsNullOrWhiteSpace(path))
+        if (!string.IsNullOrWhiteSpace(BaseDirectory) && IsMobaDevRoot(BaseDirectory))
+        {
+            return BaseDirectory;
+        }
+
+        if (!string.IsNullOrWhiteSpace(selectedRepoPath) && IsMobaDevRoot(selectedRepoPath))
+        {
+            return selectedRepoPath;
+        }
+
+        return string.Empty;
+    }
+
+    private static bool IsMobaDevRoot(string directory)
+    {
+        return File.Exists(Path.Combine(directory, "manifest.md")) &&
+               Directory.Exists(Path.Combine(directory, "agents"));
+    }
+
+    private static string ConcretePathOrEmpty(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || SwarmWorkspaceConfigLoader.ContainsUnexpandedPlaceholder(path))
         {
             return string.Empty;
         }
 
-        var expanded = environmentVariables is null
-            ? path
-            : SwarmWorkspaceConfigLoader.ExpandPlaceholders(path, environmentVariables);
-
-        return SwarmWorkspaceConfigLoader.ContainsUnexpandedPlaceholder(expanded)
-            ? string.Empty
-            : expanded;
+        return path;
     }
 }
 
@@ -131,7 +137,7 @@ public sealed record WorkspaceDefinition(
     WorkspaceScriptsConfig? Scripts = null);
 
 /// <summary>
-/// Optional workspace automation script paths relative to the repository or workspace root.
+/// Optional workspace automation script paths relative to the swarm installation or config root.
 /// </summary>
 public sealed record WorkspaceScriptsConfig(
     string? Hygiene = null,

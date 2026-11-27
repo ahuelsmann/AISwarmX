@@ -16,9 +16,15 @@ public static partial class SwarmWorkspaceConfigLoader
     private const int MaxCodeWipLimit = 10;
     private const int MinLockTtlMinutes = 5;
 
+    private static readonly string[] RequiredProhibitedFableModels =
+    [
+        "Claude Fable 5.2",
+        "claude-fable-5-2"
+    ];
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = false
     };
 
     private static readonly HashSet<string> AllowedFamilies = new(StringComparer.Ordinal)
@@ -45,17 +51,22 @@ public static partial class SwarmWorkspaceConfigLoader
     };
 
     /// <summary>
-    /// Loads and validates a <see cref="SwarmConfig"/> from <paramref name="filePath"/>, resolving relative
-    /// filesystem paths against the file's directory.
+    /// Loads and validates a <see cref="SwarmConfig"/> from <paramref name="filePath"/>.
     /// </summary>
     /// <param name="filePath">Path to the JSON configuration file.</param>
     /// <param name="environmentVariables">
     /// Optional environment variable map used exclusively for <c>${VAR_NAME}</c> placeholder expansion.
     /// When <c>null</c>, <see cref="Environment.GetEnvironmentVariable(string)"/> is used.
     /// </param>
+    /// <param name="baseDirectory">
+    /// Optional root directory for resolving relative paths. When <c>null</c>, preset files located under a
+    /// <c>presets/</c> directory inside a MOBAdev root (containing <c>schemas/</c> or <c>manifest.md</c>)
+    /// resolve relative paths against that parent root; all other config files use the file's directory.
+    /// </param>
     public static SwarmConfig LoadFromFile(
         string filePath,
-        IReadOnlyDictionary<string, string?>? environmentVariables = null)
+        IReadOnlyDictionary<string, string?>? environmentVariables = null,
+        string? baseDirectory = null)
     {
         if (string.IsNullOrWhiteSpace(filePath))
         {
@@ -69,8 +80,11 @@ public static partial class SwarmWorkspaceConfigLoader
         }
 
         var json = File.ReadAllText(fullPath);
-        var baseDirectory = Path.GetDirectoryName(fullPath);
-        return Parse(json, baseDirectory, environmentVariables);
+        var effectiveBaseDirectory = string.IsNullOrWhiteSpace(baseDirectory)
+            ? ResolveDefaultBaseDirectory(Path.GetDirectoryName(fullPath)!)
+            : Path.GetFullPath(baseDirectory);
+
+        return Parse(json, effectiveBaseDirectory, environmentVariables);
     }
 
     /// <summary>
@@ -85,9 +99,12 @@ public static partial class SwarmWorkspaceConfigLoader
     /// When <c>null</c>, <see cref="Environment.GetEnvironmentVariable(string)"/> is used.
     /// </param>
     /// <remarks>
-    /// Unresolved <c>${VAR_NAME}</c> tokens are preserved verbatim for optional machine-local placeholders (such as
-    /// repository root or adapter thread variables); if a placeholder is used in <c>dashboard.bindUrl</c> and remains
-    /// unresolved or expands to a non-loopback address, validation fails with <see cref="SwarmConfigValidationException"/>.
+    /// Only fields that support machine-local configuration (<c>repoPath</c>, <c>githubProjectOwner</c>,
+    /// <c>scripts.*</c>, <c>wakeAdapter.*</c>, <c>bus.dbPath</c>, <c>dashboard.bindUrl</c>,
+    /// <c>dashboard.staticWebRootPath</c>) undergo <c>${VAR_NAME}</c> expansion, in a single pass prior to
+    /// path normalization and validation. Unresolved tokens are preserved for optional machine-local fields;
+    /// unresolved tokens or non-loopback values in <c>dashboard.bindUrl</c> (or non-loopback literal
+    /// <c>antigravity-http</c> endpoints) fail validation with <see cref="SwarmConfigValidationException"/>.
     /// </remarks>
     public static SwarmConfig Parse(
         string json,
@@ -114,6 +131,10 @@ public static partial class SwarmWorkspaceConfigLoader
             throw new SwarmConfigValidationException("Swarm configuration JSON deserialized to null.");
         }
 
+        var normalizedBaseDir = string.IsNullOrWhiteSpace(baseDirectory)
+            ? null
+            : Path.GetFullPath(baseDirectory);
+
         var envLookup = CreateEnvLookup(environmentVariables);
 
         if (!string.Equals(dto.SchemaVersion, SupportedSchemaVersion, StringComparison.Ordinal))
@@ -122,20 +143,20 @@ public static partial class SwarmWorkspaceConfigLoader
                 $"Unsupported schemaVersion '{dto.SchemaVersion}'. Expected '{SupportedSchemaVersion}'.");
         }
 
-        var swarmName = ExpandRequiredString(dto.SwarmName, "swarmName", envLookup);
+        var swarmName = RequireNonEmptyLiteral(dto.SwarmName, "swarmName");
         var defaultWorkspaceId = RequireSlug(dto.DefaultWorkspaceId, "defaultWorkspaceId");
 
-        var workspaces = ParseWorkspaces(dto.Workspaces, baseDirectory, envLookup);
+        var workspaces = ParseWorkspaces(dto.Workspaces, normalizedBaseDir, envLookup);
         if (!workspaces.Any(w => string.Equals(w.Id, defaultWorkspaceId, StringComparison.Ordinal)))
         {
             throw new SwarmConfigValidationException(
                 $"defaultWorkspaceId '{defaultWorkspaceId}' does not match any configured workspace.");
         }
 
-        var capabilityProfiles = ParseCapabilityProfiles(dto.CapabilityProfiles, envLookup);
+        var capabilityProfiles = ParseCapabilityProfiles(dto.CapabilityProfiles);
         var standingAgents = ParseStandingAgents(dto.StandingAgents, capabilityProfiles, envLookup);
-        var bus = ParseBus(dto.Bus, baseDirectory, envLookup);
-        var dashboard = ParseDashboard(dto.Dashboard, baseDirectory, envLookup);
+        var bus = ParseBus(dto.Bus, normalizedBaseDir, envLookup);
+        var dashboard = ParseDashboard(dto.Dashboard, normalizedBaseDir, envLookup);
 
         return new SwarmConfig(
             dto.SchemaVersion!,
@@ -145,17 +166,27 @@ public static partial class SwarmWorkspaceConfigLoader
             capabilityProfiles,
             standingAgents,
             bus,
-            dashboard);
-    }
-
-    internal static string ExpandPlaceholders(string value, IReadOnlyDictionary<string, string?>? environmentVariables)
-    {
-        return ExpandPlaceholders(value, CreateEnvLookup(environmentVariables));
+            dashboard,
+            normalizedBaseDir);
     }
 
     internal static bool ContainsUnexpandedPlaceholder(string? value)
     {
         return !string.IsNullOrEmpty(value) && PlaceholderRegex().IsMatch(value);
+    }
+
+    private static string ResolveDefaultBaseDirectory(string configDirectory)
+    {
+        var dirInfo = new DirectoryInfo(configDirectory);
+        if (string.Equals(dirInfo.Name, "presets", StringComparison.OrdinalIgnoreCase) &&
+            dirInfo.Parent is { } parent &&
+            (File.Exists(Path.Combine(parent.FullName, "schemas", "swarm.config.schema.json")) ||
+             File.Exists(Path.Combine(parent.FullName, "manifest.md"))))
+        {
+            return parent.FullName;
+        }
+
+        return dirInfo.FullName;
     }
 
     private static Func<string, string?> CreateEnvLookup(IReadOnlyDictionary<string, string?>? environmentVariables)
@@ -177,6 +208,16 @@ public static partial class SwarmWorkspaceConfigLoader
             var replacement = envLookup(varName);
             return replacement is null ? match.Value : replacement;
         });
+    }
+
+    private static string RequireNonEmptyLiteral(string? raw, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            throw new SwarmConfigValidationException($"Field '{fieldName}' is required and must not be empty.");
+        }
+
+        return raw.Trim();
     }
 
     private static string ExpandRequiredString(string? raw, string fieldName, Func<string, string?> envLookup)
@@ -206,11 +247,35 @@ public static partial class SwarmWorkspaceConfigLoader
         return string.IsNullOrEmpty(expanded) ? null : expanded;
     }
 
+    private static string? ResolveOptionalConfiguredPath(
+        string? raw,
+        string fieldName,
+        string? baseDirectory,
+        bool confineRelativeToBaseDirectory,
+        Func<string, string?> envLookup)
+    {
+        if (raw is null)
+        {
+            return null;
+        }
+
+        EnsureNoParentTraversal(raw, fieldName);
+        var expanded = ExpandPlaceholders(raw, envLookup).Trim();
+        if (string.IsNullOrEmpty(expanded))
+        {
+            return null;
+        }
+
+        EnsureNoParentTraversal(expanded, fieldName);
+        return NormalizeConfiguredPath(expanded, fieldName, baseDirectory, confineRelativeToBaseDirectory);
+    }
+
     private static string ResolveConfiguredPath(
         string? raw,
         string fieldName,
         bool allowEmpty,
         string? baseDirectory,
+        bool confineRelativeToBaseDirectory,
         Func<string, string?> envLookup)
     {
         if (raw is null)
@@ -218,6 +283,7 @@ public static partial class SwarmWorkspaceConfigLoader
             throw new SwarmConfigValidationException($"Field '{fieldName}' is required.");
         }
 
+        EnsureNoParentTraversal(raw, fieldName);
         var expanded = ExpandPlaceholders(raw, envLookup).Trim();
         if (string.IsNullOrWhiteSpace(expanded))
         {
@@ -229,22 +295,62 @@ public static partial class SwarmWorkspaceConfigLoader
             throw new SwarmConfigValidationException($"Field '{fieldName}' must not be empty.");
         }
 
-        if (ContainsUnexpandedPlaceholder(expanded))
+        EnsureNoParentTraversal(expanded, fieldName);
+        return NormalizeConfiguredPath(expanded, fieldName, baseDirectory, confineRelativeToBaseDirectory);
+    }
+
+    private static string NormalizeConfiguredPath(
+        string expandedPath,
+        string fieldName,
+        string? baseDirectory,
+        bool confineRelativeToBaseDirectory)
+    {
+        if (ContainsUnexpandedPlaceholder(expandedPath))
         {
-            return expanded;
+            return expandedPath;
         }
 
-        if (Path.IsPathRooted(expanded))
+        if (Path.IsPathRooted(expandedPath))
         {
-            return Path.GetFullPath(expanded);
+            return Path.GetFullPath(expandedPath);
         }
 
-        if (!string.IsNullOrWhiteSpace(baseDirectory))
+        if (string.IsNullOrWhiteSpace(baseDirectory))
         {
-            return Path.GetFullPath(Path.Combine(baseDirectory, expanded));
+            return expandedPath;
         }
 
-        return expanded;
+        var fullBase = Path.GetFullPath(baseDirectory);
+        var resolved = Path.GetFullPath(Path.Combine(fullBase, expandedPath));
+        if (confineRelativeToBaseDirectory && !IsWithinBaseDirectory(resolved, fullBase))
+        {
+            throw new SwarmConfigValidationException(
+                $"Relative path '{expandedPath}' in '{fieldName}' must remain within '{fullBase}'.");
+        }
+
+        return resolved;
+    }
+
+    private static void EnsureNoParentTraversal(string path, string fieldName)
+    {
+        var segments = path.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Any(segment => string.Equals(segment, "..", StringComparison.Ordinal)))
+        {
+            throw new SwarmConfigValidationException(
+                $"Field '{fieldName}' value '{path}' must not contain parent directory traversal ('..').");
+        }
+    }
+
+    private static bool IsWithinBaseDirectory(string candidateFullPath, string baseFullPath)
+    {
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        var trimmedBase = baseFullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var prefix = trimmedBase + Path.DirectorySeparatorChar;
+        return string.Equals(candidateFullPath, trimmedBase, comparison) ||
+               candidateFullPath.StartsWith(prefix, comparison);
     }
 
     private static string RequireSlug(string? raw, string fieldName)
@@ -286,9 +392,16 @@ public static partial class SwarmWorkspaceConfigLoader
                 throw new SwarmConfigValidationException($"Duplicate workspace id '{id}' in 'workspaces'.");
             }
 
-            var displayName = ExpandRequiredString(dto.DisplayName, $"workspaces[{i}].displayName", envLookup);
-            var repoPath = ResolveConfiguredPath(dto.RepoPath, $"workspaces[{i}].repoPath", allowEmpty: false, baseDirectory, envLookup);
-            var githubRepo = ExpandRequiredString(dto.GitHubRepository, $"workspaces[{i}].githubRepository", envLookup);
+            var displayName = RequireNonEmptyLiteral(dto.DisplayName, $"workspaces[{i}].displayName");
+            var repoPath = ResolveConfiguredPath(
+                dto.RepoPath,
+                $"workspaces[{i}].repoPath",
+                allowEmpty: false,
+                baseDirectory,
+                confineRelativeToBaseDirectory: false,
+                envLookup);
+
+            var githubRepo = RequireNonEmptyLiteral(dto.GitHubRepository, $"workspaces[{i}].githubRepository");
             if (!GitHubRepoRegex().IsMatch(githubRepo))
             {
                 throw new SwarmConfigValidationException(
@@ -309,14 +422,29 @@ public static partial class SwarmWorkspaceConfigLoader
                     $"Field 'workspaces[{i}].codeWipLimit' value {wipLimit} must be between {MinCodeWipLimit} and {MaxCodeWipLimit}.");
             }
 
-            var docPrefixes = ParseStringArray(dto.LowRiskDocPrefixes, $"workspaces[{i}].lowRiskDocPrefixes", allowMissing: true, envLookup);
+            var docPrefixes = ParseLiteralStringArray(dto.LowRiskDocPrefixes, $"workspaces[{i}].lowRiskDocPrefixes", allowMissing: true);
             WorkspaceScriptsConfig? scripts = null;
             if (dto.Scripts is not null)
             {
                 scripts = new WorkspaceScriptsConfig(
-                    ExpandOptionalString(dto.Scripts.Hygiene, envLookup),
-                    ExpandOptionalString(dto.Scripts.Watchdog, envLookup),
-                    ExpandOptionalString(dto.Scripts.QualityGates, envLookup));
+                    ResolveOptionalConfiguredPath(
+                        dto.Scripts.Hygiene,
+                        $"workspaces[{i}].scripts.hygiene",
+                        baseDirectory,
+                        confineRelativeToBaseDirectory: true,
+                        envLookup),
+                    ResolveOptionalConfiguredPath(
+                        dto.Scripts.Watchdog,
+                        $"workspaces[{i}].scripts.watchdog",
+                        baseDirectory,
+                        confineRelativeToBaseDirectory: true,
+                        envLookup),
+                    ResolveOptionalConfiguredPath(
+                        dto.Scripts.QualityGates,
+                        $"workspaces[{i}].scripts.qualityGates",
+                        baseDirectory,
+                        confineRelativeToBaseDirectory: true,
+                        envLookup));
             }
 
             result.Add(new WorkspaceDefinition(
@@ -335,8 +463,7 @@ public static partial class SwarmWorkspaceConfigLoader
     }
 
     private static IReadOnlyDictionary<string, CapabilityProfileDefinition> ParseCapabilityProfiles(
-        CapabilityProfilesDto? dto,
-        Func<string, string?> envLookup)
+        CapabilityProfilesDto? dto)
     {
         if (dto is null)
         {
@@ -345,31 +472,59 @@ public static partial class SwarmWorkspaceConfigLoader
 
         return new Dictionary<string, CapabilityProfileDefinition>(StringComparer.Ordinal)
         {
-            ["P1"] = ParseProfile(dto.P1, "capabilityProfiles.P1", envLookup),
-            ["P2"] = ParseProfile(dto.P2, "capabilityProfiles.P2", envLookup),
-            ["P3"] = ParseProfile(dto.P3, "capabilityProfiles.P3", envLookup),
-            ["P4"] = ParseProfile(dto.P4, "capabilityProfiles.P4", envLookup)
+            ["P1"] = ParseProfile(dto.P1, "capabilityProfiles.P1"),
+            ["P2"] = ParseProfile(dto.P2, "capabilityProfiles.P2"),
+            ["P3"] = ParseProfile(dto.P3, "capabilityProfiles.P3"),
+            ["P4"] = ParseProfile(dto.P4, "capabilityProfiles.P4")
         };
     }
 
     private static CapabilityProfileDefinition ParseProfile(
         CapabilityProfileDto? dto,
-        string pathPrefix,
-        Func<string, string?> envLookup)
+        string pathPrefix)
     {
         if (dto is null)
         {
             throw new SwarmConfigValidationException($"Capability profile '{pathPrefix}' is required.");
         }
 
-        var description = ExpandRequiredString(dto.Description, $"{pathPrefix}.description", envLookup);
-        var allowedModels = ParseStringArray(dto.AllowedModels, $"{pathPrefix}.allowedModels", allowMissing: false, envLookup);
+        var description = RequireNonEmptyLiteral(dto.Description, $"{pathPrefix}.description");
+        var allowedModels = ParseLiteralStringArray(dto.AllowedModels, $"{pathPrefix}.allowedModels", allowMissing: false);
         if (allowedModels.Count == 0)
         {
             throw new SwarmConfigValidationException($"Field '{pathPrefix}.allowedModels' must contain at least one model.");
         }
 
-        var prohibitedModels = ParseStringArray(dto.ProhibitedModels, $"{pathPrefix}.prohibitedModels", allowMissing: false, envLookup);
+        var prohibitedModels = ParseLiteralStringArray(dto.ProhibitedModels, $"{pathPrefix}.prohibitedModels", allowMissing: false);
+
+        foreach (var allowed in allowedModels)
+        {
+            if (allowed.Contains("fable", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SwarmConfigValidationException(
+                    $"Field '{pathPrefix}.allowedModels' must not permit prohibited model '{allowed}'.");
+            }
+        }
+
+        var prohibitedSet = new HashSet<string>(prohibitedModels, StringComparer.OrdinalIgnoreCase);
+        foreach (var requiredBan in RequiredProhibitedFableModels)
+        {
+            if (!prohibitedSet.Contains(requiredBan))
+            {
+                throw new SwarmConfigValidationException(
+                    $"Field '{pathPrefix}.prohibitedModels' must explicitly prohibit '{requiredBan}'.");
+            }
+        }
+
+        foreach (var allowed in allowedModels)
+        {
+            if (prohibitedSet.Contains(allowed))
+            {
+                throw new SwarmConfigValidationException(
+                    $"Model '{allowed}' in '{pathPrefix}' cannot appear in both 'allowedModels' and 'prohibitedModels'.");
+            }
+        }
+
         return new CapabilityProfileDefinition(description, allowedModels, prohibitedModels);
     }
 
@@ -395,39 +550,66 @@ public static partial class SwarmWorkspaceConfigLoader
                 throw new SwarmConfigValidationException($"Duplicate standing agent id '{id}' in 'standingAgents'.");
             }
 
-            var displayName = ExpandRequiredString(dto.DisplayName, $"standingAgents[{i}].displayName", envLookup);
-            var family = ExpandRequiredString(dto.Family, $"standingAgents[{i}].family", envLookup);
+            var displayName = RequireNonEmptyLiteral(dto.DisplayName, $"standingAgents[{i}].displayName");
+            var family = RequireNonEmptyLiteral(dto.Family, $"standingAgents[{i}].family");
             if (!AllowedFamilies.Contains(family))
             {
                 throw new SwarmConfigValidationException(
                     $"Field 'standingAgents[{i}].family' value '{family}' must be one of: claude, openai, gemini.");
             }
 
-            var profile = ExpandRequiredString(dto.Profile, $"standingAgents[{i}].profile", envLookup);
+            var profile = RequireNonEmptyLiteral(dto.Profile, $"standingAgents[{i}].profile");
             if (!AllowedProfiles.Contains(profile) || !capabilityProfiles.ContainsKey(profile))
             {
                 throw new SwarmConfigValidationException(
                     $"Field 'standingAgents[{i}].profile' value '{profile}' must be one of: P1, P2, P3, P4.");
             }
 
-            var role = ExpandRequiredString(dto.Role, $"standingAgents[{i}].role", envLookup);
+            var role = RequireNonEmptyLiteral(dto.Role, $"standingAgents[{i}].role");
             if (dto.WakeAdapter is null)
             {
                 throw new SwarmConfigValidationException($"Field 'standingAgents[{i}].wakeAdapter' is required.");
             }
 
-            var adapterKind = ExpandRequiredString(dto.WakeAdapter.Kind, $"standingAgents[{i}].wakeAdapter.kind", envLookup);
+            var adapterKind = RequireNonEmptyLiteral(dto.WakeAdapter.Kind, $"standingAgents[{i}].wakeAdapter.kind");
             if (!AllowedWakeAdapterKinds.Contains(adapterKind))
             {
                 throw new SwarmConfigValidationException(
                     $"Field 'standingAgents[{i}].wakeAdapter.kind' value '{adapterKind}' is invalid.");
             }
 
+            var threadIdOrEnv = ExpandOptionalString(dto.WakeAdapter.ThreadIdOrEnv, envLookup);
+            var executableOrEnv = ExpandOptionalString(dto.WakeAdapter.ExecutableOrEnv, envLookup);
+            var endpointOrEnv = ExpandOptionalString(dto.WakeAdapter.EndpointOrEnv, envLookup);
+
+            if (string.Equals(adapterKind, "codex-queue", StringComparison.Ordinal) &&
+                string.IsNullOrWhiteSpace(threadIdOrEnv))
+            {
+                throw new SwarmConfigValidationException(
+                    $"Field 'standingAgents[{i}].wakeAdapter.threadIdOrEnv' is required for 'codex-queue' adapters.");
+            }
+
+            if (string.Equals(adapterKind, "antigravity-http", StringComparison.Ordinal) &&
+                !string.IsNullOrWhiteSpace(endpointOrEnv) &&
+                !ContainsUnexpandedPlaceholder(endpointOrEnv))
+            {
+                try
+                {
+                    endpointOrEnv = LoopbackBindingGuard.EnsureLoopbackUrl(endpointOrEnv);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    throw new SwarmConfigValidationException(
+                        $"Field 'standingAgents[{i}].wakeAdapter.endpointOrEnv' must be a loopback URL: {ex.Message}",
+                        ex);
+                }
+            }
+
             var wakeAdapter = new WakeAdapterConfig(
                 adapterKind,
-                ExpandOptionalString(dto.WakeAdapter.ThreadIdOrEnv, envLookup),
-                ExpandOptionalString(dto.WakeAdapter.ExecutableOrEnv, envLookup),
-                ExpandOptionalString(dto.WakeAdapter.EndpointOrEnv, envLookup));
+                threadIdOrEnv,
+                executableOrEnv,
+                endpointOrEnv);
 
             result.Add(new StandingAgentDefinition(id, displayName, family, profile, role, wakeAdapter));
         }
@@ -445,7 +627,14 @@ public static partial class SwarmWorkspaceConfigLoader
             throw new SwarmConfigValidationException("Section 'bus' is required.");
         }
 
-        var dbPath = ResolveConfiguredPath(dto.DbPath, "bus.dbPath", allowEmpty: false, baseDirectory, envLookup);
+        var dbPath = ResolveConfiguredPath(
+            dto.DbPath,
+            "bus.dbPath",
+            allowEmpty: false,
+            baseDirectory,
+            confineRelativeToBaseDirectory: false,
+            envLookup);
+
         if (dto.LockTtlMinutes is null || dto.LockTtlMinutes.Value < MinLockTtlMinutes)
         {
             throw new SwarmConfigValidationException(
@@ -481,6 +670,7 @@ public static partial class SwarmWorkspaceConfigLoader
             "dashboard.staticWebRootPath",
             allowEmpty: true,
             baseDirectory,
+            confineRelativeToBaseDirectory: true,
             envLookup);
 
         if (dto.LocalCacheTtlSeconds is null || dto.LocalCacheTtlSeconds.Value < 1)
@@ -500,11 +690,10 @@ public static partial class SwarmWorkspaceConfigLoader
             dto.GitHubCacheTtlSeconds.Value);
     }
 
-    private static IReadOnlyList<string> ParseStringArray(
+    private static IReadOnlyList<string> ParseLiteralStringArray(
         IReadOnlyList<string?>? rawItems,
         string fieldName,
-        bool allowMissing,
-        Func<string, string?> envLookup)
+        bool allowMissing)
     {
         if (rawItems is null)
         {
@@ -519,7 +708,7 @@ public static partial class SwarmWorkspaceConfigLoader
         var items = new List<string>(rawItems.Count);
         for (var i = 0; i < rawItems.Count; i++)
         {
-            items.Add(ExpandRequiredString(rawItems[i], $"{fieldName}[{i}]", envLookup));
+            items.Add(RequireNonEmptyLiteral(rawItems[i], $"{fieldName}[{i}]"));
         }
 
         return items;
@@ -540,88 +729,165 @@ public static partial class SwarmWorkspaceConfigLoader
         [JsonPropertyName("$schema")]
         public string? Schema { get; set; }
 
+        [JsonPropertyName("schemaVersion")]
         public string? SchemaVersion { get; set; }
+
+        [JsonPropertyName("swarmName")]
         public string? SwarmName { get; set; }
+
+        [JsonPropertyName("defaultWorkspaceId")]
         public string? DefaultWorkspaceId { get; set; }
+
+        [JsonPropertyName("workspaces")]
         public List<WorkspaceDto?>? Workspaces { get; set; }
+
+        [JsonPropertyName("capabilityProfiles")]
         public CapabilityProfilesDto? CapabilityProfiles { get; set; }
+
+        [JsonPropertyName("standingAgents")]
         public List<StandingAgentDto?>? StandingAgents { get; set; }
+
+        [JsonPropertyName("bus")]
         public SwarmBusDto? Bus { get; set; }
+
+        [JsonPropertyName("dashboard")]
         public DashboardEndpointDto? Dashboard { get; set; }
     }
 
     [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
     private sealed class WorkspaceDto
     {
+        [JsonPropertyName("id")]
         public string? Id { get; set; }
+
+        [JsonPropertyName("displayName")]
         public string? DisplayName { get; set; }
+
+        [JsonPropertyName("repoPath")]
         public string? RepoPath { get; set; }
+
+        [JsonPropertyName("githubRepository")]
         public string? GitHubRepository { get; set; }
+
+        [JsonPropertyName("githubProjectOwner")]
         public string? GitHubProjectOwner { get; set; }
+
+        [JsonPropertyName("githubProjectNumber")]
         public int? GitHubProjectNumber { get; set; }
+
+        [JsonPropertyName("codeWipLimit")]
         public int? CodeWipLimit { get; set; }
+
+        [JsonPropertyName("lowRiskDocPrefixes")]
         public List<string?>? LowRiskDocPrefixes { get; set; }
+
+        [JsonPropertyName("scripts")]
         public WorkspaceScriptsDto? Scripts { get; set; }
     }
 
     [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
     private sealed class WorkspaceScriptsDto
     {
+        [JsonPropertyName("hygiene")]
         public string? Hygiene { get; set; }
+
+        [JsonPropertyName("watchdog")]
         public string? Watchdog { get; set; }
+
+        [JsonPropertyName("qualityGates")]
         public string? QualityGates { get; set; }
     }
 
     [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
     private sealed class CapabilityProfilesDto
     {
+        [JsonPropertyName("P1")]
         public CapabilityProfileDto? P1 { get; set; }
+
+        [JsonPropertyName("P2")]
         public CapabilityProfileDto? P2 { get; set; }
+
+        [JsonPropertyName("P3")]
         public CapabilityProfileDto? P3 { get; set; }
+
+        [JsonPropertyName("P4")]
         public CapabilityProfileDto? P4 { get; set; }
     }
 
     [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
     private sealed class CapabilityProfileDto
     {
+        [JsonPropertyName("description")]
         public string? Description { get; set; }
+
+        [JsonPropertyName("allowedModels")]
         public List<string?>? AllowedModels { get; set; }
+
+        [JsonPropertyName("prohibitedModels")]
         public List<string?>? ProhibitedModels { get; set; }
     }
 
     [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
     private sealed class StandingAgentDto
     {
+        [JsonPropertyName("id")]
         public string? Id { get; set; }
+
+        [JsonPropertyName("displayName")]
         public string? DisplayName { get; set; }
+
+        [JsonPropertyName("family")]
         public string? Family { get; set; }
+
+        [JsonPropertyName("profile")]
         public string? Profile { get; set; }
+
+        [JsonPropertyName("role")]
         public string? Role { get; set; }
+
+        [JsonPropertyName("wakeAdapter")]
         public WakeAdapterDto? WakeAdapter { get; set; }
     }
 
     [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
     private sealed class WakeAdapterDto
     {
+        [JsonPropertyName("kind")]
         public string? Kind { get; set; }
+
+        [JsonPropertyName("threadIdOrEnv")]
         public string? ThreadIdOrEnv { get; set; }
+
+        [JsonPropertyName("executableOrEnv")]
         public string? ExecutableOrEnv { get; set; }
+
+        [JsonPropertyName("endpointOrEnv")]
         public string? EndpointOrEnv { get; set; }
     }
 
     [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
     private sealed class SwarmBusDto
     {
+        [JsonPropertyName("dbPath")]
         public string? DbPath { get; set; }
+
+        [JsonPropertyName("lockTtlMinutes")]
         public int? LockTtlMinutes { get; set; }
     }
 
     [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
     private sealed class DashboardEndpointDto
     {
+        [JsonPropertyName("bindUrl")]
         public string? BindUrl { get; set; }
+
+        [JsonPropertyName("staticWebRootPath")]
         public string? StaticWebRootPath { get; set; }
+
+        [JsonPropertyName("localCacheTtlSeconds")]
         public int? LocalCacheTtlSeconds { get; set; }
+
+        [JsonPropertyName("githubCacheTtlSeconds")]
         public int? GitHubCacheTtlSeconds { get; set; }
     }
 }
