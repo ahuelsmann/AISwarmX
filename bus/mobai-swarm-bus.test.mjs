@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -9,6 +10,19 @@ import { DatabaseSync } from 'node:sqlite';
 
 const BUS_SCRIPT = path.resolve(import.meta.dirname, 'mobai-swarm-bus.mjs');
 const HOOK_SCRIPT = path.resolve(import.meta.dirname, 'claude-swarm-bus-hook.mjs');
+const WATCHDOG_SCRIPT = path.resolve(import.meta.dirname, '..', 'scripts', 'Invoke-SwarmWatchdog.ps1');
+
+function runProcessAsync(command, args, env = process.env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
+}
 
 function createTempDbPath() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobai-bus-test-'));
@@ -287,7 +301,7 @@ test('Swarm Bus auto-acks headless recipients, supersedes stale watchdog PR aler
   }
 });
 
-test('bus_send deduplicates unchanged state and inserts when state changes', async () => {
+test('bus_send deduplicates recipient-scoped state, preserves distinct recipients, and retries failed wake', async () => {
   const { openBusDb, handleBusSend } = await import('./mobai-swarm-bus.mjs');
   const { dir, dbPath } = createTempDbPath();
   const { db } = openBusDb(dbPath);
@@ -315,6 +329,19 @@ test('bus_send deduplicates unchanged state and inserts when state changes', asy
     assert.equal(dup.deduplicated, true);
     assert.equal(dup.existing_id, first.id);
 
+    // Same state to a different recipient must NOT be dropped
+    const otherRecipient = handleBusSend(db, {
+      from: 'codex',
+      to: 'antigravity-gemini',
+      topic: 'slice-status',
+      pr: 601,
+      body: 'Working on checks',
+      state: 'running:sha1'
+    });
+    assert.equal(otherRecipient.ok, true);
+    assert.equal(otherRecipient.deduplicated, undefined);
+    assert.notEqual(otherRecipient.id, first.id);
+
     const changed = handleBusSend(db, {
       from: 'codex',
       to: 'claude-opus',
@@ -327,44 +354,173 @@ test('bus_send deduplicates unchanged state and inserts when state changes', asy
     assert.equal(changed.deduplicated, undefined);
     assert.notEqual(changed.id, first.id);
 
+    // Wake failure recovery: first send fails wake (wake_ok=0), second same-state send with wake retries and marks wake_ok=1
+    let seenThreadId = null;
+    const failedWake = handleBusSend(db, {
+      from: 'watchdog',
+      to: 'codex',
+      topic: 'HeadIdleWake',
+      issue: 382,
+      body: 'Wake codex',
+      state: 'idle-wake-382',
+      wake: true,
+      codex_thread_id: 'thread-override-999'
+    }, {
+      wakeCodex: (_msg, tid) => {
+        seenThreadId = tid;
+        return { attempted: true, ok: false, target: 'codex', threadId: tid, error: 'transient' };
+      }
+    });
+    assert.equal(failedWake.wakeResults[0].ok, false);
+    assert.equal(seenThreadId, 'thread-override-999');
+    assert.equal(db.prepare('SELECT wake_ok FROM messages WHERE id = ?').get(failedWake.id).wake_ok, 0);
+
+    const retriedWake = handleBusSend(db, {
+      from: 'watchdog',
+      to: 'codex',
+      topic: 'HeadIdleWake',
+      issue: 382,
+      body: 'Wake codex',
+      state: 'idle-wake-382',
+      wake: true,
+      codex_thread_id: 'thread-override-999'
+    }, {
+      wakeCodex: (_msg, tid) => ({ attempted: true, ok: true, target: 'codex', threadId: tid })
+    });
+    assert.equal(retriedWake.deduplicated, true);
+    assert.equal(retriedWake.wake_retried, true);
+    assert.equal(retriedWake.existing_id, failedWake.id);
+    assert.equal(retriedWake.wakeResults[0].ok, true);
+    assert.equal(db.prepare('SELECT wake_ok FROM messages WHERE id = ?').get(failedWake.id).wake_ok, 1);
+
+    // Third same-state send after wake_ok=1 short-circuits without re-waking
+    let calledThird = false;
+    const shortCircuit = handleBusSend(db, {
+      from: 'watchdog',
+      to: 'codex',
+      topic: 'HeadIdleWake',
+      issue: 382,
+      body: 'Wake codex',
+      state: 'idle-wake-382',
+      wake: true
+    }, {
+      wakeCodex: () => {
+        calledThird = true;
+        return { attempted: true, ok: true };
+      }
+    });
+    assert.equal(shortCircuit.deduplicated, true);
+    assert.equal(shortCircuit.wake_retried, undefined);
+    assert.equal(calledThird, false);
+
     const countRow = db.prepare('SELECT COUNT(*) AS cnt FROM messages').get();
-    assert.equal(countRow.cnt, 2);
+    assert.equal(countRow.cnt, 4);
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('bus_review_claim enforces single holder per (pr_number, head_sha, role)', async () => {
+test('bus_review_claim validates/canonicalizes 40-char hex SHA and supports expiration, release, complete, and list', async () => {
   const { openBusDb, handleBusReviewClaim } = await import('./mobai-swarm-bus.mjs');
   const { dir, dbPath } = createTempDbPath();
   const { db } = openBusDb(dbPath);
   try {
-    const sha1 = '1111111111111111111111111111111111111111';
+    const shaUpper = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    const shaLower = shaUpper.toLowerCase();
     const sha2 = '2222222222222222222222222222222222222222';
+
+    assert.throws(() => handleBusReviewClaim(db, { agent: 'codex', pr_number: 55, head_sha: 'abc123', role: 'final' }), /40-character/);
+    assert.throws(() => handleBusReviewClaim(db, { agent: 'codex', pr_number: 55, head_sha: 'z'.repeat(40), role: 'final' }), /40-character/);
 
     const first = handleBusReviewClaim(db, {
       agent: 'codex',
       pr_number: 55,
-      head_sha: sha1,
-      role: 'final'
+      head_sha: shaUpper,
+      role: 'final',
+      ttl_minutes: 60
     });
     assert.equal(first.claimed, true);
+    assert.equal(first.head_sha, shaLower);
+    assert.equal(first.status, 'claimed');
 
+    // Case-variant duplicate claim is blocked
     const second = handleBusReviewClaim(db, {
       agent: 'antigravity-gemini',
       pr_number: 55,
-      head_sha: sha1,
+      head_sha: shaLower,
       role: 'final'
     });
     assert.equal(second.claimed, false);
+    assert.equal(second.reason, 'already_claimed');
     assert.equal(second.holder, 'codex');
-    assert.ok(second.claimed_at_utc);
+
+    // Expired lease allows reclaim by replacement reviewer
+    const expiredIso = new Date(Date.now() - 60_000).toISOString();
+    db.prepare('UPDATE review_claims SET expires_at_utc = ? WHERE pr_number = 55 AND head_sha = ? AND role = ?').run(expiredIso, shaLower, 'final');
+    const reclaimed = handleBusReviewClaim(db, {
+      agent: 'antigravity-opus',
+      pr_number: 55,
+      head_sha: shaUpper,
+      role: 'final'
+    });
+    assert.equal(reclaimed.claimed, true);
+    assert.equal(reclaimed.reclaimed, true);
+    assert.equal(reclaimed.previous_holder, 'codex');
+
+    // Explicit release allows immediate claim by another reviewer
+    const released = handleBusReviewClaim(db, {
+      action: 'release',
+      pr_number: 55,
+      head_sha: shaUpper,
+      role: 'final'
+    });
+    assert.equal(released.released, true);
+    assert.equal(released.claim.status, 'released');
+
+    const afterRelease = handleBusReviewClaim(db, {
+      agent: 'codex',
+      pr_number: 55,
+      head_sha: shaLower,
+      role: 'final'
+    });
+    assert.equal(afterRelease.claimed, true);
+    assert.equal(afterRelease.reclaimed, true);
+    assert.equal(afterRelease.previous_status, 'released');
+
+    // Complete locks head+role permanently and prevents release/reclaim
+    const completed = handleBusReviewClaim(db, {
+      action: 'complete',
+      agent: 'codex',
+      pr_number: 55,
+      head_sha: shaUpper,
+      role: 'final'
+    });
+    assert.equal(completed.status, 'completed');
+    assert.ok(completed.completed_at_utc);
+
+    const blockedCompleted = handleBusReviewClaim(db, {
+      agent: 'antigravity-opus',
+      pr_number: 55,
+      head_sha: shaLower,
+      role: 'final'
+    });
+    assert.equal(blockedCompleted.claimed, false);
+    assert.equal(blockedCompleted.reason, 'already_completed');
+
+    const releaseCompleted = handleBusReviewClaim(db, {
+      action: 'release',
+      pr_number: 55,
+      head_sha: shaLower,
+      role: 'final'
+    });
+    assert.equal(releaseCompleted.released, false);
+    assert.equal(releaseCompleted.reason, 'already_completed');
 
     const differentRole = handleBusReviewClaim(db, {
       agent: 'antigravity-gemini',
       pr_number: 55,
-      head_sha: sha1,
+      head_sha: shaLower,
       role: 'p3-verification'
     });
     assert.equal(differentRole.claimed, true);
@@ -376,13 +532,16 @@ test('bus_review_claim enforces single holder per (pr_number, head_sha, role)', 
       role: 'final'
     });
     assert.equal(newHead.claimed, true);
+
+    const listRes = handleBusReviewClaim(db, { action: 'list', pr_number: 55, head_sha: shaUpper });
+    assert.equal(listRes.count, 2);
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('bus_queue supports priority/oldest ordering, resume renewal, expired lease takeover, and code_wip L-only gate', async () => {
+test('bus_queue supports priority/oldest ordering, resume renewal, expired lease takeover, and effective code_wip >= 2 gate', async () => {
   const { openBusDb, handleBusQueue } = await import('./mobai-swarm-bus.mjs');
   const { dir, dbPath } = createTempDbPath();
   const { db } = openBusDb(dbPath);
@@ -391,6 +550,7 @@ test('bus_queue supports priority/oldest ordering, resume renewal, expired lease
     handleBusQueue(db, { action: 'upsert', issue_number: 101, title: 'Medium P2 older', priority: 2, risk_class: 'M' });
     handleBusQueue(db, { action: 'upsert', issue_number: 102, title: 'High P1 urgent', priority: 1, risk_class: 'H' });
     handleBusQueue(db, { action: 'upsert', issue_number: 103, title: 'Low P2 newer', priority: 2, risk_class: 'L' });
+    handleBusQueue(db, { action: 'upsert', issue_number: 104, title: 'Medium P2 extra', priority: 2, risk_class: 'M' });
 
     // Re-syncing queued item updates title/priority, and preserves claimed status later
     handleBusQueue(db, { action: 'upsert', issue_number: 102, title: 'High P1 urgent updated', priority: 1, risk_class: 'H' });
@@ -401,6 +561,7 @@ test('bus_queue supports priority/oldest ordering, resume renewal, expired lease
     assert.equal(claim1.item.issue_number, 102);
     assert.equal(claim1.item.status, 'claimed');
     assert.equal(claim1.item.title, 'High P1 urgent updated');
+    assert.equal(claim1.effective_code_wip, 0);
 
     // Re-syncing an actively claimed item keeps status='claimed'
     const resynced = handleBusQueue(db, { action: 'upsert', issue_number: 102, title: 'High P1 still Ready', priority: 1, risk_class: 'H' });
@@ -415,27 +576,33 @@ test('bus_queue supports priority/oldest ordering, resume renewal, expired lease
     assert.equal(resumed.item.issue_number, 102);
     assert.ok(resumed.item.lease_expires_utc > pastLease);
 
-    // 3. When code_wip >= 3, non-L items (101 M) are skipped and only L item (103 L) is eligible
-    handleBusQueue(db, { action: 'sync-meta', meta_key: 'code_wip', meta_value: '3' });
+    // 3. When base code_wip=1 + 1 active H/M claim (#102) => effectiveCodeWip=2 >= 2: skips M items and picks L item (#103)
+    handleBusQueue(db, { action: 'sync-meta', meta_key: 'code_wip', meta_value: '1' });
     const lOnly = handleBusQueue(db, { action: 'next', agent: 'antigravity-gemini' });
     assert.equal(lOnly.resumed, false);
+    assert.equal(lOnly.effective_code_wip, 2);
     assert.equal(lOnly.item.issue_number, 103);
 
-    // Next non-L item is refused while code_wip >= 3
+    // Next non-L item (#101/#104 M) is refused while effectiveCodeWip >= 2
     const blocked = handleBusQueue(db, { action: 'next', agent: 'claude-opus' });
     assert.equal(blocked.item, null);
+    assert.equal(blocked.effective_code_wip, 2);
 
-    // 4. Lower code_wip back to 1 -> 101 M becomes eligible
-    handleBusQueue(db, { action: 'sync-meta', meta_key: 'code_wip', meta_value: '1' });
+    // 4. Lower code_wip to 0 -> effectiveCodeWip=1 < 2, so 101 M is claimed (making active claims = 2), then 104 M is blocked!
+    handleBusQueue(db, { action: 'sync-meta', meta_key: 'code_wip', meta_value: '0' });
     const mClaim = handleBusQueue(db, { action: 'next', agent: 'claude-opus' });
     assert.equal(mClaim.item.issue_number, 101);
+    assert.equal(mClaim.effective_code_wip, 1);
 
-    // 5. Expired lease takeover by another agent
+    const blockedBackToBack = handleBusQueue(db, { action: 'next', agent: 'antigravity-opus' });
+    assert.equal(blockedBackToBack.item, null);
+    assert.equal(blockedBackToBack.effective_code_wip, 2);
+
+    // 5. Expired lease takeover by another agent (#101 expired while #102 active -> 1 active + 0 code_wip => takeover picks #101)
     const expiredIso = new Date(Date.now() - 60_000).toISOString();
     db.prepare('UPDATE work_queue SET lease_expires_utc = ? WHERE issue_number = 101').run(expiredIso);
     const releaseOther = handleBusQueue(db, { action: 'release', issue_number: 103, agent: 'antigravity-gemini' });
     assert.equal(releaseOther.released, true);
-    // 101 (P2, id=1) is older than 103 (P2, id=3) and has an expired lease, so takeover picks 101
     const takeover = handleBusQueue(db, { action: 'next', agent: 'antigravity-opus' });
     assert.equal(takeover.resumed, false);
     assert.equal(takeover.item.issue_number, 101);
@@ -525,6 +692,258 @@ test('Additive schema migration upgrades legacy swarm-bus.db without losing exis
     assert.equal(cliUpsert.status, 0);
     assert.equal(JSON.parse(cliUpsert.stdout).item.issue_number, 382);
   } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Concurrent startup, atomic state deduplication, and queue WIP claim race stay consistent across processes', async () => {
+  const { dir, dbPath } = createTempDbPath();
+  try {
+    // Seed legacy pre-state DB missing messages.state, messages.wake_ok, review_claims, work_queue, meta
+    const legacyDb = new DatabaseSync(dbPath);
+    legacyDb.exec(`
+      CREATE TABLE messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at_utc TEXT NOT NULL,
+        sender TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        topic TEXT NOT NULL,
+        body TEXT NOT NULL,
+        pr_number INTEGER,
+        issue_number INTEGER,
+        priority TEXT NOT NULL DEFAULT 'normal',
+        reply_to_id INTEGER,
+        status TEXT NOT NULL DEFAULT 'unread',
+        acked_by TEXT,
+        acked_at_utc TEXT
+      );
+      CREATE TABLE locks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent TEXT NOT NULL,
+        path_pattern TEXT NOT NULL UNIQUE,
+        pr_number INTEGER,
+        claimed_at_utc TEXT NOT NULL,
+        expires_at_utc TEXT NOT NULL
+      );
+    `);
+    legacyDb.prepare(`
+      INSERT INTO messages (created_at_utc, sender, recipient, topic, body, pr_number, status)
+      VALUES ('2026-11-26T00:00:00.000Z', 'codex', 'claude-opus', 'legacy-msg', 'Keep row', 54, 'unread')
+    `).run();
+    legacyDb.close();
+
+    const workerEnv = { ...process.env, MOBADEV_SWARM_BUS_DB: dbPath };
+
+    // 1. 6 concurrent CLI workers open and upgrade legacy DB simultaneously with zero duplicate column errors
+    const startupResults = await Promise.all(
+      Array.from({ length: 6 }, () => runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'status'], workerEnv))
+    );
+    for (const res of startupResults) {
+      assert.equal(res.status, 0, `Concurrent startup failed: ${res.stderr}`);
+      assert.equal(JSON.parse(res.stdout).recentMessages[0].body, 'Keep row');
+    }
+
+    // 2. 4 concurrent sends with identical (sender, recipient, topic, pr, state) insert exactly 1 row
+    const sendResults = await Promise.all(
+      Array.from({ length: 4 }, () => runProcessAsync(process.execPath, [
+        '--no-warnings', BUS_SCRIPT, '--cli', 'send',
+        '--from', 'codex', '--to', 'claude-opus', '--topic', 'race-check',
+        '--pr', '58', '--body', 'Same state', '--state', 'sha-race-1'
+      ], workerEnv))
+    );
+    for (const res of sendResults) {
+      assert.equal(res.status, 0, `Concurrent send failed: ${res.stderr}`);
+    }
+    const parsedSends = sendResults.map((r) => JSON.parse(r.stdout));
+    const insertedSends = parsedSends.filter((p) => !p.deduplicated);
+    const dedupSends = parsedSends.filter((p) => p.deduplicated);
+    assert.equal(insertedSends.length, 1);
+    assert.equal(dedupSends.length, 3);
+
+    // 3. Concurrent queue next with base code_wip=1 and two M items grants strictly 1 claim
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'sync-meta', '--meta-key', 'code_wip', '--meta-value', '1'], workerEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'upsert', '--issue-number', '701', '--title', 'Item 701', '--priority', '1', '--risk-class', 'M'], workerEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'upsert', '--issue-number', '702', '--title', 'Item 702', '--priority', '1', '--risk-class', 'M'], workerEnv);
+
+    const raceClaims = await Promise.all([
+      runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'next', '--agent', 'codex'], workerEnv),
+      runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'next', '--agent', 'claude-opus'], workerEnv)
+    ]);
+    for (const res of raceClaims) {
+      assert.equal(res.status, 0, `Concurrent queue next failed: ${res.stderr}`);
+    }
+    const claimPayloads = raceClaims.map((r) => JSON.parse(r.stdout));
+    const granted = claimPayloads.filter((p) => p.item !== null);
+    const denied = claimPayloads.filter((p) => p.item === null);
+    assert.equal(granted.length, 1);
+    assert.equal(denied.length, 1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Invoke-SwarmWatchdog preserves queue on failed GraphQL, paginates Project v2, and forwards CodexThreadId on HeadIdleWake', async () => {
+  const pwshCheck = spawnSync('pwsh', ['--version'], { encoding: 'utf8' });
+  if (pwshCheck.status !== 0) {
+    return;
+  }
+
+  const { dir, dbPath } = createTempDbPath();
+  const localAppDir = path.join(dir, 'localapp');
+  const binDir = path.join(dir, 'bin');
+  const logFile = path.join(dir, 'node-calls.jsonl');
+  fs.mkdirSync(localAppDir, { recursive: true });
+  fs.mkdirSync(binDir, { recursive: true });
+
+  // Mock node.cmd in PATH to log invoked args + MOBADEV_CODEX_THREAD_ID and forward to real node.exe
+  const nodeWrapper = path.join(dir, 'node-wrapper.mjs');
+  fs.writeFileSync(nodeWrapper, `
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify({ args, threadEnv: process.env.MOBADEV_CODEX_THREAD_ID ?? null }) + '\\n');
+const res = spawnSync(${JSON.stringify(process.execPath)}, args, { stdio: 'inherit', env: process.env });
+process.exit(res.status ?? 1);
+`, 'utf8');
+  fs.writeFileSync(path.join(binDir, 'node.cmd'), `@echo off\r\n"${process.execPath}" "${nodeWrapper}" %*\r\n`, 'utf8');
+
+  const mockGhScript = path.join(dir, 'mock-gh.mjs');
+  fs.writeFileSync(mockGhScript, `
+const args = process.argv.slice(2);
+const mode = process.env.MOCK_GH_MODE || 'fail';
+if (args[0] === 'pr' && args[1] === 'list') {
+  console.log('[]');
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1] === 'graphql') {
+  if (mode === 'fail') {
+    process.exit(1);
+  }
+  const cursorArg = args.find((a) => a.startsWith('cursor='));
+  if (!cursorArg) {
+    console.log(JSON.stringify({
+      data: {
+        user: {
+          projectV2: {
+            fields: { nodes: [{ name: 'Status' }, { name: 'Priority' }, { name: 'Risk class' }] },
+            items: {
+              pageInfo: { hasNextPage: true, endCursor: 'page2' },
+              nodes: [{
+                id: 'I1',
+                fieldValues: { nodes: [
+                  { name: 'Ready', field: { name: 'Status' } },
+                  { name: 'P1', field: { name: 'Priority' } },
+                  { name: 'M', field: { name: 'Risk class' } }
+                ] },
+                content: { __typename: 'Issue', number: 801, title: 'Page 1 Issue', state: 'OPEN' }
+              }]
+            }
+          }
+        }
+      }
+    }));
+    process.exit(0);
+  }
+  console.log(JSON.stringify({
+    data: {
+      user: {
+        projectV2: {
+          fields: { nodes: [{ name: 'Status' }, { name: 'Priority' }, { name: 'Risk class' }] },
+          items: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [{
+              id: 'I2',
+              fieldValues: { nodes: [
+                { name: 'Ready', field: { name: 'Status' } },
+                { name: 'P2', field: { name: 'Priority' } },
+                { name: 'L', field: { name: 'Risk class' } }
+              ] },
+              content: { __typename: 'Issue', number: 802, title: 'Page 2 Issue', state: 'OPEN' }
+            }]
+          }
+        }
+      }
+    }
+  }));
+  process.exit(0);
+}
+console.log('[]');
+`, 'utf8');
+  fs.writeFileSync(path.join(binDir, 'gh.cmd'), `@echo off\r\n"${process.execPath}" "${mockGhScript}" %*\r\n`, 'utf8');
+
+  const idleTimeIso = new Date(Date.now() - 45 * 60_000).toISOString();
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      monitors: [{
+        id: 'codex-monitor',
+        displayName: 'MOBAi ChatGPT Codex',
+        state: 'idle',
+        model: 'gpt-6.2-sol',
+        lastActivityUtc: idleTimeIso,
+        rateLimitResetLabel: null
+      }]
+    }));
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+
+  try {
+    const busEnv = { ...process.env, MOBADEV_SWARM_BUS_DB: dbPath };
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'upsert', '--issue-number', '799', '--title', 'Existing Claimed', '--priority', '1', '--risk-class', 'M'], busEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'next', '--agent', 'codex'], busEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'sync-meta', '--meta-key', 'code_wip', '--meta-value', '2'], busEnv);
+
+    const baseWdEnv = {
+      ...process.env,
+      LOCALAPPDATA: localAppDir,
+      MOBADEV_SWARM_BUS_DB: dbPath,
+      PATH: `${binDir}${path.delimiter}${process.env.PATH}`
+    };
+
+    // Case A: GraphQL failure must preserve existing work_queue and meta.code_wip
+    const failRun = await runProcessAsync('pwsh', [
+      '-NoProfile', '-File', WATCHDOG_SCRIPT,
+      '-SkipHygiene', '-SyncQueue', '-Json',
+      '-DashboardApiUrl', `http://127.0.0.1:${port}`
+    ], { ...baseWdEnv, MOCK_GH_MODE: 'fail' });
+    assert.equal(failRun.status, 0, failRun.stderr);
+    const failReport = JSON.parse(failRun.stdout);
+    assert.equal(failReport.QueueSync.BoardReadSucceeded, false);
+    assert.equal(failReport.QueueSync.RemovedCount, 0);
+
+    const afterFail = JSON.parse((await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'list'], busEnv)).stdout);
+    assert.equal(afterFail.code_wip, 2);
+    assert.equal(afterFail.items[0].status, 'claimed');
+    assert.equal(afterFail.items[0].issue_number, 799);
+
+    // Case B: Paginated 2-page GraphQL sync + HeadIdleWake forwarding custom -CodexThreadId
+    const customThread = 'custom-codex-thread-abc';
+    const okRun = await runProcessAsync('pwsh', [
+      '-NoProfile', '-File', WATCHDOG_SCRIPT,
+      '-SkipHygiene', '-DispatchEvents', '-SyncQueue', '-Json',
+      '-CodexThreadId', customThread,
+      '-DashboardApiUrl', `http://127.0.0.1:${port}`
+    ], { ...baseWdEnv, MOCK_GH_MODE: 'paginated' });
+    assert.equal(okRun.status, 0, okRun.stderr);
+    const okReport = JSON.parse(okRun.stdout);
+    assert.equal(okReport.QueueSync.BoardReadSucceeded, true);
+    assert.equal(okReport.QueueSync.UpsertedCount, 2);
+    assert.equal(okReport.QueueSync.RemovedCount, 1);
+
+    const afterOk = JSON.parse((await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'list'], busEnv)).stdout);
+    const syncedNums = afterOk.items.filter((i) => i.status === 'queued').map((i) => i.issue_number);
+    assert.deepEqual(syncedNums, [801, 802]);
+
+    const loggedCalls = fs.readFileSync(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const idleWakeCall = loggedCalls.find((c) => c.args.includes('HeadIdleWake'));
+    assert.ok(idleWakeCall, 'Expected HeadIdleWake bus_send call');
+    assert.equal(idleWakeCall.threadEnv, customThread);
+    const tidFlagIndex = idleWakeCall.args.indexOf('--codex-thread-id');
+    assert.ok(tidFlagIndex !== -1 && idleWakeCall.args[tidFlagIndex + 1] === customThread);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

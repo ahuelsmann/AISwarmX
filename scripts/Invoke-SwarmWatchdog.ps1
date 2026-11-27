@@ -15,6 +15,7 @@ param(
     [switch]$SyncQueue,
     [switch]$ResetEventState,
     [string]$CodexThreadId = "01a14504-bd6c-7a50-b715-1a2f2ec76467",
+    [string]$DashboardApiUrl = "http://127.0.0.1:5179",
     [switch]$Json,
     [switch]$RegisterScheduledTask,
     [switch]$UnregisterScheduledTask,
@@ -111,7 +112,8 @@ $monitorsSummary = @()
 $claudeRateLimited = $false
 $codexMonitor = $null
 try {
-    $monResp = Invoke-RestMethod -Uri "http://127.0.0.1:5179/api/monitors?refresh=true" -TimeoutSec 5 -ErrorAction Stop
+    $monitorsBaseUrl = $DashboardApiUrl.TrimEnd('/')
+    $monResp = Invoke-RestMethod -Uri "$monitorsBaseUrl/api/monitors?refresh=true" -TimeoutSec 5 -ErrorAction Stop
     $monitorsOnline = $true
     foreach ($m in @($monResp.monitors)) {
         if ($m.displayName -eq "MOBAi Claude Opus" -and $m.state -eq "rate_limited") {
@@ -137,13 +139,17 @@ catch { }
 
 # 3. Query MOBAflow Open PRs
 $openPrs = @()
+$openPrsReadSucceeded = $false
 try {
     $prJson = & gh pr list --repo ahuelsmann/MOBAflow --state open --limit 50 --json number,title,url,headRefName,headRefOid,isDraft,mergeStateStatus,statusCheckRollup,body,files 2>$null
     if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($prJson)) {
         $openPrs = @($prJson | ConvertFrom-Json)
+        $openPrsReadSucceeded = $true
     }
 }
-catch { }
+catch {
+    Write-Verbose "Watchdog open PR query failed: $_"
+}
 
 $openCodePrCount = 0
 $fastPathCandidates = [System.Collections.Generic.List[object]]::new()
@@ -254,7 +260,7 @@ foreach ($pr in $openPrs) {
     }
 }
 
-# 4. Query MOBAflow Kanban Project #1 (PVT_kwHOAPwF2s4BZ8_z)
+# 4. Query MOBAflow Kanban Project #1 (PVT_kwHOAPwF2s4BZ8_z) with full cursor pagination
 $projectId = "PVT_kwHOAPwF2s4BZ8_z"
 $statusFieldId = "PVTSSF_lAHOAPwF2s4BZ8_zzhU4AOM"
 $doneOptionId = "98236657"
@@ -262,16 +268,45 @@ $doneOptionId = "98236657"
 $boardItems = @()
 $projectFieldNames = @()
 $autoHealedItems = [System.Collections.Generic.List[object]]::new()
-$graphQuery = 'query($owner:String!,$num:Int!){user(login:$owner){projectV2(number:$num){fields(first:20){nodes{... on ProjectV2SingleSelectField{name}}}items(first:100,query:"-status:Done -status:Planned -status:Inbox"){nodes{id fieldValues(first:20){nodes{... on ProjectV2ItemFieldSingleSelectValue{name field{... on ProjectV2SingleSelectField{name}}}}}content{__typename ... on Issue{number title state} ... on PullRequest{number title state}}}}}}}'
+$boardReadSucceeded = $false
+$boardReadError = $null
+$graphQuery = 'query($owner:String!,$num:Int!,$cursor:String){user(login:$owner){projectV2(number:$num){fields(first:20){nodes{... on ProjectV2SingleSelectField{name}}}items(first:100,after:$cursor,query:"-status:Done -status:Planned -status:Inbox"){pageInfo{hasNextPage endCursor}nodes{id fieldValues(first:20){nodes{... on ProjectV2ItemFieldSingleSelectValue{name field{... on ProjectV2SingleSelectField{name}}}}}content{__typename ... on Issue{number title state} ... on PullRequest{number title state}}}}}}}'
 
 try {
-    $gqlRaw = & gh api graphql -f owner=ahuelsmann -F num=1 -f "query=$graphQuery" 2>$null
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($gqlRaw)) {
-        $gqlObj = ($gqlRaw -join "`n") | ConvertFrom-Json
-        if ($gqlObj.data.user.projectV2.fields -and $gqlObj.data.user.projectV2.fields.nodes) {
-            $projectFieldNames = @($gqlObj.data.user.projectV2.fields.nodes | Where-Object { $_ -and $_.PSObject.Properties["name"] -and $_.name } | ForEach-Object { "$($_.name)" })
+    $cursor = $null
+    $pageCount = 0
+    $maxPages = 50
+    while ($pageCount -lt $maxPages) {
+        $pageCount++
+        $gqlArgs = @("api", "graphql", "-f", "owner=ahuelsmann", "-F", "num=1", "-f", "query=$graphQuery")
+        if (-not [string]::IsNullOrWhiteSpace($cursor)) {
+            $gqlArgs += @("-f", "cursor=$cursor")
         }
-        $nodes = @($gqlObj.data.user.projectV2.items.nodes)
+        $gqlRaw = & gh @gqlArgs 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($gqlRaw)) {
+            $boardReadError = "gh api graphql exited with $LASTEXITCODE"
+            break
+        }
+
+        $gqlObj = ($gqlRaw -join "`n") | ConvertFrom-Json
+        if ($gqlObj.PSObject.Properties["errors"] -and @($gqlObj.errors).Count -gt 0) {
+            $boardReadError = "GraphQL returned API errors"
+            break
+        }
+
+        $userNode = if ($gqlObj.PSObject.Properties["data"] -and $gqlObj.data) { $gqlObj.data.user } else { $null }
+        $projectNode = if ($userNode) { $userNode.projectV2 } else { $null }
+        $itemsPage = if ($projectNode) { $projectNode.items } else { $null }
+        if ($null -eq $projectNode -or $null -eq $itemsPage) {
+            $boardReadError = "GraphQL response missing projectV2.items"
+            break
+        }
+
+        if ($projectFieldNames.Count -eq 0 -and $projectNode.fields -and $projectNode.fields.nodes) {
+            $projectFieldNames = @($projectNode.fields.nodes | Where-Object { $_ -and $_.PSObject.Properties["name"] -and $_.name } | ForEach-Object { "$($_.name)" })
+        }
+
+        $nodes = @($itemsPage.nodes)
         foreach ($node in $nodes) {
             if ($null -eq $node -or $null -eq $node.content) { continue }
             $kanbanStatus = $null
@@ -315,16 +350,37 @@ try {
                 RiskClass    = $riskClass
             }
         }
+
+        $pageInfo = if ($itemsPage.PSObject.Properties["pageInfo"]) { $itemsPage.pageInfo } else { $null }
+        $hasNext = ($null -ne $pageInfo -and [bool]$pageInfo.hasNextPage)
+        if ($hasNext) {
+            $nextCursor = if ($pageInfo.PSObject.Properties["endCursor"] -and $pageInfo.endCursor) { "$($pageInfo.endCursor)" } else { "" }
+            if ([string]::IsNullOrWhiteSpace($nextCursor)) {
+                $boardReadError = "GraphQL pagination missing endCursor while hasNextPage=true"
+                break
+            }
+            $cursor = $nextCursor
+        }
+        else {
+            $boardReadSucceeded = $true
+            break
+        }
+    }
+
+    if (-not $boardReadSucceeded -and -not $boardReadError) {
+        $boardReadError = "GraphQL pagination exceeded $maxPages pages"
     }
 }
 catch {
+    $boardReadSucceeded = $false
+    $boardReadError = "$_"
     Write-Warning "Watchdog GraphQL error: $_"
 }
 
 $readyIssues = @($boardItems | Where-Object { $_.Kind -eq "Issue" -and $_.GitHubState -eq "OPEN" -and $_.KanbanStatus -eq "Ready" })
 $rf30OpenInProgress = @($boardItems | Where-Object { $_.Kind -eq "Issue" -and $_.Number -eq 452 -and $_.GitHubState -eq "OPEN" -and $_.KanbanStatus -eq "In progress" }).Count -gt 0
 
-# 5. Re-plan trigger check & work_queue / meta.code_wip sync
+# 5. Re-plan trigger check & fail-safe work_queue / meta.code_wip sync
 $busScript = Join-Path $RepoDevRoot "bus\mobai-swarm-bus.mjs"
 $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
 $codexExe = Join-Path $env:USERPROFILE ".codex\.sandbox-bin\codex.exe"
@@ -345,7 +401,16 @@ foreach ($ri in $readyIssues) {
 
 $queueSchemaValid = $true
 $queueSyncWarning = $null
-if ($projectFieldNames.Count -gt 0 -and (-not $hasPriorityField -or -not $hasRiskField)) {
+if (-not $boardReadSucceeded) {
+    $queueSchemaValid = $false
+    $queueSyncWarning = if ($boardReadError) {
+        "Project #1 board read failed ($boardReadError); preserving existing work_queue and meta.code_wip."
+    }
+    else {
+        "Project #1 board read incomplete; preserving existing work_queue and meta.code_wip."
+    }
+}
+elseif ($projectFieldNames.Count -gt 0 -and (-not $hasPriorityField -or -not $hasRiskField)) {
     $queueSchemaValid = $false
     $queueSyncWarning = "Project #1 schema check failed: missing Priority ($hasPriorityField) or Risk class ($hasRiskField) field."
 }
@@ -362,20 +427,23 @@ if ($queueSyncWarning -and -not $Json) {
 }
 
 $queueSyncResult = [pscustomobject]@{
-    Enabled      = $effectiveSyncQueue
-    SchemaValid  = $queueSchemaValid
-    Warning      = $queueSyncWarning
-    UpsertedCount = 0
-    RemovedCount = 0
-    DoneCount    = 0
-    CodeWip      = $openCodePrCount
+    Enabled            = $effectiveSyncQueue
+    BoardReadSucceeded = $boardReadSucceeded
+    SchemaValid        = $queueSchemaValid
+    Warning            = $queueSyncWarning
+    UpsertedCount      = 0
+    RemovedCount       = 0
+    DoneCount          = 0
+    CodeWip            = $openCodePrCount
 }
 
 $queueItemsSnapshot = @()
 if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
-    if ($effectiveSyncQueue) {
+    if ($effectiveSyncQueue -and $boardReadSucceeded) {
         try {
-            & $nodeCmd.Source --no-warnings $busScript --cli queue --action sync-meta --meta-key "code_wip" --meta-value "$openCodePrCount" 2>$null | Out-Null
+            if ($openPrsReadSucceeded) {
+                & $nodeCmd.Source --no-warnings $busScript --cli queue --action sync-meta --meta-key "code_wip" --meta-value "$openCodePrCount" 2>$null | Out-Null
+            }
 
             if ($queueSchemaValid) {
                 $preListJson = & $nodeCmd.Source --no-warnings $busScript --cli queue --action list 2>$null
@@ -577,8 +645,25 @@ if ($DispatchEvents) {
                 }
                 if ($ev.WakeViaBus) {
                     $sendArgs += "--wake"
+                    if (-not [string]::IsNullOrWhiteSpace($CodexThreadId)) {
+                        $sendArgs += @("--codex-thread-id", $CodexThreadId)
+                    }
                 }
-                & $nodeCmd.Source @sendArgs 2>$null | Out-Null
+                $prevCodexThreadEnv = $env:MOBADEV_CODEX_THREAD_ID
+                if (-not [string]::IsNullOrWhiteSpace($CodexThreadId)) {
+                    $env:MOBADEV_CODEX_THREAD_ID = $CodexThreadId
+                }
+                try {
+                    & $nodeCmd.Source @sendArgs 2>$null | Out-Null
+                }
+                finally {
+                    if ($null -eq $prevCodexThreadEnv) {
+                        Remove-Item Env:MOBADEV_CODEX_THREAD_ID -ErrorAction SilentlyContinue
+                    }
+                    else {
+                        $env:MOBADEV_CODEX_THREAD_ID = $prevCodexThreadEnv
+                    }
+                }
                 if ($LASTEXITCODE -eq 0) {
                     $routedTo = if ($ev.WakeViaBus) { "SwarmBusWake+$routedTo" } else { "SwarmBus+$routedTo" }
                 }

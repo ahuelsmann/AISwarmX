@@ -21,8 +21,12 @@ const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_CODEX_THREAD_ID = '01a14504-bd6c-7a50-b715-1a2f2ec76467';
 const HEADLESS_RECIPIENTS = new Set(['watchdog', 'claude-opus-worker', 'system']);
 const REVIEW_CLAIM_ROLES = new Set(['companion', 'final', 'p3-verification']);
+const REVIEW_CLAIM_ACTIONS = new Set(['claim', 'complete', 'release', 'list']);
+const REVIEW_CLAIM_DEFAULT_TTL_MINUTES = 60;
+const HEAD_SHA_REGEX = /^[0-9a-fA-F]{40}$/;
 const QUEUE_STATUSES = new Set(['queued', 'claimed', 'done', 'removed']);
 const QUEUE_LEASE_MS = 4 * 60 * 60 * 1000;
+const CODE_WIP_CLAIM_LIMIT = 2;
 
 function resolveDbPath() {
   if (process.env.MOBADEV_SWARM_BUS_DB && process.env.MOBADEV_SWARM_BUS_DB.trim()) {
@@ -34,83 +38,104 @@ function resolveDbPath() {
   return path.join(localApp, 'MOBAdev', 'swarm-bus.db');
 }
 
+function ensureTableColumns(db, tableName, columnDefs) {
+  const existingCols = new Set(db.prepare(`PRAGMA table_info(${tableName})`).all().map((col) => col.name));
+  for (const [colName, colSql] of columnDefs) {
+    if (!existingCols.has(colName)) {
+      db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${colSql};`);
+    }
+  }
+}
+
 function openBusDb(dbPath = resolveDbPath()) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
   db.exec(`
-    PRAGMA journal_mode = WAL;
     PRAGMA busy_timeout = 5000;
-
-    CREATE TABLE IF NOT EXISTS messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      created_at_utc TEXT NOT NULL,
-      sender TEXT NOT NULL,
-      recipient TEXT NOT NULL,
-      topic TEXT NOT NULL,
-      body TEXT NOT NULL,
-      pr_number INTEGER,
-      issue_number INTEGER,
-      priority TEXT NOT NULL DEFAULT 'normal',
-      reply_to_id INTEGER,
-      status TEXT NOT NULL DEFAULT 'unread',
-      acked_by TEXT,
-      acked_at_utc TEXT,
-      state TEXT
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_messages_recipient_status
-      ON messages (recipient, status, id DESC);
-
-    CREATE TABLE IF NOT EXISTS locks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      agent TEXT NOT NULL,
-      path_pattern TEXT NOT NULL UNIQUE,
-      pr_number INTEGER,
-      claimed_at_utc TEXT NOT NULL,
-      expires_at_utc TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_locks_expires
-      ON locks (expires_at_utc);
-
-    CREATE TABLE IF NOT EXISTS review_claims (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      pr_number INTEGER NOT NULL,
-      head_sha TEXT NOT NULL,
-      role TEXT NOT NULL,
-      agent TEXT NOT NULL,
-      claimed_at_utc TEXT NOT NULL,
-      UNIQUE(pr_number, head_sha, role)
-    );
-
-    CREATE TABLE IF NOT EXISTS work_queue (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      issue_number INTEGER UNIQUE NOT NULL,
-      title TEXT NOT NULL,
-      priority INTEGER NOT NULL,
-      risk_class TEXT,
-      status TEXT NOT NULL CHECK(status IN ('queued','claimed','done','removed')),
-      claimed_by TEXT,
-      claimed_at_utc TEXT,
-      lease_expires_utc TEXT,
-      updated_at_utc TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_work_queue_status_priority
-      ON work_queue (status, priority ASC, id ASC);
-
-    CREATE TABLE IF NOT EXISTS meta (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at_utc TEXT NOT NULL
-    );
+    PRAGMA journal_mode = WAL;
   `);
 
-  // Additive migration for pre-existing databases created before messages.state existed.
-  const messageColumns = db.prepare('PRAGMA table_info(messages)').all();
-  if (!messageColumns.some((col) => col.name === 'state')) {
-    db.exec('ALTER TABLE messages ADD COLUMN state TEXT;');
-  }
+  runInImmediateTransaction(db, () => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at_utc TEXT NOT NULL,
+        sender TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        topic TEXT NOT NULL,
+        body TEXT NOT NULL,
+        pr_number INTEGER,
+        issue_number INTEGER,
+        priority TEXT NOT NULL DEFAULT 'normal',
+        reply_to_id INTEGER,
+        status TEXT NOT NULL DEFAULT 'unread',
+        acked_by TEXT,
+        acked_at_utc TEXT,
+        state TEXT,
+        wake_ok INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_messages_recipient_status
+        ON messages (recipient, status, id DESC);
+
+      CREATE TABLE IF NOT EXISTS locks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent TEXT NOT NULL,
+        path_pattern TEXT NOT NULL UNIQUE,
+        pr_number INTEGER,
+        claimed_at_utc TEXT NOT NULL,
+        expires_at_utc TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_locks_expires
+        ON locks (expires_at_utc);
+
+      CREATE TABLE IF NOT EXISTS review_claims (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pr_number INTEGER NOT NULL,
+        head_sha TEXT NOT NULL,
+        role TEXT NOT NULL,
+        agent TEXT NOT NULL,
+        claimed_at_utc TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'claimed' CHECK(status IN ('claimed','completed','released')),
+        expires_at_utc TEXT,
+        completed_at_utc TEXT,
+        UNIQUE(pr_number, head_sha, role)
+      );
+
+      CREATE TABLE IF NOT EXISTS work_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        issue_number INTEGER UNIQUE NOT NULL,
+        title TEXT NOT NULL,
+        priority INTEGER NOT NULL,
+        risk_class TEXT,
+        status TEXT NOT NULL CHECK(status IN ('queued','claimed','done','removed')),
+        claimed_by TEXT,
+        claimed_at_utc TEXT,
+        lease_expires_utc TEXT,
+        updated_at_utc TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_work_queue_status_priority
+        ON work_queue (status, priority ASC, id ASC);
+
+      CREATE TABLE IF NOT EXISTS meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at_utc TEXT NOT NULL
+      );
+    `);
+
+    ensureTableColumns(db, 'messages', [
+      ['state', 'state TEXT'],
+      ['wake_ok', 'wake_ok INTEGER']
+    ]);
+    ensureTableColumns(db, 'review_claims', [
+      ['status', "status TEXT NOT NULL DEFAULT 'claimed'"],
+      ['expires_at_utc', 'expires_at_utc TEXT'],
+      ['completed_at_utc', 'completed_at_utc TEXT']
+    ]);
+  });
 
   return { db, dbPath };
 }
@@ -142,17 +167,19 @@ function pathsOverlap(aRaw, bRaw) {
   return false;
 }
 
-function tryWakeCodex(messageText) {
+function tryWakeCodex(messageText, threadIdOverride = null) {
   const codexExe = process.env.MOBADEV_CODEX_EXE && process.env.MOBADEV_CODEX_EXE.trim()
     ? process.env.MOBADEV_CODEX_EXE.trim()
     : path.join(os.homedir(), '.codex', '.sandbox-bin', 'codex.exe');
 
-  const threadId = process.env.MOBADEV_CODEX_THREAD_ID && process.env.MOBADEV_CODEX_THREAD_ID.trim()
+  const overrideTrimmed = threadIdOverride ? String(threadIdOverride).trim() : '';
+  const envThread = process.env.MOBADEV_CODEX_THREAD_ID && process.env.MOBADEV_CODEX_THREAD_ID.trim()
     ? process.env.MOBADEV_CODEX_THREAD_ID.trim()
-    : DEFAULT_CODEX_THREAD_ID;
+    : '';
+  const threadId = overrideTrimmed || envThread || DEFAULT_CODEX_THREAD_ID;
 
   if (!fs.existsSync(codexExe)) {
-    return { attempted: false, target: 'codex', reason: 'codex.exe not found' };
+    return { attempted: false, target: 'codex', threadId, reason: 'codex.exe not found' };
   }
 
   try {
@@ -175,7 +202,91 @@ function tryWakeCodex(messageText) {
 
 export { openBusDb };
 
-export function handleBusSend(db, args) {
+function sendOrDeduplicateInTx(db, params) {
+  const {
+    sender,
+    recipient,
+    topic,
+    body,
+    normalizedPr,
+    normalizedIssue,
+    normalizedReplyTo,
+    state,
+    priority,
+    wakeTargetMatches
+  } = params;
+
+  if (state !== null) {
+    const latest = db.prepare(`
+      SELECT id, body, status, state, wake_ok
+      FROM messages
+      WHERE lower(sender) = lower(?)
+        AND lower(recipient) = lower(?)
+        AND topic = ?
+        AND COALESCE(pr_number, -1) = COALESCE(?, -1)
+        AND COALESCE(issue_number, -1) = COALESCE(?, -1)
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(sender, recipient, topic, normalizedPr, normalizedIssue);
+
+    if (latest?.state === state) {
+      if (wakeTargetMatches && latest.status === 'unread' && latest.wake_ok !== 1) {
+        return { mode: 'retry-wake', id: Number(latest.id), body: latest.body || body };
+      }
+      return { mode: 'deduplicated', id: Number(latest.id), wake_ok: latest.wake_ok ?? null };
+    }
+  }
+
+  const createdAt = nowUtcIso();
+  if (sender.toLowerCase() === 'watchdog' && normalizedPr !== null) {
+    db.prepare(`
+      UPDATE messages
+      SET status = 'acked', acked_by = 'auto-superseded', acked_at_utc = ?
+      WHERE lower(sender) = 'watchdog' AND pr_number = ? AND status = 'unread'
+    `).run(createdAt, normalizedPr);
+  }
+
+  const isHeadlessRecipient = HEADLESS_RECIPIENTS.has(recipient.toLowerCase());
+  const initialStatus = isHeadlessRecipient ? 'acked' : 'unread';
+  const initialAckedBy = isHeadlessRecipient ? 'auto-headless' : null;
+  const initialAckedAt = isHeadlessRecipient ? createdAt : null;
+  const initialWakeOk = wakeTargetMatches ? 0 : null;
+
+  const info = db.prepare(`
+    INSERT INTO messages (created_at_utc, sender, recipient, topic, body, pr_number, issue_number, priority, reply_to_id, status, acked_by, acked_at_utc, state, wake_ok)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    createdAt,
+    sender,
+    recipient,
+    topic,
+    body,
+    normalizedPr,
+    normalizedIssue,
+    priority,
+    normalizedReplyTo,
+    initialStatus,
+    initialAckedBy,
+    initialAckedAt,
+    state,
+    initialWakeOk
+  );
+
+  return { mode: 'inserted', id: Number(info.lastInsertRowid), createdAt };
+}
+
+function dispatchCodexWake(db, messageId, sender, recipient, normalizedPr, topic, body, codexThreadId, wakeCodex = tryWakeCodex) {
+  const prTag = normalizedPr !== null ? ` (PR #${normalizedPr})` : '';
+  const wakeMsg = `[SwarmBus #${messageId}] ${sender} -> ${recipient}${prTag} [${topic}]: ${body}`;
+  const wakeRes = wakeCodex(wakeMsg, codexThreadId);
+  if (wakeRes.ok) {
+    db.prepare('UPDATE messages SET wake_ok = 1 WHERE id = ?').run(messageId);
+  }
+  return wakeRes;
+}
+
+export function handleBusSend(db, args, options = {}) {
+  const wakeCodex = typeof options.wakeCodex === 'function' ? options.wakeCodex : tryWakeCodex;
   const sender = String(args.from ?? args.sender ?? '').trim();
   const recipient = String(args.to ?? args.recipient ?? '').trim();
   const topic = String(args.topic ?? '').trim();
@@ -197,76 +308,54 @@ export function handleBusSend(db, args) {
     ? String(args.priority ?? 'normal').toLowerCase()
     : 'normal';
 
-  if (state !== null) {
-    const latest = db.prepare(`
-      SELECT id, state
-      FROM messages
-      WHERE lower(sender) = lower(?)
-        AND topic = ?
-        AND pr_number IS ?
-        AND issue_number IS ?
-      ORDER BY id DESC
-      LIMIT 1
-    `).get(sender, topic, normalizedPr, normalizedIssue);
+  const wakeRequested = args.wake === true || args.wake === 'true';
+  const recLower = recipient.toLowerCase();
+  const wakeTargetMatches = wakeRequested && (recLower.includes('codex') || recLower === 'all');
+  const codexThreadId = args.codex_thread_id ? String(args.codex_thread_id).trim() : null;
 
-    if (latest?.state === state) {
-      return {
-        ok: true,
-        deduplicated: true,
-        existing_id: Number(latest.id),
-        state
-      };
-    }
-  }
-
-  const createdAt = nowUtcIso();
-  if (sender.toLowerCase() === 'watchdog' && normalizedPr !== null) {
-    db.prepare(`
-      UPDATE messages
-      SET status = 'acked', acked_by = 'auto-superseded', acked_at_utc = ?
-      WHERE lower(sender) = 'watchdog' AND pr_number = ? AND status = 'unread'
-    `).run(createdAt, normalizedPr);
-  }
-
-  const isHeadlessRecipient = HEADLESS_RECIPIENTS.has(recipient.toLowerCase());
-  const initialStatus = isHeadlessRecipient ? 'acked' : 'unread';
-  const initialAckedBy = isHeadlessRecipient ? 'auto-headless' : null;
-  const initialAckedAt = isHeadlessRecipient ? createdAt : null;
-
-  const stmt = db.prepare(`
-    INSERT INTO messages (created_at_utc, sender, recipient, topic, body, pr_number, issue_number, priority, reply_to_id, status, acked_by, acked_at_utc, state)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const info = stmt.run(
-    createdAt,
+  const txResult = runInImmediateTransaction(db, () => sendOrDeduplicateInTx(db, {
     sender,
     recipient,
     topic,
     body,
     normalizedPr,
     normalizedIssue,
-    priority,
     normalizedReplyTo,
-    initialStatus,
-    initialAckedBy,
-    initialAckedAt,
-    state
-  );
+    state,
+    priority,
+    wakeTargetMatches
+  }));
+
+  if (txResult.mode === 'deduplicated') {
+    return {
+      ok: true,
+      deduplicated: true,
+      existing_id: txResult.id,
+      state
+    };
+  }
+
+  if (txResult.mode === 'retry-wake') {
+    const wakeRes = dispatchCodexWake(db, txResult.id, sender, recipient, normalizedPr, topic, txResult.body, codexThreadId, wakeCodex);
+    return {
+      ok: true,
+      deduplicated: true,
+      wake_retried: true,
+      existing_id: txResult.id,
+      state,
+      wakeResults: [wakeRes]
+    };
+  }
 
   const wakeResults = [];
-  if (args.wake === true || args.wake === 'true') {
-    const recLower = recipient.toLowerCase();
-    if (recLower.includes('codex') || recLower === 'all') {
-      const prTag = normalizedPr !== null ? ` (PR #${normalizedPr})` : '';
-      const wakeMsg = `[SwarmBus #${info.lastInsertRowid}] ${sender} -> ${recipient}${prTag} [${topic}]: ${body}`;
-      wakeResults.push(tryWakeCodex(wakeMsg));
-    }
+  if (wakeTargetMatches) {
+    wakeResults.push(dispatchCodexWake(db, txResult.id, sender, recipient, normalizedPr, topic, body, codexThreadId, wakeCodex));
   }
 
   return {
     ok: true,
-    id: Number(info.lastInsertRowid),
-    createdAtUtc: createdAt,
+    id: txResult.id,
+    createdAtUtc: txResult.createdAt,
     from: sender,
     to: recipient,
     topic,
@@ -484,61 +573,294 @@ function runInImmediateTransaction(db, fn) {
   }
 }
 
-export function handleBusReviewClaim(db, args = {}) {
-  const agent = String(args.agent ?? '').trim();
-  const prNumber = Number(args.pr_number ?? args.pr);
-  const headSha = String(args.head_sha ?? args.head ?? args.sha ?? '').trim();
-  const role = String(args.role ?? '').trim().toLowerCase();
-
-  if (!agent) {
-    throw new Error('bus_review_claim requires non-empty "agent".');
+function normalizeHeadSha(rawSha, { required = true } = {}) {
+  const trimmed = String(rawSha ?? '').trim();
+  if (!trimmed) {
+    if (required) {
+      throw new Error('bus_review_claim requires a 40-character hexadecimal "head_sha".');
+    }
+    return null;
   }
+  if (!HEAD_SHA_REGEX.test(trimmed)) {
+    throw new Error('bus_review_claim "head_sha" must be a 40-character hexadecimal SHA.');
+  }
+  return trimmed.toLowerCase();
+}
+
+function validateReviewClaimTarget(args) {
+  const prNumber = Number(args.pr_number ?? args.pr);
   if (!Number.isInteger(prNumber) || prNumber <= 0) {
     throw new Error('bus_review_claim requires positive integer "pr_number".');
   }
-  if (!headSha) {
-    throw new Error('bus_review_claim requires non-empty "head_sha".');
-  }
+  const headSha = normalizeHeadSha(args.head_sha ?? args.head ?? args.sha, { required: true });
+  const role = String(args.role ?? '').trim().toLowerCase();
   if (!REVIEW_CLAIM_ROLES.has(role)) {
     throw new Error(`bus_review_claim requires "role" to be one of: ${Array.from(REVIEW_CLAIM_ROLES).join(', ')}.`);
   }
+  return { prNumber, headSha, role };
+}
+
+function claimReviewSlot(db, args) {
+  const agent = String(args.agent ?? '').trim();
+  if (!agent) {
+    throw new Error('bus_review_claim claim requires non-empty "agent".');
+  }
+  const { prNumber, headSha, role } = validateReviewClaimTarget(args);
+  const rawTtl = args.ttl_minutes === undefined || args.ttl_minutes === null || args.ttl_minutes === ''
+    ? REVIEW_CLAIM_DEFAULT_TTL_MINUTES
+    : Number(args.ttl_minutes);
+  const ttlMinutes = Number.isFinite(rawTtl) && rawTtl > 0
+    ? Math.min(1440, Math.max(1, rawTtl))
+    : REVIEW_CLAIM_DEFAULT_TTL_MINUTES;
 
   return runInImmediateTransaction(db, () => {
-    const claimedAt = nowUtcIso();
-    const insertRes = db.prepare(`
-      INSERT OR IGNORE INTO review_claims (pr_number, head_sha, role, agent, claimed_at_utc)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(prNumber, headSha, role, agent, claimedAt);
+    const nowMs = Date.now();
+    const claimedAt = new Date(nowMs).toISOString();
+    const expiresAt = new Date(nowMs + ttlMinutes * 60_000).toISOString();
 
-    if (insertRes.changes === 1) {
+    const existing = db.prepare(`
+      SELECT id, pr_number, head_sha, role, agent, claimed_at_utc, status, expires_at_utc, completed_at_utc
+      FROM review_claims
+      WHERE pr_number = ? AND lower(head_sha) = ? AND role = ?
+    `).get(prNumber, headSha, role);
+
+    if (!existing) {
+      db.prepare(`
+        INSERT INTO review_claims (pr_number, head_sha, role, agent, claimed_at_utc, status, expires_at_utc, completed_at_utc)
+        VALUES (?, ?, ?, ?, ?, 'claimed', ?, NULL)
+      `).run(prNumber, headSha, role, agent, claimedAt, expiresAt);
       return {
         ok: true,
+        action: 'claim',
         claimed: true,
+        reclaimed: false,
         pr_number: prNumber,
         head_sha: headSha,
         role,
         agent,
-        claimed_at_utc: claimedAt
+        status: 'claimed',
+        claimed_at_utc: claimedAt,
+        expires_at_utc: expiresAt
       };
     }
 
-    const existing = db.prepare(`
-      SELECT id, pr_number, head_sha, role, agent, claimed_at_utc
-      FROM review_claims
-      WHERE pr_number = ? AND head_sha = ? AND role = ?
-    `).get(prNumber, headSha, role);
+    const existingStatus = existing.status || 'claimed';
+    if (existingStatus === 'completed') {
+      return {
+        ok: true,
+        action: 'claim',
+        claimed: false,
+        reason: 'already_completed',
+        pr_number: Number(existing.pr_number),
+        head_sha: existing.head_sha.toLowerCase(),
+        role: existing.role,
+        holder: existing.agent,
+        status: 'completed',
+        claimed_at_utc: existing.claimed_at_utc,
+        completed_at_utc: existing.completed_at_utc ?? null
+      };
+    }
+
+    const isActiveClaim = existingStatus === 'claimed'
+      && typeof existing.expires_at_utc === 'string'
+      && existing.expires_at_utc > claimedAt;
+
+    if (isActiveClaim) {
+      return {
+        ok: true,
+        action: 'claim',
+        claimed: false,
+        reason: 'already_claimed',
+        already_claimed_by_self: existing.agent.toLowerCase() === agent.toLowerCase(),
+        pr_number: Number(existing.pr_number),
+        head_sha: existing.head_sha.toLowerCase(),
+        role: existing.role,
+        holder: existing.agent,
+        status: 'claimed',
+        claimed_at_utc: existing.claimed_at_utc,
+        expires_at_utc: existing.expires_at_utc
+      };
+    }
+
+    db.prepare(`
+      UPDATE review_claims
+      SET head_sha = ?,
+          agent = ?,
+          status = 'claimed',
+          claimed_at_utc = ?,
+          expires_at_utc = ?,
+          completed_at_utc = NULL
+      WHERE id = ?
+    `).run(headSha, agent, claimedAt, expiresAt, existing.id);
 
     return {
       ok: true,
-      claimed: false,
-      already_claimed_by_self: existing.agent.toLowerCase() === agent.toLowerCase(),
-      pr_number: Number(existing.pr_number),
-      head_sha: existing.head_sha,
-      role: existing.role,
-      holder: existing.agent,
-      claimed_at_utc: existing.claimed_at_utc
+      action: 'claim',
+      claimed: true,
+      reclaimed: true,
+      previous_holder: existing.agent,
+      previous_status: existingStatus,
+      pr_number: prNumber,
+      head_sha: headSha,
+      role,
+      agent,
+      status: 'claimed',
+      claimed_at_utc: claimedAt,
+      expires_at_utc: expiresAt
     };
   });
+}
+
+function completeReviewSlot(db, args) {
+  const { prNumber, headSha, role } = validateReviewClaimTarget(args);
+  const agent = args.agent !== undefined && args.agent !== null ? String(args.agent).trim() : '';
+
+  return runInImmediateTransaction(db, () => {
+    const completedAt = nowUtcIso();
+    const existing = db.prepare(`
+      SELECT id, agent, status
+      FROM review_claims
+      WHERE pr_number = ? AND lower(head_sha) = ? AND role = ?
+    `).get(prNumber, headSha, role);
+
+    if (!existing) {
+      if (!agent) {
+        throw new Error(`No review claim found for PR #${prNumber} (${headSha}, ${role}).`);
+      }
+      db.prepare(`
+        INSERT INTO review_claims (pr_number, head_sha, role, agent, claimed_at_utc, status, expires_at_utc, completed_at_utc)
+        VALUES (?, ?, ?, ?, ?, 'completed', NULL, ?)
+      `).run(prNumber, headSha, role, agent, completedAt, completedAt);
+    } else {
+      db.prepare(`
+        UPDATE review_claims
+        SET head_sha = ?,
+            agent = COALESCE(NULLIF(?, ''), agent),
+            status = 'completed',
+            expires_at_utc = NULL,
+            completed_at_utc = ?
+        WHERE id = ?
+      `).run(headSha, agent, completedAt, existing.id);
+    }
+
+    const claim = db.prepare('SELECT * FROM review_claims WHERE pr_number = ? AND lower(head_sha) = ? AND role = ?').get(prNumber, headSha, role);
+    return {
+      ok: true,
+      action: 'complete',
+      pr_number: prNumber,
+      head_sha: headSha,
+      role,
+      status: 'completed',
+      completed_at_utc: completedAt,
+      claim
+    };
+  });
+}
+
+function releaseReviewSlot(db, args) {
+  const { prNumber, headSha, role } = validateReviewClaimTarget(args);
+
+  return runInImmediateTransaction(db, () => {
+    const existing = db.prepare(`
+      SELECT id, status
+      FROM review_claims
+      WHERE pr_number = ? AND lower(head_sha) = ? AND role = ?
+    `).get(prNumber, headSha, role);
+
+    if (!existing) {
+      return {
+        ok: true,
+        action: 'release',
+        released: false,
+        pr_number: prNumber,
+        head_sha: headSha,
+        role,
+        claim: null
+      };
+    }
+
+    if (existing.status === 'completed') {
+      return {
+        ok: true,
+        action: 'release',
+        released: false,
+        reason: 'already_completed',
+        pr_number: prNumber,
+        head_sha: headSha,
+        role,
+        claim: db.prepare('SELECT * FROM review_claims WHERE id = ?').get(existing.id)
+      };
+    }
+
+    db.prepare(`
+      UPDATE review_claims
+      SET head_sha = ?,
+          status = 'released',
+          expires_at_utc = NULL,
+          completed_at_utc = NULL
+      WHERE id = ?
+    `).run(headSha, existing.id);
+
+    const claim = db.prepare('SELECT * FROM review_claims WHERE id = ?').get(existing.id);
+    return {
+      ok: true,
+      action: 'release',
+      released: true,
+      pr_number: prNumber,
+      head_sha: headSha,
+      role,
+      claim
+    };
+  });
+}
+
+function listReviewSlots(db, args) {
+  const clauses = [];
+  const params = [];
+
+  if (args.pr_number !== undefined && args.pr_number !== null && args.pr_number !== '') {
+    const prNumber = Number(args.pr_number ?? args.pr);
+    if (!Number.isInteger(prNumber) || prNumber <= 0) {
+      throw new Error('bus_review_claim list "pr_number" must be a positive integer.');
+    }
+    clauses.push('pr_number = ?');
+    params.push(prNumber);
+  }
+
+  const headSha = normalizeHeadSha(args.head_sha ?? args.head ?? args.sha, { required: false });
+  if (headSha) {
+    clauses.push('lower(head_sha) = ?');
+    params.push(headSha);
+  }
+
+  if (args.role !== undefined && args.role !== null && String(args.role).trim() !== '') {
+    const role = String(args.role).trim().toLowerCase();
+    if (!REVIEW_CLAIM_ROLES.has(role)) {
+      throw new Error(`bus_review_claim list "role" must be one of: ${Array.from(REVIEW_CLAIM_ROLES).join(', ')}.`);
+    }
+    clauses.push('role = ?');
+    params.push(role);
+  }
+
+  const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+  const claims = db.prepare(`SELECT * FROM review_claims ${whereSql} ORDER BY id DESC`).all(...params);
+  return {
+    ok: true,
+    action: 'list',
+    count: claims.length,
+    claims
+  };
+}
+
+export function handleBusReviewClaim(db, args = {}) {
+  const action = String(args.action ?? 'claim').trim().toLowerCase();
+  if (!REVIEW_CLAIM_ACTIONS.has(action)) {
+    throw new Error(`Unsupported bus_review_claim action '${action}'. Use: claim, complete, release, list.`);
+  }
+  if (action === 'list') return listReviewSlots(db, args);
+  if (action === 'complete') return completeReviewSlot(db, args);
+  if (action === 'release') return releaseReviewSlot(db, args);
+  return claimReviewSlot(db, args);
 }
 
 function readMetaMap(db) {
@@ -625,8 +947,17 @@ function handleQueueNext(db, args, nowIso, leaseExpiresIso) {
     }
 
     const wipRow = db.prepare("SELECT value FROM meta WHERE key = 'code_wip'").get();
-    const codeWip = wipRow ? Number(wipRow.value) || 0 : 0;
-    const restrictToLowRisk = codeWip >= 3;
+    const baseCodeWip = wipRow ? Number(wipRow.value) || 0 : 0;
+    const activeCodeRow = db.prepare(`
+      SELECT COUNT(*) AS cnt
+      FROM work_queue
+      WHERE status = 'claimed'
+        AND (lease_expires_utc IS NULL OR lease_expires_utc > ?)
+        AND UPPER(COALESCE(risk_class, '')) IN ('H', 'M')
+    `).get(nowIso);
+    const activeClaimedCodeCount = Number(activeCodeRow?.cnt ?? 0);
+    const effectiveCodeWip = baseCodeWip + activeClaimedCodeCount;
+    const restrictToLowRisk = effectiveCodeWip >= CODE_WIP_CLAIM_LIMIT;
 
     const candidateSql = restrictToLowRisk
       ? `SELECT * FROM work_queue
@@ -645,10 +976,12 @@ function handleQueueNext(db, args, nowIso, leaseExpiresIso) {
         ok: true,
         action: 'next',
         resumed: false,
-        code_wip: codeWip,
+        code_wip: baseCodeWip,
+        active_claimed_code_count: activeClaimedCodeCount,
+        effective_code_wip: effectiveCodeWip,
         item: null,
         reason: restrictToLowRisk
-          ? 'code_wip >= 3 and no eligible L-class work item is queued.'
+          ? `effective_code_wip (${effectiveCodeWip}) >= ${CODE_WIP_CLAIM_LIMIT} and no eligible L-class work item is queued.`
           : 'No queued or expired-lease work items available.'
       };
     }
@@ -668,7 +1001,9 @@ function handleQueueNext(db, args, nowIso, leaseExpiresIso) {
       ok: true,
       action: 'next',
       resumed: false,
-      code_wip: codeWip,
+      code_wip: baseCodeWip,
+      active_claimed_code_count: activeClaimedCodeCount,
+      effective_code_wip: effectiveCodeWip,
       item: claimed
     };
   });
@@ -806,8 +1141,9 @@ const TOOL_DEFINITIONS = [
         issue: { type: 'integer', description: 'Optional GitHub issue number.' },
         priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'], default: 'normal' },
         reply_to: { type: 'integer', description: 'Optional parent bus message id.' },
-        state: { type: 'string', description: 'Optional deduplication state key; skips insert when matching sender/topic/pr/issue latest message has identical state.' },
-        wake: { type: 'boolean', description: 'If true and recipient includes codex or all, also pushes into codex.exe queue.', default: false }
+        state: { type: 'string', description: 'Optional deduplication state key; skips insert when matching sender/recipient/topic/pr/issue latest message has identical state.' },
+        wake: { type: 'boolean', description: 'If true and recipient includes codex or all, also pushes into codex.exe queue.', default: false },
+        codex_thread_id: { type: 'string', description: 'Optional override Codex thread ID when wake is true.' }
       },
       required: ['from', 'to', 'topic', 'body']
     }
@@ -869,16 +1205,17 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'bus_review_claim',
-    description: 'Atomically claim a single-holder review slot per (pr_number, head_sha, role) to prevent duplicate reviews.',
+    description: 'Manage single-holder review leases per (pr_number, head_sha, role) with expiration, completion, release, and listing.',
     inputSchema: {
       type: 'object',
       properties: {
-        agent: { type: 'string', description: 'Reviewing agent identifier.' },
+        action: { type: 'string', enum: ['claim', 'complete', 'release', 'list'], default: 'claim', description: 'Lifecycle operation to perform.' },
+        agent: { type: 'string', description: 'Reviewing agent identifier (required for claim; optional for complete/release).' },
         pr_number: { type: 'integer', description: 'MOBAflow/MOBAdev PR number.' },
-        head_sha: { type: 'string', description: 'Exact 40-char PR head commit SHA.' },
-        role: { type: 'string', enum: ['companion', 'final', 'p3-verification'], description: 'Review role slot.' }
-      },
-      required: ['agent', 'pr_number', 'head_sha', 'role']
+        head_sha: { type: 'string', description: 'Exact 40-char hex PR head commit SHA (normalized to lowercase).' },
+        role: { type: 'string', enum: ['companion', 'final', 'p3-verification'], description: 'Review role slot.' },
+        ttl_minutes: { type: 'integer', default: 60, description: 'Lease duration in minutes for claim (default 60).' }
+      }
     }
   },
   {
@@ -1035,7 +1372,8 @@ function runCli(args) {
         priority: flags.priority,
         reply_to: flags['reply-to'],
         state: flags.state,
-        wake: flags.wake === true || flags.wake === 'true'
+        wake: flags.wake === true || flags.wake === 'true',
+        codex_thread_id: flags['codex-thread-id']
       });
     } else if (sub === 'inbox') {
       result = handleBusInbox(db, {
@@ -1061,10 +1399,12 @@ function runCli(args) {
       result = handleBusStatus(db, { limit: flags.limit });
     } else if (sub === 'review-claim' || sub === 'review_claim') {
       result = handleBusReviewClaim(db, {
+        action: flags.action ?? 'claim',
         agent: flags.agent,
         pr_number: flags['pr-number'] ?? flags.pr,
         head_sha: flags['head-sha'] ?? flags.head ?? flags.sha,
-        role: flags.role
+        role: flags.role,
+        ttl_minutes: flags['ttl-minutes']
       });
     } else if (sub === 'queue') {
       result = handleBusQueue(db, {
