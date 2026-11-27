@@ -136,4 +136,82 @@ public sealed class ApiEndpointsIntegrationTests
         using var postRes = await client.PostAsJsonAsync("/api/snapshot", new { });
         Assert.Equal(HttpStatusCode.MethodNotAllowed, postRes.StatusCode);
     }
+
+    [Fact]
+    public async Task WebApplicationFactory_AppliesSwarmConfigWorkspaceAndPreservesExplicitOverrides()
+    {
+        using var fx = new TempDashboardFixture();
+        var repoRoot = FindWorktreeRoot();
+        var presetPath = Path.Combine(repoRoot, "presets", "mobaflow.swarm.json");
+
+        var runner = new PipelineAndWorktreeProviderTests.FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("pr"))
+            {
+                return new CommandResult(1, string.Empty, "Pull requests are disabled for this repository.");
+            }
+
+            if (fileName == "gh" && args.Contains("graphql"))
+            {
+                return new CommandResult(1, string.Empty, "missing scope");
+            }
+
+            if (fileName == "gh" && args.Contains("issue"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            return new CommandResult(1, string.Empty, "unexpected");
+        });
+
+        await using var factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Testing");
+                builder.ConfigureAppConfiguration((_, config) =>
+                {
+                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Dashboard:SwarmConfigPath"] = presetPath,
+                        ["Dashboard:WorkspaceId"] = "mobadev",
+                        ["Dashboard:MobaDevRepoPath"] = fx.MobaDevPath,
+                        ["Dashboard:MobaFlowRepoPath"] = fx.MobaFlowPath,
+                        ["Dashboard:ClaudeHomePath"] = fx.ClaudeHomePath,
+                        ["Dashboard:CodexHomePath"] = fx.CodexHomePath,
+                        ["Dashboard:AntigravityHomePath"] = fx.AntigravityHomePath,
+                        ["Dashboard:GeminiConfigPath"] = fx.GeminiConfigPath
+                    });
+                });
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<ICommandRunner>();
+                    services.AddSingleton<ICommandRunner>(runner);
+                });
+            });
+
+        using var client = factory.CreateClient();
+        var pipelineRes = await client.GetAsync("/api/pipeline");
+        Assert.Equal(HttpStatusCode.OK, pipelineRes.StatusCode);
+        var pipeline = await pipelineRes.Content.ReadFromJsonAsync<PipelineResponse>();
+        Assert.NotNull(pipeline);
+        Assert.Equal("ahuelsmann/MOBAdev", pipeline.Repository);
+        Assert.Equal("ok", pipeline.Source.Status);
+        Assert.Empty(pipeline.PullRequests);
+    }
+
+    private static string FindWorktreeRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "presets", "mobaflow.swarm.json")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate worktree root containing presets/mobaflow.swarm.json.");
+    }
 }

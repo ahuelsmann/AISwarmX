@@ -23,6 +23,197 @@ public sealed class DashboardOptions
     public int BusyIdleAfterMinutes { get; set; } = DefaultBusyIdleAfterMinutes;
     public string StaticWebRootPath { get; set; } = string.Empty;
     public string SwarmBusDbPath { get; set; } = string.Empty;
+    public string SwarmConfigPath { get; set; } = string.Empty;
+    public string WorkspaceId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Resolves effective <see cref="DashboardOptions"/> by optionally loading a <see cref="SwarmConfig"/>
+    /// from <see cref="SwarmConfigPath"/> (or <c>MOBADEV_SWARM_CONFIG</c>), a <c>swarm.config.json</c>
+    /// in the MOBAdev root, or <c>presets/mobaflow.swarm.json</c> when core workspace settings remain at defaults,
+    /// while preserving any explicit overrides configured by callers or appsettings.
+    /// </summary>
+    public DashboardOptions ResolveWithSwarmConfig(IReadOnlyDictionary<string, string?>? environmentVariables = null)
+    {
+        var effectiveConfigPath = ResolveOptionOrEnvironment(SwarmConfigPath, "MOBADEV_SWARM_CONFIG", environmentVariables);
+        var effectiveWorkspaceId = ResolveOptionOrEnvironment(WorkspaceId, "MOBADEV_SWARM_WORKSPACE", environmentVariables);
+
+        var mobaDevRoot = ResolveMobaDevRepoPath(MobaDevRepoPath);
+        var resolvedConfigPath = TryResolveSwarmConfigFilePath(effectiveConfigPath, mobaDevRoot, out var isFallbackPreset);
+
+        if (string.IsNullOrWhiteSpace(resolvedConfigPath))
+        {
+            return CloneWithResolvedMetadata(effectiveConfigPath, effectiveWorkspaceId);
+        }
+
+        if (isFallbackPreset && !ShouldApplyFallbackPreset())
+        {
+            return CloneWithResolvedMetadata(effectiveConfigPath, effectiveWorkspaceId);
+        }
+
+        var swarmConfig = SwarmWorkspaceConfigLoader.LoadFromFile(resolvedConfigPath, environmentVariables);
+        var fromSwarm = swarmConfig.ToDashboardOptions(
+            string.IsNullOrWhiteSpace(effectiveWorkspaceId) ? null : effectiveWorkspaceId);
+
+        return MergeWithSwarmOptions(fromSwarm, effectiveConfigPath, effectiveWorkspaceId);
+    }
+
+    /// <summary>
+    /// Resolves swarm configuration settings and applies the resulting effective values onto this instance.
+    /// </summary>
+    public void ApplySwarmConfigInPlace(IReadOnlyDictionary<string, string?>? environmentVariables = null)
+    {
+        CopyFrom(ResolveWithSwarmConfig(environmentVariables));
+    }
+
+    /// <summary>
+    /// Copies all configurable properties from <paramref name="source"/> onto this instance.
+    /// </summary>
+    public void CopyFrom(DashboardOptions source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        BindUrl = source.BindUrl;
+        MobaDevRepoPath = source.MobaDevRepoPath;
+        MobaFlowRepoPath = source.MobaFlowRepoPath;
+        ClaudeHomePath = source.ClaudeHomePath;
+        CodexHomePath = source.CodexHomePath;
+        AntigravityHomePath = source.AntigravityHomePath;
+        GeminiConfigPath = source.GeminiConfigPath;
+        GitHubRepository = source.GitHubRepository;
+        GitHubProjectNumber = source.GitHubProjectNumber;
+        GitHubProjectOwner = source.GitHubProjectOwner;
+        LocalCacheTtlSeconds = source.LocalCacheTtlSeconds;
+        GitHubCacheTtlSeconds = source.GitHubCacheTtlSeconds;
+        BusyIdleAfterMinutes = source.BusyIdleAfterMinutes;
+        StaticWebRootPath = source.StaticWebRootPath;
+        SwarmBusDbPath = source.SwarmBusDbPath;
+        SwarmConfigPath = source.SwarmConfigPath;
+        WorkspaceId = source.WorkspaceId;
+    }
+
+    private DashboardOptions CloneWithResolvedMetadata(string effectiveConfigPath, string effectiveWorkspaceId)
+    {
+        var copy = new DashboardOptions();
+        copy.CopyFrom(this);
+        copy.SwarmConfigPath = effectiveConfigPath;
+        copy.WorkspaceId = effectiveWorkspaceId;
+        return copy;
+    }
+
+    private bool ShouldApplyFallbackPreset()
+    {
+        var defaults = new DashboardOptions();
+        return string.IsNullOrWhiteSpace(MobaFlowRepoPath) &&
+               string.Equals(GitHubRepository, defaults.GitHubRepository, StringComparison.Ordinal);
+    }
+
+    private DashboardOptions MergeWithSwarmOptions(
+        DashboardOptions fromSwarm,
+        string effectiveConfigPath,
+        string effectiveWorkspaceId)
+    {
+        var defaults = new DashboardOptions();
+
+        return new DashboardOptions
+        {
+            BindUrl = ChooseStringOverride(BindUrl, fromSwarm.BindUrl, defaults.BindUrl),
+            MobaDevRepoPath = ChoosePathOverride(MobaDevRepoPath, fromSwarm.MobaDevRepoPath),
+            MobaFlowRepoPath = ChoosePathOverride(MobaFlowRepoPath, fromSwarm.MobaFlowRepoPath),
+            ClaudeHomePath = ClaudeHomePath,
+            CodexHomePath = CodexHomePath,
+            AntigravityHomePath = AntigravityHomePath,
+            GeminiConfigPath = GeminiConfigPath,
+            GitHubRepository = ChooseStringOverride(GitHubRepository, fromSwarm.GitHubRepository, defaults.GitHubRepository),
+            GitHubProjectNumber = ChooseIntOverride(GitHubProjectNumber, fromSwarm.GitHubProjectNumber, defaults.GitHubProjectNumber),
+            GitHubProjectOwner = ChooseStringOverride(GitHubProjectOwner, fromSwarm.GitHubProjectOwner, defaults.GitHubProjectOwner),
+            LocalCacheTtlSeconds = ChooseIntOverride(LocalCacheTtlSeconds, fromSwarm.LocalCacheTtlSeconds, defaults.LocalCacheTtlSeconds),
+            GitHubCacheTtlSeconds = ChooseIntOverride(GitHubCacheTtlSeconds, fromSwarm.GitHubCacheTtlSeconds, defaults.GitHubCacheTtlSeconds),
+            BusyIdleAfterMinutes = BusyIdleAfterMinutes,
+            StaticWebRootPath = ChoosePathOverride(StaticWebRootPath, fromSwarm.StaticWebRootPath),
+            SwarmBusDbPath = ChoosePathOverride(SwarmBusDbPath, fromSwarm.SwarmBusDbPath),
+            SwarmConfigPath = effectiveConfigPath,
+            WorkspaceId = effectiveWorkspaceId
+        };
+    }
+
+    private static string ResolveOptionOrEnvironment(
+        string configuredValue,
+        string envVarName,
+        IReadOnlyDictionary<string, string?>? environmentVariables)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredValue))
+        {
+            return configuredValue.Trim();
+        }
+
+        if (environmentVariables is not null)
+        {
+            var match = environmentVariables.FirstOrDefault(kv =>
+                string.Equals(kv.Key, envVarName, StringComparison.OrdinalIgnoreCase));
+            return string.IsNullOrWhiteSpace(match.Value) ? string.Empty : match.Value.Trim();
+        }
+
+        var envValue = Environment.GetEnvironmentVariable(envVarName);
+        return string.IsNullOrWhiteSpace(envValue) ? string.Empty : envValue.Trim();
+    }
+
+    private static string? TryResolveSwarmConfigFilePath(
+        string explicitConfigPath,
+        string mobaDevRoot,
+        out bool isFallbackPreset)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitConfigPath))
+        {
+            isFallbackPreset = false;
+            return Path.GetFullPath(explicitConfigPath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(mobaDevRoot))
+        {
+            var localConfig = Path.Combine(mobaDevRoot, "swarm.config.json");
+            if (File.Exists(localConfig))
+            {
+                isFallbackPreset = false;
+                return localConfig;
+            }
+
+            var presetConfig = Path.Combine(mobaDevRoot, "presets", "mobaflow.swarm.json");
+            if (File.Exists(presetConfig))
+            {
+                isFallbackPreset = true;
+                return presetConfig;
+            }
+        }
+
+        isFallbackPreset = false;
+        return null;
+    }
+
+    private static string ChoosePathOverride(string configured, string fromSwarm)
+    {
+        return !string.IsNullOrWhiteSpace(configured) ? configured : fromSwarm;
+    }
+
+    private static string ChooseStringOverride(string configured, string fromSwarm, string defaultValue)
+    {
+        if (!string.IsNullOrWhiteSpace(configured) &&
+            !string.Equals(configured, defaultValue, StringComparison.Ordinal))
+        {
+            return configured;
+        }
+
+        return !string.IsNullOrWhiteSpace(fromSwarm) ? fromSwarm : defaultValue;
+    }
+
+    private static int ChooseIntOverride(int configured, int fromSwarm, int defaultValue)
+    {
+        if (configured != defaultValue && configured > 0)
+        {
+            return configured;
+        }
+
+        return fromSwarm > 0 ? fromSwarm : defaultValue;
+    }
 
     /// <summary>
     /// Resolves the inactivity threshold after which a busy monitor transitions to idle.

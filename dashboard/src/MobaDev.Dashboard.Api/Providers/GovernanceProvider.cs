@@ -50,8 +50,8 @@ public sealed partial class GovernanceProvider
 
     private static List<CapabilityProfileInfo> ParseProfiles(string mobaFlowRepoPath)
     {
-        var filePath = Path.Combine(mobaFlowRepoPath, "docs", "AI-DEVELOPMENT.md");
-        if (!File.Exists(filePath) || !PathWhitelistGuard.IsAllowedFilePath(filePath))
+        var filePath = ResolveAiDevelopmentDocPath(mobaFlowRepoPath);
+        if (filePath is null)
         {
             return [];
         }
@@ -81,6 +81,23 @@ public sealed partial class GovernanceProvider
         }
 
         return result;
+    }
+
+    private static string? ResolveAiDevelopmentDocPath(string mobaFlowRepoPath)
+    {
+        if (string.IsNullOrWhiteSpace(mobaFlowRepoPath))
+        {
+            return null;
+        }
+
+        var candidates = new[]
+        {
+            Path.Combine(mobaFlowRepoPath, "docs", "developer", "AI-DEVELOPMENT.md"),
+            Path.Combine(mobaFlowRepoPath, "docs", "AI-DEVELOPMENT.md")
+        };
+
+        return candidates.FirstOrDefault(path =>
+            File.Exists(path) && PathWhitelistGuard.IsAllowedFilePath(path));
     }
 
     private static string SanitizeDeprecatedModels(string models)

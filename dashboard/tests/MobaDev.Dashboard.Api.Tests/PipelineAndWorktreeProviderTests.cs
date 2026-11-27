@@ -889,6 +889,83 @@ public sealed class PipelineAndWorktreeProviderTests
         Assert.Equal(1, snapshot.WarningCount);
     }
 
+    [Theory]
+    [InlineData("Pull requests are disabled for this repository.")]
+    [InlineData("HTTP 404: Not Found (https://api.github.com/repos/ahuelsmann/MOBAdev/pulls)")]
+    [InlineData("HTTP 410: Gone (https://api.github.com/repos/ahuelsmann/MOBAdev/pulls)")]
+    public async Task PipelineProvider_ReturnsOkWithActiveIssuesWhenPullRequestsAreDisabled(string prDisabledStdErr)
+    {
+        var graphQlJson = """
+            {
+              "data": {
+                "user": {
+                  "projectV2": {
+                    "items": {
+                      "nodes": [
+                        {
+                          "fieldValues": {
+                            "nodes": [
+                              { "name": "Ready", "field": { "name": "Status" } },
+                              { "name": "M", "field": { "name": "Risk class" } }
+                            ]
+                          },
+                          "content": {
+                            "__typename": "Issue",
+                            "number": 57,
+                            "title": "Workspace configuration contract",
+                            "url": "https://github.com/ahuelsmann/MOBAdev/issues/57",
+                            "state": "OPEN",
+                            "updatedAt": "2026-11-27T09:00:00Z"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        var runner = new FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("pr"))
+            {
+                return new CommandResult(1, string.Empty, prDisabledStdErr);
+            }
+
+            if (fileName == "gh" && args.Contains("graphql"))
+            {
+                return new CommandResult(0, graphQlJson, string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("issue"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            return new CommandResult(1, string.Empty, "unexpected");
+        });
+
+        var options = new DashboardOptions
+        {
+            GitHubRepository = "ahuelsmann/MOBAdev",
+            GitHubProjectOwner = "ahuelsmann",
+            GitHubProjectNumber = 1
+        };
+
+        var provider = new PipelineProvider(runner);
+        var result = await provider.GetPipelineAsync(options, CancellationToken.None);
+
+        Assert.Equal("ok", result.Source.Status);
+        Assert.Contains("Pull requests are disabled", result.Source.Notice, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(result.PullRequests);
+        Assert.Empty(result.RecentlyMerged);
+        Assert.True(result.ProjectBoardAvailable);
+        var issue = Assert.Single(result.ActiveIssues);
+        Assert.Equal(57, issue.Number);
+        Assert.Equal("Ready", issue.KanbanStatus);
+    }
+
     private sealed class StaticOptionsMonitor<T>(T value) : Microsoft.Extensions.Options.IOptionsMonitor<T>
     {
         public T CurrentValue => value;

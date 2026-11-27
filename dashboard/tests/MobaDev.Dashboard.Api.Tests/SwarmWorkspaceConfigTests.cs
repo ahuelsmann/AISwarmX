@@ -289,6 +289,78 @@ public sealed partial class SwarmWorkspaceConfigTests
             SwarmWorkspaceConfigLoader.Parse(overlapJson, repoRoot, new Dictionary<string, string?>()));
     }
 
+    [Fact]
+    public void DashboardOptions_ResolveWithSwarmConfig_SupportsExplicitPathEnvSwitchingAndOverrides()
+    {
+        var repoRoot = FindWorktreeRoot();
+        var presetPath = Path.Combine(repoRoot, "presets", "mobaflow.swarm.json");
+        var syntheticRepos = Path.Combine(Path.GetTempPath(), "synthetic-slice2-repos");
+        var syntheticAppData = Path.Combine(Path.GetTempPath(), "synthetic-slice2-appdata");
+
+        var env = new Dictionary<string, string?>
+        {
+            ["MOBADEV_SWARM_CONFIG"] = presetPath,
+            ["MOBADEV_SWARM_WORKSPACE"] = "mobadev",
+            ["SWARM_REPOS_ROOT"] = syntheticRepos,
+            ["LOCALAPPDATA"] = syntheticAppData
+        };
+
+        var resolvedFromEnv = new DashboardOptions().ResolveWithSwarmConfig(env);
+        Assert.Equal(presetPath, resolvedFromEnv.SwarmConfigPath);
+        Assert.Equal("mobadev", resolvedFromEnv.WorkspaceId);
+        Assert.Equal("ahuelsmann/MOBAdev", resolvedFromEnv.GitHubRepository);
+        Assert.Equal(Path.GetFullPath($"{syntheticRepos}/MOBAdev"), resolvedFromEnv.MobaFlowRepoPath);
+        Assert.Equal(repoRoot, resolvedFromEnv.MobaDevRepoPath);
+        Assert.Equal(Path.GetFullPath($"{syntheticAppData}/MOBAdev/swarm-bus.db"), resolvedFromEnv.SwarmBusDbPath);
+
+        // Explicit caller overrides must be preserved even when SwarmConfigPath is active
+        var withOverrides = new DashboardOptions
+        {
+            SwarmConfigPath = presetPath,
+            WorkspaceId = "mobadev",
+            BindUrl = "http://localhost:5199",
+            MobaFlowRepoPath = Path.Combine(syntheticRepos, "CustomOverride"),
+            GitHubRepository = "custom-org/custom-repo",
+            GitHubProjectNumber = 42,
+            LocalCacheTtlSeconds = 15
+        }.ResolveWithSwarmConfig(env);
+
+        Assert.Equal("http://localhost:5199", withOverrides.BindUrl);
+        Assert.Equal(Path.Combine(syntheticRepos, "CustomOverride"), withOverrides.MobaFlowRepoPath);
+        Assert.Equal("custom-org/custom-repo", withOverrides.GitHubRepository);
+        Assert.Equal(42, withOverrides.GitHubProjectNumber);
+        Assert.Equal(15, withOverrides.LocalCacheTtlSeconds);
+    }
+
+    [Fact]
+    public void DashboardOptions_ResolveWithSwarmConfig_AutoDiscoversLocalSwarmConfigAndPresetFallback()
+    {
+        using var fx = new TempDashboardFixture();
+        var repoRoot = FindWorktreeRoot();
+        var presetJson = File.ReadAllText(Path.Combine(repoRoot, "presets", "mobaflow.swarm.json"));
+
+        // Preserves explicit MobaFlowRepoPath when only presets/mobaflow.swarm.json fallback exists
+        var explicitOnly = new DashboardOptions
+        {
+            MobaDevRepoPath = repoRoot,
+            MobaFlowRepoPath = fx.MobaFlowPath
+        }.ResolveWithSwarmConfig(new Dictionary<string, string?>());
+
+        Assert.Equal(fx.MobaFlowPath, explicitOnly.MobaFlowRepoPath);
+        Assert.Equal("ahuelsmann/MOBAflow", explicitOnly.GitHubRepository);
+
+        // Auto-discovers swarm.config.json in MobaDevRepoPath
+        File.WriteAllText(Path.Combine(fx.MobaDevPath, "swarm.config.json"), presetJson);
+        var autoDiscovered = new DashboardOptions
+        {
+            MobaDevRepoPath = fx.MobaDevPath,
+            WorkspaceId = "mobadev"
+        }.ResolveWithSwarmConfig(new Dictionary<string, string?>());
+
+        Assert.Equal("ahuelsmann/MOBAdev", autoDiscovered.GitHubRepository);
+        Assert.Equal(fx.MobaDevPath, autoDiscovered.MobaDevRepoPath);
+    }
+
     private static void AssertObjectMatchesSchema(JsonElement instanceObj, JsonElement schemaObj)
     {
         Assert.False(schemaObj.GetProperty("additionalProperties").GetBoolean());
