@@ -86,7 +86,9 @@ if (Test-Path -LiteralPath $StatePath) {
             }
         }
     }
-    catch { }
+    catch {
+        Write-Verbose "Watchdog state load failed: $_"
+    }
 }
 
 # 1. Run repo hygiene unless skipped
@@ -98,7 +100,9 @@ if (-not $SkipHygiene -and (Test-Path $HygieneScriptPath)) {
             $hygieneResult = ($hygieneJson -join "`n") | ConvertFrom-Json
         }
     }
-    catch { }
+    catch {
+        Write-Verbose "Watchdog repo hygiene check failed: $_"
+    }
 }
 
 # 2. Query local Dashboard :5179 monitors
@@ -440,7 +444,9 @@ if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
             $queueItemsSnapshot = @($postListObj.items)
         }
     }
-    catch { }
+    catch {
+        $queueSyncResult.Warning = if ($queueSyncResult.Warning) { "$($queueSyncResult.Warning); $_" } else { "$_" }
+    }
 }
 
 $nowUtc = [DateTimeOffset]::UtcNow
@@ -496,7 +502,9 @@ if ($null -ne $topEligibleQueueItem) {
             }
         }
     }
-    catch { }
+    catch {
+        Write-Verbose "Watchdog merged PR lookup failed: $_"
+    }
 
     if ($openCodePrCount -lt 3 -and $monitorsOnline -and $null -ne $codexMonitor) {
         if ($codexMonitor.State -notin @("rate_limited", "busy") -and $codexMonitor.LastActivityUtc) {
@@ -543,7 +551,9 @@ if ($DispatchEvents) {
                     $routedTo = "CodexQueue+AlertLog"
                 }
             }
-            catch { }
+            catch {
+                Write-Verbose "Watchdog Codex queue dispatch failed: $_"
+            }
         }
 
         if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
@@ -573,7 +583,9 @@ if ($DispatchEvents) {
                     $routedTo = if ($ev.WakeViaBus) { "SwarmBusWake+$routedTo" } else { "SwarmBus+$routedTo" }
                 }
             }
-            catch { }
+            catch {
+                Write-Verbose "Watchdog Swarm Bus dispatch failed: $_"
+            }
         }
 
         $utcNow = [DateTimeOffset]::UtcNow.ToString("O")

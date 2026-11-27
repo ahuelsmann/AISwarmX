@@ -209,7 +209,7 @@ export function handleBusSend(db, args) {
       LIMIT 1
     `).get(sender, topic, normalizedPr, normalizedIssue);
 
-    if (latest && latest.state === state) {
+    if (latest?.state === state) {
       return {
         ok: true,
         deduplicated: true,
@@ -550,238 +550,243 @@ function readMetaMap(db) {
   return map;
 }
 
+function handleQueueList(db, args) {
+  const rawStatus = args.status !== undefined && args.status !== null ? String(args.status).trim().toLowerCase() : '';
+  const statusFilter = rawStatus || null;
+  if (statusFilter && !QUEUE_STATUSES.has(statusFilter)) {
+    throw new Error(`Invalid status '${statusFilter}'. Expected: queued, claimed, done, removed.`);
+  }
+  const items = statusFilter
+    ? db.prepare('SELECT * FROM work_queue WHERE status = ? ORDER BY priority ASC, id ASC').all(statusFilter)
+    : db.prepare('SELECT * FROM work_queue ORDER BY priority ASC, id ASC').all();
+  const meta = readMetaMap(db);
+  return {
+    ok: true,
+    action: 'list',
+    code_wip: Number(meta.code_wip ?? 0) || 0,
+    meta,
+    items
+  };
+}
+
+function handleQueueSyncMeta(db, args, nowIso) {
+  const metaKey = String(args.meta_key ?? '').trim();
+  const hasValue = args.meta_value !== undefined && args.meta_value !== null;
+  if (!metaKey || !hasValue) {
+    throw new Error('bus_queue sync-meta requires non-empty "meta_key" and "meta_value".');
+  }
+  const metaValue = String(args.meta_value);
+  db.prepare(`
+    INSERT INTO meta (key, value, updated_at_utc)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET
+      value = excluded.value,
+      updated_at_utc = excluded.updated_at_utc
+  `).run(metaKey, metaValue, nowIso);
+
+  return {
+    ok: true,
+    action: 'sync-meta',
+    key: metaKey,
+    value: metaValue,
+    updated_at_utc: nowIso
+  };
+}
+
+function handleQueueNext(db, args, nowIso, leaseExpiresIso) {
+  const agent = String(args.agent ?? '').trim();
+  if (!agent) {
+    throw new Error('bus_queue next requires non-empty "agent".');
+  }
+
+  return runInImmediateTransaction(db, () => {
+    const ownActive = db.prepare(`
+      SELECT * FROM work_queue
+      WHERE status = 'claimed'
+        AND lower(claimed_by) = lower(?)
+        AND lease_expires_utc > ?
+      ORDER BY priority ASC, id ASC
+      LIMIT 1
+    `).get(agent, nowIso);
+
+    if (ownActive) {
+      db.prepare(`
+        UPDATE work_queue
+        SET lease_expires_utc = ?, updated_at_utc = ?
+        WHERE id = ?
+      `).run(leaseExpiresIso, nowIso, ownActive.id);
+      const refreshed = db.prepare('SELECT * FROM work_queue WHERE id = ?').get(ownActive.id);
+      return {
+        ok: true,
+        action: 'next',
+        resumed: true,
+        item: refreshed
+      };
+    }
+
+    const wipRow = db.prepare("SELECT value FROM meta WHERE key = 'code_wip'").get();
+    const codeWip = wipRow ? Number(wipRow.value) || 0 : 0;
+    const restrictToLowRisk = codeWip >= 3;
+
+    const candidateSql = restrictToLowRisk
+      ? `SELECT * FROM work_queue
+         WHERE (status = 'queued' OR (status = 'claimed' AND lease_expires_utc <= ?))
+           AND UPPER(COALESCE(risk_class, '')) = 'L'
+         ORDER BY priority ASC, id ASC
+         LIMIT 1`
+      : `SELECT * FROM work_queue
+         WHERE (status = 'queued' OR (status = 'claimed' AND lease_expires_utc <= ?))
+         ORDER BY priority ASC, id ASC
+         LIMIT 1`;
+
+    const candidate = db.prepare(candidateSql).get(nowIso);
+    if (!candidate) {
+      return {
+        ok: true,
+        action: 'next',
+        resumed: false,
+        code_wip: codeWip,
+        item: null,
+        reason: restrictToLowRisk
+          ? 'code_wip >= 3 and no eligible L-class work item is queued.'
+          : 'No queued or expired-lease work items available.'
+      };
+    }
+
+    db.prepare(`
+      UPDATE work_queue
+      SET status = 'claimed',
+          claimed_by = ?,
+          claimed_at_utc = ?,
+          lease_expires_utc = ?,
+          updated_at_utc = ?
+      WHERE id = ?
+    `).run(agent, nowIso, leaseExpiresIso, nowIso, candidate.id);
+
+    const claimed = db.prepare('SELECT * FROM work_queue WHERE id = ?').get(candidate.id);
+    return {
+      ok: true,
+      action: 'next',
+      resumed: false,
+      code_wip: codeWip,
+      item: claimed
+    };
+  });
+}
+
+function handleQueueRelease(db, issueNumber, args, nowIso) {
+  const agent = args.agent !== undefined && args.agent !== null ? String(args.agent).trim() : '';
+  const res = agent
+    ? db.prepare(`
+        UPDATE work_queue
+        SET status = 'queued', claimed_by = NULL, claimed_at_utc = NULL, lease_expires_utc = NULL, updated_at_utc = ?
+        WHERE issue_number = ? AND status = 'claimed' AND lower(claimed_by) = lower(?)
+      `).run(nowIso, issueNumber, agent)
+    : db.prepare(`
+        UPDATE work_queue
+        SET status = 'queued', claimed_by = NULL, claimed_at_utc = NULL, lease_expires_utc = NULL, updated_at_utc = ?
+        WHERE issue_number = ? AND status = 'claimed'
+      `).run(nowIso, issueNumber);
+
+  const item = db.prepare('SELECT * FROM work_queue WHERE issue_number = ?').get(issueNumber) ?? null;
+  return {
+    ok: true,
+    action: 'release',
+    issue_number: issueNumber,
+    released: res.changes > 0,
+    item
+  };
+}
+
+function handleQueueDone(db, issueNumber, nowIso) {
+  const res = db.prepare(`
+    UPDATE work_queue
+    SET status = 'done', lease_expires_utc = NULL, updated_at_utc = ?
+    WHERE issue_number = ?
+  `).run(nowIso, issueNumber);
+  const item = db.prepare('SELECT * FROM work_queue WHERE issue_number = ?').get(issueNumber) ?? null;
+  return {
+    ok: true,
+    action: 'done',
+    issue_number: issueNumber,
+    updated: res.changes > 0,
+    item
+  };
+}
+
+function handleQueueUpsert(db, issueNumber, args, nowIso) {
+  const incomingStatus = String(args.status ?? 'queued').trim().toLowerCase();
+  if (!QUEUE_STATUSES.has(incomingStatus)) {
+    throw new Error(`Invalid work_queue status '${incomingStatus}'. Expected: queued, claimed, done, removed.`);
+  }
+
+  const rawTitle = args.title !== undefined && args.title !== null ? String(args.title).trim() : '';
+  if (!rawTitle && (incomingStatus === 'done' || incomingStatus === 'removed')) {
+    const existing = db.prepare('SELECT * FROM work_queue WHERE issue_number = ?').get(issueNumber);
+    if (existing) {
+      db.prepare(`
+        UPDATE work_queue
+        SET status = ?, claimed_by = NULL, claimed_at_utc = NULL, lease_expires_utc = NULL, updated_at_utc = ?
+        WHERE issue_number = ?
+      `).run(incomingStatus, nowIso, issueNumber);
+      const updated = db.prepare('SELECT * FROM work_queue WHERE issue_number = ?').get(issueNumber);
+      return { ok: true, action: 'upsert', item: updated };
+    }
+  }
+
+  if (!rawTitle) {
+    throw new Error('bus_queue upsert requires non-empty "title".');
+  }
+
+  const hasPriority = args.priority !== undefined && args.priority !== null && args.priority !== '';
+  const priority = hasPriority ? Number(args.priority) : 2;
+  if (!Number.isInteger(priority)) {
+    throw new TypeError('bus_queue upsert "priority" must be an integer.');
+  }
+
+  const rawRisk = args.risk_class !== undefined && args.risk_class !== null ? String(args.risk_class).trim().toUpperCase() : '';
+  const riskClass = rawRisk || null;
+
+  db.prepare(`
+    INSERT INTO work_queue (issue_number, title, priority, risk_class, status, updated_at_utc)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(issue_number) DO UPDATE SET
+      title = excluded.title,
+      priority = excluded.priority,
+      risk_class = excluded.risk_class,
+      status = CASE
+        WHEN excluded.status IN ('done', 'removed') THEN excluded.status
+        WHEN work_queue.status = 'claimed' THEN 'claimed'
+        ELSE excluded.status
+      END,
+      claimed_by = CASE WHEN excluded.status IN ('done', 'removed') THEN NULL ELSE work_queue.claimed_by END,
+      claimed_at_utc = CASE WHEN excluded.status IN ('done', 'removed') THEN NULL ELSE work_queue.claimed_at_utc END,
+      lease_expires_utc = CASE WHEN excluded.status IN ('done', 'removed') THEN NULL ELSE work_queue.lease_expires_utc END,
+      updated_at_utc = excluded.updated_at_utc
+  `).run(issueNumber, rawTitle, priority, riskClass, incomingStatus, nowIso);
+
+  const item = db.prepare('SELECT * FROM work_queue WHERE issue_number = ?').get(issueNumber);
+  return { ok: true, action: 'upsert', item };
+}
+
 export function handleBusQueue(db, args = {}) {
   const action = String(args.action ?? 'list').trim().toLowerCase();
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
   const leaseExpiresIso = new Date(nowMs + QUEUE_LEASE_MS).toISOString();
 
-  if (action === 'list') {
-    const statusFilter = args.status !== undefined && args.status !== null && String(args.status).trim() !== ''
-      ? String(args.status).trim().toLowerCase()
-      : null;
-    if (statusFilter && !QUEUE_STATUSES.has(statusFilter)) {
-      throw new Error(`Invalid status '${statusFilter}'. Expected: queued, claimed, done, removed.`);
-    }
-    const items = statusFilter
-      ? db.prepare('SELECT * FROM work_queue WHERE status = ? ORDER BY priority ASC, id ASC').all(statusFilter)
-      : db.prepare('SELECT * FROM work_queue ORDER BY priority ASC, id ASC').all();
-    const meta = readMetaMap(db);
-    return {
-      ok: true,
-      action: 'list',
-      code_wip: Number(meta.code_wip ?? 0) || 0,
-      meta,
-      items
-    };
-  }
-
-  if (action === 'sync-meta') {
-    const metaKey = String(args.meta_key ?? '').trim();
-    const hasValue = args.meta_value !== undefined && args.meta_value !== null;
-    if (!metaKey || !hasValue) {
-      throw new Error('bus_queue sync-meta requires non-empty "meta_key" and "meta_value".');
-    }
-    const metaValue = String(args.meta_value);
-    db.prepare(`
-      INSERT INTO meta (key, value, updated_at_utc)
-      VALUES (?, ?, ?)
-      ON CONFLICT(key) DO UPDATE SET
-        value = excluded.value,
-        updated_at_utc = excluded.updated_at_utc
-    `).run(metaKey, metaValue, nowIso);
-
-    return {
-      ok: true,
-      action: 'sync-meta',
-      key: metaKey,
-      value: metaValue,
-      updated_at_utc: nowIso
-    };
-  }
-
-  if (action === 'next') {
-    const agent = String(args.agent ?? '').trim();
-    if (!agent) {
-      throw new Error('bus_queue next requires non-empty "agent".');
-    }
-
-    return runInImmediateTransaction(db, () => {
-      const ownActive = db.prepare(`
-        SELECT * FROM work_queue
-        WHERE status = 'claimed'
-          AND lower(claimed_by) = lower(?)
-          AND lease_expires_utc > ?
-        ORDER BY priority ASC, id ASC
-        LIMIT 1
-      `).get(agent, nowIso);
-
-      if (ownActive) {
-        db.prepare(`
-          UPDATE work_queue
-          SET lease_expires_utc = ?, updated_at_utc = ?
-          WHERE id = ?
-        `).run(leaseExpiresIso, nowIso, ownActive.id);
-        const refreshed = db.prepare('SELECT * FROM work_queue WHERE id = ?').get(ownActive.id);
-        return {
-          ok: true,
-          action: 'next',
-          resumed: true,
-          item: refreshed
-        };
-      }
-
-      const wipRow = db.prepare("SELECT value FROM meta WHERE key = 'code_wip'").get();
-      const codeWip = wipRow ? Number(wipRow.value) || 0 : 0;
-      const restrictToLowRisk = codeWip >= 3;
-
-      const candidateSql = restrictToLowRisk
-        ? `SELECT * FROM work_queue
-           WHERE (status = 'queued' OR (status = 'claimed' AND lease_expires_utc <= ?))
-             AND UPPER(COALESCE(risk_class, '')) = 'L'
-           ORDER BY priority ASC, id ASC
-           LIMIT 1`
-        : `SELECT * FROM work_queue
-           WHERE (status = 'queued' OR (status = 'claimed' AND lease_expires_utc <= ?))
-           ORDER BY priority ASC, id ASC
-           LIMIT 1`;
-
-      const candidate = db.prepare(candidateSql).get(nowIso);
-      if (!candidate) {
-        return {
-          ok: true,
-          action: 'next',
-          resumed: false,
-          code_wip: codeWip,
-          item: null,
-          reason: restrictToLowRisk
-            ? 'code_wip >= 3 and no eligible L-class work item is queued.'
-            : 'No queued or expired-lease work items available.'
-        };
-      }
-
-      db.prepare(`
-        UPDATE work_queue
-        SET status = 'claimed',
-            claimed_by = ?,
-            claimed_at_utc = ?,
-            lease_expires_utc = ?,
-            updated_at_utc = ?
-        WHERE id = ?
-      `).run(agent, nowIso, leaseExpiresIso, nowIso, candidate.id);
-
-      const claimed = db.prepare('SELECT * FROM work_queue WHERE id = ?').get(candidate.id);
-      return {
-        ok: true,
-        action: 'next',
-        resumed: false,
-        code_wip: codeWip,
-        item: claimed
-      };
-    });
-  }
+  if (action === 'list') return handleQueueList(db, args);
+  if (action === 'sync-meta') return handleQueueSyncMeta(db, args, nowIso);
+  if (action === 'next') return handleQueueNext(db, args, nowIso, leaseExpiresIso);
 
   const issueNumber = Number(args.issue_number ?? args.issue);
   if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
     throw new Error(`bus_queue ${action} requires positive integer "issue_number".`);
   }
 
-  if (action === 'release') {
-    const agent = args.agent !== undefined && args.agent !== null ? String(args.agent).trim() : '';
-    const res = agent
-      ? db.prepare(`
-          UPDATE work_queue
-          SET status = 'queued', claimed_by = NULL, claimed_at_utc = NULL, lease_expires_utc = NULL, updated_at_utc = ?
-          WHERE issue_number = ? AND status = 'claimed' AND lower(claimed_by) = lower(?)
-        `).run(nowIso, issueNumber, agent)
-      : db.prepare(`
-          UPDATE work_queue
-          SET status = 'queued', claimed_by = NULL, claimed_at_utc = NULL, lease_expires_utc = NULL, updated_at_utc = ?
-          WHERE issue_number = ? AND status = 'claimed'
-        `).run(nowIso, issueNumber);
-
-    const item = db.prepare('SELECT * FROM work_queue WHERE issue_number = ?').get(issueNumber) ?? null;
-    return {
-      ok: true,
-      action: 'release',
-      issue_number: issueNumber,
-      released: res.changes > 0,
-      item
-    };
-  }
-
-  if (action === 'done') {
-    const res = db.prepare(`
-      UPDATE work_queue
-      SET status = 'done', lease_expires_utc = NULL, updated_at_utc = ?
-      WHERE issue_number = ?
-    `).run(nowIso, issueNumber);
-    const item = db.prepare('SELECT * FROM work_queue WHERE issue_number = ?').get(issueNumber) ?? null;
-    return {
-      ok: true,
-      action: 'done',
-      issue_number: issueNumber,
-      updated: res.changes > 0,
-      item
-    };
-  }
-
-  if (action === 'upsert') {
-    const incomingStatus = String(args.status ?? 'queued').trim().toLowerCase();
-    if (!QUEUE_STATUSES.has(incomingStatus)) {
-      throw new Error(`Invalid work_queue status '${incomingStatus}'. Expected: queued, claimed, done, removed.`);
-    }
-
-    const rawTitle = args.title !== undefined && args.title !== null ? String(args.title).trim() : '';
-    if (!rawTitle && (incomingStatus === 'done' || incomingStatus === 'removed')) {
-      const existing = db.prepare('SELECT * FROM work_queue WHERE issue_number = ?').get(issueNumber);
-      if (existing) {
-        db.prepare(`
-          UPDATE work_queue
-          SET status = ?, claimed_by = NULL, claimed_at_utc = NULL, lease_expires_utc = NULL, updated_at_utc = ?
-          WHERE issue_number = ?
-        `).run(incomingStatus, nowIso, issueNumber);
-        const updated = db.prepare('SELECT * FROM work_queue WHERE issue_number = ?').get(issueNumber);
-        return { ok: true, action: 'upsert', item: updated };
-      }
-    }
-
-    if (!rawTitle) {
-      throw new Error('bus_queue upsert requires non-empty "title".');
-    }
-
-    const priority = args.priority !== undefined && args.priority !== null && args.priority !== ''
-      ? Number(args.priority)
-      : 2;
-    if (!Number.isInteger(priority)) {
-      throw new Error('bus_queue upsert "priority" must be an integer.');
-    }
-
-    const riskClass = args.risk_class !== undefined && args.risk_class !== null && String(args.risk_class).trim() !== ''
-      ? String(args.risk_class).trim().toUpperCase()
-      : null;
-
-    db.prepare(`
-      INSERT INTO work_queue (issue_number, title, priority, risk_class, status, updated_at_utc)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(issue_number) DO UPDATE SET
-        title = excluded.title,
-        priority = excluded.priority,
-        risk_class = excluded.risk_class,
-        status = CASE
-          WHEN excluded.status IN ('done', 'removed') THEN excluded.status
-          WHEN work_queue.status = 'claimed' THEN 'claimed'
-          ELSE excluded.status
-        END,
-        claimed_by = CASE WHEN excluded.status IN ('done', 'removed') THEN NULL ELSE work_queue.claimed_by END,
-        claimed_at_utc = CASE WHEN excluded.status IN ('done', 'removed') THEN NULL ELSE work_queue.claimed_at_utc END,
-        lease_expires_utc = CASE WHEN excluded.status IN ('done', 'removed') THEN NULL ELSE work_queue.lease_expires_utc END,
-        updated_at_utc = excluded.updated_at_utc
-    `).run(issueNumber, rawTitle, priority, riskClass, incomingStatus, nowIso);
-
-    const item = db.prepare('SELECT * FROM work_queue WHERE issue_number = ?').get(issueNumber);
-    return { ok: true, action: 'upsert', item };
-  }
+  if (action === 'release') return handleQueueRelease(db, issueNumber, args, nowIso);
+  if (action === 'done') return handleQueueDone(db, issueNumber, nowIso);
+  if (action === 'upsert') return handleQueueUpsert(db, issueNumber, args, nowIso);
 
   throw new Error(`Unsupported bus_queue action '${action}'. Use: list, next, release, done, upsert, sync-meta.`);
 }
