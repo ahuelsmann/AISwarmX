@@ -123,6 +123,8 @@ function formatMonitorStateText(state: string | undefined): string {
   switch (state) {
     case 'busy':
       return 'Active / Busy';
+    case 'idle':
+      return 'Idle';
     case 'standby':
       return 'Standby';
     case 'rate_limited':
@@ -130,6 +132,16 @@ function formatMonitorStateText(state: string | undefined): string {
     default:
       return 'Offline';
   }
+}
+
+function resolveMonitorDotStatusKey(state: string | undefined): 'ok' | 'warn' | 'neutral' {
+  if (state === 'standby') {
+    return 'ok';
+  }
+  if (state === 'busy' || state === 'rate_limited') {
+    return 'warn';
+  }
+  return 'neutral';
 }
 
 interface DecisionTriadCardProps {
@@ -152,7 +164,9 @@ export function DecisionTriadCard({
 
   const triadDef = governance.roles.find((r) => r.role.toLowerCase().includes('triad'));
   const totalSeats = monitors.length > 0 ? monitors.length : 4;
-  const readyCount = monitors.filter((m) => m.state === 'busy' || m.state === 'standby').length;
+  const readyCount = monitors.filter(
+    (m) => m.state === 'busy' || m.state === 'idle' || m.state === 'standby'
+  ).length;
   const rateLimitedCount = monitors.filter((m) => m.state === 'rate_limited').length;
 
   const codeSliceCount = pullRequests.filter((p) => p.riskClass !== 'L').length;
@@ -248,12 +262,7 @@ export function DecisionTriadCard({
           const stateLabel = formatMonitorStateText(monitor?.state);
           const toolName = monitor?.tool ?? seat.tool;
           const isBusy = monitor?.state === 'busy';
-          const dotStatusKey =
-            monitor?.state === 'standby'
-              ? 'ok'
-              : isBusy || monitor?.state === 'rate_limited'
-                ? 'warn'
-                : 'neutral';
+          const dotStatusKey = resolveMonitorDotStatusKey(monitor?.state);
           const dotColor = getStatusStyles(dotStatusKey, isDark).solid;
 
           const seatTone = resolveProfileTone(seat.profile);

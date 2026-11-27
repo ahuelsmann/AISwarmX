@@ -91,6 +91,8 @@ function stateToStatusKey(state: string): StatusKey {
   switch (state) {
     case 'standby':
       return 'ok';
+    case 'idle':
+      return 'neutral';
     case 'busy':
     case 'rate_limited':
       return 'warn';
@@ -105,6 +107,8 @@ function stateLabelShort(state: string): string {
   switch (state) {
     case 'busy':
       return 'Busy';
+    case 'idle':
+      return 'Idle';
     case 'standby':
       return 'Standby';
     case 'rate_limited':

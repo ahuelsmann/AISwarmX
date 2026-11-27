@@ -109,6 +109,7 @@ Drei identisch aufgebaute Karten für `Claude Monitor` (`P1`), `Codex Monitor` (
 | Zustand | Icon & Farbe | Darstellung & Zusatzinfo |
 | --- | --- | --- |
 | **Aktiv / Busy** | Animierter Punkt (statisch bei `reduced-motion`) · Blau | Laufende Aktivität/Heartbeat (neutral-aktiv, kein Alarm) |
+| **Idle** | Uhr-Icon · Neutral / Subtle | Laufende/offene Session ohne Aktivität über `BusyIdleAfterMinutes` (Standard `10` min): `Idle · no activity for N min` (zählt als *Online / Ready*, nicht als *Busy*) |
 | **Standby** | Häkchen / gefüllter Punkt · Grün | Bereit für Aufgaben, ruhige Darstellung |
 | **Kontingent-Pause** | Sanduhr / Pause · Amber | Prominenter **Reset-Countdown** (`Reset in 01:42 h`, `tabular-nums`, Zieluhrzeit im Tooltip) |
 | **Offline / Unbekannt** | Durchgestrichener Kreis / `?` · Grau | Keine laufende Session bzw. Datenquelle erkannt (gedämpft, kein Rot-Alarm) |
