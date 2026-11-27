@@ -109,10 +109,9 @@ public sealed partial class ClaudeMonitorProvider
         var isBusy = string.Equals(selected.Status, "busy", StringComparison.OrdinalIgnoreCase);
         var isStaleBusy = isBusy &&
             (!lastActivityUtc.HasValue || (now - lastActivityUtc.Value) > effectiveThreshold);
-        var anchorTimestampUtc = transcriptInspection.RateLimitEventTimestampUtc ?? lastActivityUtc;
         var activeRateLimitResetLabel = FilterActiveRateLimitResetLabel(
             transcriptInspection.RateLimitResetLabel,
-            anchorTimestampUtc,
+            transcriptInspection.RateLimitEventTimestampUtc,
             now,
             requireVerifiableFutureDeadline: isStaleBusy);
         var (state, effectiveRateLimitResetLabel) = MonitorStateRules.ResolveState(
@@ -286,10 +285,9 @@ public sealed partial class ClaudeMonitorProvider
                 // Ignore timestamp lookup failure on transient transcript files.
             }
 
-            var anchorTimestampUtc = inspection.RateLimitEventTimestampUtc ?? lastActivityUtc;
             var activeRateLimitResetLabel = FilterActiveRateLimitResetLabel(
                 inspection.RateLimitResetLabel,
-                anchorTimestampUtc,
+                inspection.RateLimitEventTimestampUtc,
                 now,
                 requireVerifiableFutureDeadline: false);
             if (!string.IsNullOrEmpty(activeRateLimitResetLabel))

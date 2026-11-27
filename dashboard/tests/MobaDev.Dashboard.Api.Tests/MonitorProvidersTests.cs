@@ -738,6 +738,25 @@ public sealed class MonitorProvidersTests
         Assert.Equal("idle", claudeUndated.State);
         Assert.Null(claudeUndated.RateLimitResetLabel);
 
+        // (c2) Stale busy with populated session updatedAt (14:30Z, 30 min before now=15:00Z) + undated relative reset "2pm (UTC)" -> "idle"
+        //      (must NOT roll 2pm to next day using session.UpdatedAtMs when the quota notice line itself has no timestamp)
+        await File.WriteAllTextAsync(sessionFile, $$"""
+            {
+              "sessionId": "{{claudeSessionId}}",
+              "cwd": "{{cwd.Replace("\\", "\\\\")}}",
+              "name": "MOBAi Claude Opus",
+              "status": "busy",
+              "updatedAt": {{claudeStale30MinAgo.ToUnixTimeMilliseconds()}}
+            }
+            """);
+        await File.WriteAllLinesAsync(
+            transcriptFile,
+            ["""{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"5-hour limit reached · resets 2pm (UTC)"}]}}"""]);
+
+        var claudeUndatedWithPopulatedSession = await claudeProvider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("idle", claudeUndatedWithPopulatedSession.State);
+        Assert.Null(claudeUndatedWithPopulatedSession.RateLimitResetLabel);
+
         // (d) Live non-stale busy (2 min ago) remains "busy" with null RateLimitResetLabel
         await File.WriteAllTextAsync(sessionFile, $$"""
             {
