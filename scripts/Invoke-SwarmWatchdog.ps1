@@ -141,7 +141,7 @@ catch { }
 $openPrs = @()
 $openPrsReadSucceeded = $false
 try {
-    $prJson = & gh pr list --repo ahuelsmann/MOBAflow --state open --limit 50 --json number,title,url,headRefName,headRefOid,isDraft,mergeStateStatus,statusCheckRollup,body,files 2>$null
+    $prJson = & gh pr list --repo ahuelsmann/MOBAflow --state open --limit 50 --json number,title,url,headRefName,headRefOid,isDraft,mergeStateStatus,statusCheckRollup,body,files,closingIssuesReferences 2>$null
     if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($prJson)) {
         $openPrs = @($prJson | ConvertFrom-Json)
         $openPrsReadSucceeded = $true
@@ -152,6 +152,7 @@ catch {
 }
 
 $openCodePrCount = 0
+$openPrDetails = [System.Collections.Generic.List[object]]::new()
 $fastPathCandidates = [System.Collections.Generic.List[object]]::new()
 $failedChecksPrs = [System.Collections.Generic.List[object]]::new()
 $detectedEvents = [System.Collections.Generic.List[object]]::new()
@@ -167,6 +168,7 @@ foreach ($pr in $openPrs) {
     $ownerInfo = Get-TargetOwnerFromBranch -BranchName $headRef
     $targetOwner = $ownerInfo.Owner
 
+    $isCodePr = $true
     $prFiles = if ($pr.PSObject.Properties["files"] -and $null -ne $pr.files) { @($pr.files) } else { @() }
     if ($prFiles.Count -gt 0) {
         $allDocsOnly = $true
@@ -177,17 +179,37 @@ foreach ($pr in $openPrs) {
                 break
             }
         }
-        if (-not $allDocsOnly) {
-            $openCodePrCount++
-        }
+        $isCodePr = -not $allDocsOnly
     }
     else {
         $isLowDocs = ($bodyText -match '(?im)Risk class[^\r\n]*:\s*L\b') -or
                      ($titleText -match '^(docs|spec|chore)(\([^)]*\))?:' -and $bodyText -notmatch '(?im)Risk class[^\r\n]*:\s*[HM]\b')
-        if (-not $isLowDocs) {
-            $openCodePrCount++
+        $isCodePr = -not $isLowDocs
+    }
+    if ($isCodePr) {
+        $openCodePrCount++
+    }
+
+    $linkedIssues = [System.Collections.Generic.HashSet[int]]::new()
+    if ($pr.PSObject.Properties["closingIssuesReferences"] -and $null -ne $pr.closingIssuesReferences) {
+        $closingNodes = if ($pr.closingIssuesReferences.PSObject.Properties["nodes"]) { @($pr.closingIssuesReferences.nodes) } else { @($pr.closingIssuesReferences) }
+        foreach ($cRef in $closingNodes) {
+            if ($null -ne $cRef -and $cRef.PSObject.Properties["number"] -and $cRef.number) {
+                $null = $linkedIssues.Add([int]$cRef.number)
+            }
         }
     }
+    foreach ($m in [regex]::Matches("$titleText`n$bodyText", '(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?|issue)\s+#(\d+)\b')) {
+        $null = $linkedIssues.Add([int]$m.Groups[1].Value)
+    }
+    foreach ($m in [regex]::Matches($headRef, '(?:^|[/-])(\d{1,6})(?:[/-]|$)')) {
+        $null = $linkedIssues.Add([int]$m.Groups[1].Value)
+    }
+    $openPrDetails.Add([pscustomobject]@{
+        Number       = [int]$pr.number
+        IsCodePr     = $isCodePr
+        LinkedIssues = $linkedIssues
+    })
 
     $checks = @($pr.statusCheckRollup)
     $allGreen = $checks.Count -gt 0
@@ -478,6 +500,78 @@ if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
                     if ($readyIssueSet.Contains($qNum)) { continue }
 
                     $boardMatch = $boardItems | Where-Object { $_.Kind -eq "Issue" -and $_.Number -eq $qNum } | Select-Object -First 1
+
+                    if ($qi.status -eq "claimed") {
+                        $qiRisk = if ($qi.risk_class) { "$($qi.risk_class)".Trim().ToUpperInvariant() } else { "" }
+                        $isCodeItem = ($qiRisk -ne "L")
+                        $hasLinkedOpenPr = $false
+                        foreach ($prInfo in $openPrDetails) {
+                            if ($prInfo.LinkedIssues.Contains($qNum) -and (-not $isCodeItem -or $prInfo.IsCodePr)) {
+                                $hasLinkedOpenPr = $true
+                                break
+                            }
+                        }
+
+                        if ($hasLinkedOpenPr) {
+                            & $nodeCmd.Source --no-warnings $busScript --cli queue --action done --issue-number "$qNum" 2>$null | Out-Null
+                            if ($LASTEXITCODE -eq 0) { $queueSyncResult.DoneCount++ }
+                            continue
+                        }
+
+                        if ($boardMatch) {
+                            if ($boardMatch.GitHubState -eq "CLOSED") {
+                                & $nodeCmd.Source --no-warnings $busScript --cli queue --action done --issue-number "$qNum" 2>$null | Out-Null
+                                if ($LASTEXITCODE -eq 0) { $queueSyncResult.DoneCount++ }
+                            }
+                            # Otherwise the issue is open (e.g. In progress / In review) with no linked PR yet: preserve lease & WIP reservation.
+                            continue
+                        }
+
+                        $ghIssueRaw = (& gh issue view $qNum --repo ahuelsmann/MOBAflow --json state,projectItems 2>$null)
+                        $claimTransition = $null
+                        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($ghIssueRaw)) {
+                            $rawTrimmed = ($ghIssueRaw -join "`n").Trim()
+                            if ($rawTrimmed -eq "CLOSED") {
+                                $claimTransition = "done"
+                            }
+                            else {
+                                try {
+                                    $issueObj = $rawTrimmed | ConvertFrom-Json
+                                    if ($issueObj.PSObject.Properties["state"] -and "$($issueObj.state)".Trim() -eq "CLOSED") {
+                                        $claimTransition = "done"
+                                    }
+                                    elseif ($issueObj.PSObject.Properties["projectItems"] -and $issueObj.projectItems) {
+                                        foreach ($pi in @($issueObj.projectItems)) {
+                                            if ($null -eq $pi) { continue }
+                                            $piStatus = if ($pi.PSObject.Properties["status"] -and $pi.status) { "$($pi.status)".Trim() } else { "" }
+                                            if ($piStatus -eq "Done") {
+                                                $claimTransition = "done"
+                                                break
+                                            }
+                                            if ($piStatus -in @("Planned", "Inbox")) {
+                                                $claimTransition = "removed"
+                                                break
+                                            }
+                                        }
+                                    }
+                                }
+                                catch {
+                                    Write-Verbose "Watchdog issue view JSON parse skipped for #${qNum}: $_"
+                                }
+                            }
+                        }
+
+                        if ($claimTransition -eq "done") {
+                            & $nodeCmd.Source --no-warnings $busScript --cli queue --action done --issue-number "$qNum" 2>$null | Out-Null
+                            if ($LASTEXITCODE -eq 0) { $queueSyncResult.DoneCount++ }
+                        }
+                        elseif ($claimTransition -eq "removed") {
+                            & $nodeCmd.Source --no-warnings $busScript --cli queue --action upsert --issue-number "$qNum" --status "removed" 2>$null | Out-Null
+                            if ($LASTEXITCODE -eq 0) { $queueSyncResult.RemovedCount++ }
+                        }
+                        continue
+                    }
+
                     $isClosed = $false
                     if ($boardMatch) {
                         $isClosed = ($boardMatch.GitHubState -eq "CLOSED")
@@ -518,6 +612,24 @@ if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
 }
 
 $nowUtc = [DateTimeOffset]::UtcNow
+$activeClaimedCodeCount = 0
+foreach ($qi in $queueItemsSnapshot) {
+    if ($qi.status -ne "claimed") { continue }
+    $isExpiredClaim = $false
+    if ($qi.lease_expires_utc) {
+        $leaseTs = [DateTimeOffset]::MinValue
+        if ([DateTimeOffset]::TryParse("$($qi.lease_expires_utc)", [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$leaseTs)) {
+            $isExpiredClaim = ($leaseTs -le $nowUtc)
+        }
+    }
+    if ($isExpiredClaim) { continue }
+    $qiRisk = if ($qi.risk_class) { "$($qi.risk_class)".Trim().ToUpperInvariant() } else { "" }
+    if ($qiRisk -ne "L") {
+        $activeClaimedCodeCount++
+    }
+}
+$effectiveCodeWip = $openCodePrCount + $activeClaimedCodeCount
+
 $topEligibleQueueItem = $null
 foreach ($qi in $queueItemsSnapshot) {
     $isExpiredClaim = $false
@@ -529,7 +641,7 @@ foreach ($qi in $queueItemsSnapshot) {
     }
     if ($qi.status -ne "queued" -and -not $isExpiredClaim) { continue }
     $qiRisk = if ($qi.risk_class) { "$($qi.risk_class)".Trim().ToUpperInvariant() } else { "" }
-    if ($openCodePrCount -ge 3 -and $qiRisk -ne "L") { continue }
+    if ($effectiveCodeWip -ge 2 -and $qiRisk -ne "L") { continue }
     $topEligibleQueueItem = $qi
     break
 }

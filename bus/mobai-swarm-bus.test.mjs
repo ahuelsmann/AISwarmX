@@ -930,9 +930,10 @@ console.log('[]');
     const okReport = JSON.parse(okRun.stdout);
     assert.equal(okReport.QueueSync.BoardReadSucceeded, true);
     assert.equal(okReport.QueueSync.UpsertedCount, 2);
-    assert.equal(okReport.QueueSync.RemovedCount, 1);
+    assert.equal(okReport.QueueSync.RemovedCount, 0);
 
     const afterOk = JSON.parse((await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'list'], busEnv)).stdout);
+    assert.equal(afterOk.items.find((i) => i.issue_number === 799).status, 'claimed');
     const syncedNums = afterOk.items.filter((i) => i.status === 'queued').map((i) => i.issue_number);
     assert.deepEqual(syncedNums, [801, 802]);
 
@@ -944,6 +945,255 @@ console.log('[]');
     assert.ok(tidFlagIndex !== -1 && idleWakeCall.args[tidFlagIndex + 1] === customThread);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Atomic wake reservation prevents overlapping wake dispatches and allows retry on failed or expired pending', async () => {
+  const { openBusDb, handleBusSend } = await import('./mobai-swarm-bus.mjs');
+  const { dir, dbPath } = createTempDbPath();
+  const wakeLogPath = path.join(dir, 'wake-invocations.jsonl');
+  const mockCodexMjs = path.join(dir, 'mock-codex.mjs');
+  fs.writeFileSync(mockCodexMjs, `
+import fs from 'node:fs';
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 350);
+fs.appendFileSync(${JSON.stringify(wakeLogPath)}, JSON.stringify({ argv: process.argv.slice(2), at: Date.now() }) + '\\n');
+`, 'utf8');
+
+  const { db } = openBusDb(dbPath);
+  try {
+    // 1. Overlapping concurrent wake-enabled sends across two processes -> strictly 1 wake dispatch
+    const workerEnv = { ...process.env, MOBADEV_SWARM_BUS_DB: dbPath, MOBADEV_CODEX_EXE: mockCodexMjs };
+    const p1 = runProcessAsync(process.execPath, [
+      '--no-warnings', BUS_SCRIPT, '--cli', 'send',
+      '--from', 'watchdog', '--to', 'codex', '--topic', 'HeadIdleWake',
+      '--issue', '910', '--body', 'Claim 910', '--state', 'wake-overlap-910', '--wake'
+    ], workerEnv);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const p2 = runProcessAsync(process.execPath, [
+      '--no-warnings', BUS_SCRIPT, '--cli', 'send',
+      '--from', 'watchdog', '--to', 'codex', '--topic', 'HeadIdleWake',
+      '--issue', '910', '--body', 'Claim 910', '--state', 'wake-overlap-910', '--wake'
+    ], workerEnv);
+
+    const [r1, r2] = await Promise.all([p1, p2]);
+    assert.equal(r1.status, 0, r1.stderr);
+    assert.equal(r2.status, 0, r2.stderr);
+    const o1 = JSON.parse(r1.stdout);
+    const o2 = JSON.parse(r2.stdout);
+    assert.equal(o1.deduplicated, undefined);
+    assert.equal(o2.deduplicated, true);
+    assert.equal(o2.wake_in_progress, true);
+
+    const wakeEntries = fs.readFileSync(wakeLogPath, 'utf8').trim().split('\n').filter(Boolean);
+    assert.equal(wakeEntries.length, 1);
+    assert.equal(db.prepare('SELECT wake_state, wake_ok FROM messages WHERE id = ?').get(o1.id).wake_state, 'ok');
+
+    // 2. Expired 'pending' reservation allows retry
+    const expiredIso = new Date(Date.now() - 5000).toISOString();
+    const expiredId = handleBusSend(db, {
+      from: 'watchdog', to: 'codex', topic: 'HeadIdleWake', issue: 911, body: 'Claim 911', state: 'wake-exp-911', wake: true
+    }, { wakeCodex: () => ({ attempted: true, ok: false }) }).id;
+    db.prepare("UPDATE messages SET wake_state = 'pending', wake_attempt_expires_at_utc = ? WHERE id = ?").run(expiredIso, expiredId);
+
+    const retriedExpired = handleBusSend(db, {
+      from: 'watchdog', to: 'codex', topic: 'HeadIdleWake', issue: 911, body: 'Claim 911', state: 'wake-exp-911', wake: true
+    }, { wakeCodex: () => ({ attempted: true, ok: true }) });
+    assert.equal(retriedExpired.wake_retried, true);
+    assert.equal(retriedExpired.wakeResults[0].ok, true);
+    assert.equal(db.prepare('SELECT wake_state FROM messages WHERE id = ?').get(expiredId).wake_state, 'ok');
+
+    // 3. 'failed' wake_state allows retry
+    const failedId = handleBusSend(db, {
+      from: 'watchdog', to: 'codex', topic: 'HeadIdleWake', issue: 912, body: 'Claim 912', state: 'wake-fail-912', wake: true
+    }, { wakeCodex: () => ({ attempted: true, ok: false }) }).id;
+    assert.equal(db.prepare('SELECT wake_state FROM messages WHERE id = ?').get(failedId).wake_state, 'failed');
+
+    const retriedFailed = handleBusSend(db, {
+      from: 'watchdog', to: 'codex', topic: 'HeadIdleWake', issue: 912, body: 'Claim 912', state: 'wake-fail-912', wake: true
+    }, { wakeCodex: () => ({ attempted: true, ok: true }) });
+    assert.equal(retriedFailed.wake_retried, true);
+    assert.equal(db.prepare('SELECT wake_state FROM messages WHERE id = ?').get(failedId).wake_state, 'ok');
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Unclassified queue claims count toward WIP reservation and are skipped when effectiveCodeWip >= 2', async () => {
+  const { openBusDb, handleBusQueue } = await import('./mobai-swarm-bus.mjs');
+  const { dir, dbPath } = createTempDbPath();
+  const { db } = openBusDb(dbPath);
+  try {
+    handleBusQueue(db, { action: 'sync-meta', meta_key: 'code_wip', meta_value: '1' });
+    handleBusQueue(db, { action: 'upsert', issue_number: 501, title: 'Unclassified first', priority: 1 });
+    handleBusQueue(db, { action: 'upsert', issue_number: 502, title: 'Medium second', priority: 2, risk_class: 'M' });
+    handleBusQueue(db, { action: 'upsert', issue_number: 503, title: 'High third', priority: 2, risk_class: 'H' });
+    handleBusQueue(db, { action: 'upsert', issue_number: 504, title: 'Unclassified fourth', priority: 2 });
+    handleBusQueue(db, { action: 'upsert', issue_number: 505, title: 'Low fifth', priority: 3, risk_class: 'L' });
+
+    const first = handleBusQueue(db, { action: 'next', agent: 'codex' });
+    assert.equal(first.item.issue_number, 501);
+    assert.equal(first.item.risk_class, null);
+
+    // Now baseCodeWip=1 + active unclassified claim #501 (1) => effective_code_wip = 2 >= 2:
+    // H, M, and unclassified items must be skipped; only L (#505) is eligible
+    const second = handleBusQueue(db, { action: 'next', agent: 'claude-opus' });
+    assert.equal(second.effective_code_wip, 2);
+    assert.equal(second.active_claimed_code_count, 1);
+    assert.equal(second.item.issue_number, 505);
+
+    const third = handleBusQueue(db, { action: 'next', agent: 'antigravity-opus' });
+    assert.equal(third.effective_code_wip, 2);
+    assert.equal(third.item, null);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Invoke-SwarmWatchdog preserves claimed In progress lease until linked open PR or terminal Closed/Done', async () => {
+  const pwshCheck = spawnSync('pwsh', ['--version'], { encoding: 'utf8' });
+  if (pwshCheck.status !== 0) {
+    return;
+  }
+
+  const { dir, dbPath } = createTempDbPath();
+  const localAppDir = path.join(dir, 'localapp');
+  const binDir = path.join(dir, 'bin');
+  fs.mkdirSync(localAppDir, { recursive: true });
+  fs.mkdirSync(binDir, { recursive: true });
+
+  const mockGhScript = path.join(dir, 'mock-gh-lifecycle.mjs');
+  fs.writeFileSync(mockGhScript, `
+const args = process.argv.slice(2);
+const phase = process.env.MOCK_PHASE || 'in_progress';
+if (args[0] === 'pr' && args[1] === 'list') {
+  if (phase === 'linked_pr') {
+    console.log(JSON.stringify([{
+      number: 901,
+      title: 'feat: implement 850',
+      url: 'https://github.com/ahuelsmann/MOBAflow/pull/901',
+      headRefName: 'codex/850-feature',
+      headRefOid: '1234567890abcdef1234567890abcdef12345678',
+      isDraft: true,
+      mergeStateStatus: 'CLEAN',
+      statusCheckRollup: [],
+      body: 'Closes #850',
+      files: [{ path: 'Backend/Feature.cs' }],
+      closingIssuesReferences: [{ number: 850 }]
+    }]));
+  } else {
+    console.log('[]');
+  }
+  process.exit(0);
+}
+if (args[0] === 'issue' && args[1] === 'view') {
+  const num = Number(args[2]);
+  if (phase === 'closed' && num === 851) {
+    console.log(JSON.stringify({ state: 'CLOSED', projectItems: [{ status: 'Done' }] }));
+  } else {
+    console.log(JSON.stringify({ state: 'OPEN', projectItems: [{ status: 'In progress' }] }));
+  }
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1] === 'graphql') {
+  const nodes = [];
+  if (phase === 'in_progress' || phase === 'linked_pr') {
+    nodes.push({
+      id: 'IP_850',
+      fieldValues: { nodes: [
+        { name: 'In progress', field: { name: 'Status' } },
+        { name: 'P1', field: { name: 'Priority' } },
+        { name: 'M', field: { name: 'Risk class' } }
+      ] },
+      content: { __typename: 'Issue', number: 850, title: 'In Progress Claimed', state: 'OPEN' }
+    });
+  }
+  nodes.push({
+    id: 'R_852',
+    fieldValues: { nodes: [
+      { name: 'Ready', field: { name: 'Status' } },
+      { name: 'P2', field: { name: 'Priority' } },
+      { name: 'M', field: { name: 'Risk class' } }
+    ] },
+    content: { __typename: 'Issue', number: 852, title: 'Ready Item', state: 'OPEN' }
+  });
+  console.log(JSON.stringify({
+    data: {
+      user: {
+        projectV2: {
+          fields: { nodes: [{ name: 'Status' }, { name: 'Priority' }, { name: 'Risk class' }] },
+          items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes }
+        }
+      }
+    }
+  }));
+  process.exit(0);
+}
+console.log('[]');
+`, 'utf8');
+  fs.writeFileSync(path.join(binDir, 'gh.cmd'), `@echo off\r\n"${process.execPath}" "${mockGhScript}" %*\r\n`, 'utf8');
+
+  try {
+    const busEnv = { ...process.env, MOBADEV_SWARM_BUS_DB: dbPath };
+    const wdEnv = {
+      ...process.env,
+      LOCALAPPDATA: localAppDir,
+      MOBADEV_SWARM_BUS_DB: dbPath,
+      PATH: `${binDir}${path.delimiter}${process.env.PATH}`
+    };
+
+    // Seed claimed #850 (In progress on board), queued #853 (dropped from Ready -> removed), and claimed #851 (later closed)
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'upsert', '--issue-number', '850', '--title', 'In Progress Claimed', '--priority', '1', '--risk-class', 'M'], busEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'next', '--agent', 'codex'], busEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'upsert', '--issue-number', '851', '--title', 'Closed Claimed', '--priority', '1', '--risk-class', 'M'], busEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'next', '--agent', 'claude-opus'], busEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'upsert', '--issue-number', '853', '--title', 'Stale Queued', '--priority', '2', '--risk-class', 'M'], busEnv);
+
+    // 1. Issue #850 moved to In progress with no linked PR -> stays claimed and reserves WIP; #853 queued -> removed
+    const p1Res = await runProcessAsync('pwsh', [
+      '-NoProfile', '-File', WATCHDOG_SCRIPT,
+      '-SkipHygiene', '-SyncQueue', '-Json', '-DashboardApiUrl', 'http://127.0.0.1:9'
+    ], { ...wdEnv, MOCK_PHASE: 'in_progress' });
+    assert.equal(p1Res.status, 0, p1Res.stderr);
+    const r1 = JSON.parse(p1Res.stdout);
+    assert.equal(r1.QueueSync.RemovedCount, 1);
+    assert.equal(r1.QueueSync.DoneCount, 0);
+
+    const q1 = JSON.parse((await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'list'], busEnv)).stdout);
+    assert.equal(q1.items.find((i) => i.issue_number === 850).status, 'claimed');
+    assert.equal(q1.items.find((i) => i.issue_number === 853).status, 'removed');
+
+    // Because #850 and #851 are still claimed (effective_code_wip = 2), #852 (M) cannot be claimed yet
+    const blockedNext = JSON.parse((await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'next', '--agent', 'antigravity-opus'], busEnv)).stdout);
+    assert.equal(blockedNext.item, null);
+
+    // 2. Linked open code PR #901 appears for #850 -> #850 transitions to done (not double-counted with PR's code_wip=1)
+    const p2Res = await runProcessAsync('pwsh', [
+      '-NoProfile', '-File', WATCHDOG_SCRIPT,
+      '-SkipHygiene', '-SyncQueue', '-Json', '-DashboardApiUrl', 'http://127.0.0.1:9'
+    ], { ...wdEnv, MOCK_PHASE: 'linked_pr' });
+    assert.equal(p2Res.status, 0, p2Res.stderr);
+    const r2 = JSON.parse(p2Res.stdout);
+    assert.equal(r2.QueueSync.DoneCount, 1);
+
+    const q2 = JSON.parse((await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'list'], busEnv)).stdout);
+    assert.equal(q2.code_wip, 1);
+    assert.equal(q2.items.find((i) => i.issue_number === 850).status, 'done');
+
+    // 3. Closed issue #851 -> transitions to done and releases claim
+    const p3Res = await runProcessAsync('pwsh', [
+      '-NoProfile', '-File', WATCHDOG_SCRIPT,
+      '-SkipHygiene', '-SyncQueue', '-Json', '-DashboardApiUrl', 'http://127.0.0.1:9'
+    ], { ...wdEnv, MOCK_PHASE: 'closed' });
+    assert.equal(p3Res.status, 0, p3Res.stderr);
+    const r3 = JSON.parse(p3Res.stdout);
+    assert.equal(r3.QueueSync.DoneCount, 1);
+
+    const q3 = JSON.parse((await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'list'], busEnv)).stdout);
+    assert.equal(q3.items.find((i) => i.issue_number === 851).status, 'done');
+  } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -27,6 +27,7 @@ const HEAD_SHA_REGEX = /^[0-9a-fA-F]{40}$/;
 const QUEUE_STATUSES = new Set(['queued', 'claimed', 'done', 'removed']);
 const QUEUE_LEASE_MS = 4 * 60 * 60 * 1000;
 const CODE_WIP_CLAIM_LIMIT = 2;
+const WAKE_ATTEMPT_TTL_MS = 120 * 1000;
 
 function resolveDbPath() {
   if (process.env.MOBADEV_SWARM_BUS_DB && process.env.MOBADEV_SWARM_BUS_DB.trim()) {
@@ -72,7 +73,9 @@ function openBusDb(dbPath = resolveDbPath()) {
         acked_by TEXT,
         acked_at_utc TEXT,
         state TEXT,
-        wake_ok INTEGER
+        wake_ok INTEGER,
+        wake_state TEXT CHECK(wake_state IN ('pending','ok','failed')),
+        wake_attempt_expires_at_utc TEXT
       );
 
       CREATE INDEX IF NOT EXISTS idx_messages_recipient_status
@@ -128,7 +131,9 @@ function openBusDb(dbPath = resolveDbPath()) {
 
     ensureTableColumns(db, 'messages', [
       ['state', 'state TEXT'],
-      ['wake_ok', 'wake_ok INTEGER']
+      ['wake_ok', 'wake_ok INTEGER'],
+      ['wake_state', 'wake_state TEXT'],
+      ['wake_attempt_expires_at_utc', 'wake_attempt_expires_at_utc TEXT']
     ]);
     ensureTableColumns(db, 'review_claims', [
       ['status', "status TEXT NOT NULL DEFAULT 'claimed'"],
@@ -180,7 +185,12 @@ function tryWakeCodex(messageText, threadIdOverride = null) {
   }
 
   try {
-    execFileSync(codexExe, ['queue', '--thread', threadId, '--message', messageText], {
+    const isNodeScript = codexExe.toLowerCase().endsWith('.mjs');
+    const execCmd = isNodeScript ? process.execPath : codexExe;
+    const execArgs = isNodeScript
+      ? [codexExe, 'queue', '--thread', threadId, '--message', messageText]
+      : ['queue', '--thread', threadId, '--message', messageText];
+    execFileSync(execCmd, execArgs, {
       stdio: 'ignore',
       timeout: 6000,
       windowsHide: true
@@ -199,6 +209,43 @@ function tryWakeCodex(messageText, threadIdOverride = null) {
 
 export { openBusDb };
 
+function resolveMatchedStateRow(db, latest, fallbackBody, wakeTargetMatches, nowIso, wakeExpiresIso) {
+  if (!wakeTargetMatches) {
+    return { mode: 'deduplicated', id: Number(latest.id), wake_state: latest.wake_state ?? null };
+  }
+
+  let curWakeState = latest.wake_state ?? null;
+  if (!curWakeState) {
+    if (latest.wake_ok === 1) curWakeState = 'ok';
+    else if (latest.wake_ok === 0) curWakeState = 'failed';
+  }
+
+  if (curWakeState === 'ok') {
+    return { mode: 'deduplicated', id: Number(latest.id), wake_state: 'ok' };
+  }
+
+  const hasUnexpiredPending = curWakeState === 'pending'
+    && typeof latest.wake_attempt_expires_at_utc === 'string'
+    && latest.wake_attempt_expires_at_utc > nowIso;
+
+  if (hasUnexpiredPending) {
+    return { mode: 'deduplicated', id: Number(latest.id), wake_state: 'pending', wake_in_progress: true };
+  }
+
+  if (latest.status === 'unread') {
+    db.prepare(`
+      UPDATE messages
+      SET wake_state = 'pending',
+          wake_attempt_expires_at_utc = ?,
+          wake_ok = 0
+      WHERE id = ?
+    `).run(wakeExpiresIso, latest.id);
+    return { mode: 'retry-wake', id: Number(latest.id), body: latest.body || fallbackBody };
+  }
+
+  return { mode: 'deduplicated', id: Number(latest.id), wake_state: curWakeState };
+}
+
 function sendOrDeduplicateInTx(db, params) {
   const {
     sender,
@@ -213,9 +260,13 @@ function sendOrDeduplicateInTx(db, params) {
     wakeTargetMatches
   } = params;
 
+  const nowMs = Date.now();
+  const createdAt = new Date(nowMs).toISOString();
+  const wakeExpiresIso = new Date(nowMs + WAKE_ATTEMPT_TTL_MS).toISOString();
+
   if (state !== null) {
     const latest = db.prepare(`
-      SELECT id, body, status, state, wake_ok
+      SELECT id, body, status, state, wake_ok, wake_state, wake_attempt_expires_at_utc
       FROM messages
       WHERE lower(sender) = lower(?)
         AND lower(recipient) = lower(?)
@@ -227,14 +278,10 @@ function sendOrDeduplicateInTx(db, params) {
     `).get(sender, recipient, topic, normalizedPr, normalizedIssue);
 
     if (latest?.state === state) {
-      if (wakeTargetMatches && latest.status === 'unread' && latest.wake_ok !== 1) {
-        return { mode: 'retry-wake', id: Number(latest.id), body: latest.body || body };
-      }
-      return { mode: 'deduplicated', id: Number(latest.id), wake_ok: latest.wake_ok ?? null };
+      return resolveMatchedStateRow(db, latest, body, wakeTargetMatches, createdAt, wakeExpiresIso);
     }
   }
 
-  const createdAt = nowUtcIso();
   if (sender.toLowerCase() === 'watchdog' && normalizedPr !== null) {
     db.prepare(`
       UPDATE messages
@@ -248,10 +295,12 @@ function sendOrDeduplicateInTx(db, params) {
   const initialAckedBy = isHeadlessRecipient ? 'auto-headless' : null;
   const initialAckedAt = isHeadlessRecipient ? createdAt : null;
   const initialWakeOk = wakeTargetMatches ? 0 : null;
+  const initialWakeState = wakeTargetMatches ? 'pending' : null;
+  const initialWakeExpires = wakeTargetMatches ? wakeExpiresIso : null;
 
   const info = db.prepare(`
-    INSERT INTO messages (created_at_utc, sender, recipient, topic, body, pr_number, issue_number, priority, reply_to_id, status, acked_by, acked_at_utc, state, wake_ok)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO messages (created_at_utc, sender, recipient, topic, body, pr_number, issue_number, priority, reply_to_id, status, acked_by, acked_at_utc, state, wake_ok, wake_state, wake_attempt_expires_at_utc)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     createdAt,
     sender,
@@ -266,7 +315,9 @@ function sendOrDeduplicateInTx(db, params) {
     initialAckedBy,
     initialAckedAt,
     state,
-    initialWakeOk
+    initialWakeOk,
+    initialWakeState,
+    initialWakeExpires
   );
 
   return { mode: 'inserted', id: Number(info.lastInsertRowid), createdAt };
@@ -289,9 +340,15 @@ function dispatchCodexWake({ db, messageId, sender, recipient, prNumber, topic, 
   const prTag = prNumber !== null ? ` (PR #${prNumber})` : '';
   const wakeMsg = `[SwarmBus #${messageId}] ${sender} -> ${recipient}${prTag} [${topic}]: ${body}`;
   const wakeRes = wakeCodex(wakeMsg, codexThreadId);
-  if (wakeRes.ok) {
-    db.prepare('UPDATE messages SET wake_ok = 1 WHERE id = ?').run(messageId);
-  }
+  const finalState = wakeRes.ok ? 'ok' : 'failed';
+  const finalOk = wakeRes.ok ? 1 : 0;
+  db.prepare(`
+    UPDATE messages
+    SET wake_state = ?,
+        wake_ok = ?,
+        wake_attempt_expires_at_utc = NULL
+    WHERE id = ?
+  `).run(finalState, finalOk, messageId);
   return wakeRes;
 }
 
@@ -332,12 +389,16 @@ export function handleBusSend(db, args, options = {}) {
   }));
 
   if (txResult.mode === 'deduplicated') {
-    return {
+    const dedupPayload = {
       ok: true,
       deduplicated: true,
       existing_id: txResult.id,
       state
     };
+    if (txResult.wake_in_progress) {
+      dedupPayload.wake_in_progress = true;
+    }
+    return dedupPayload;
   }
 
   if (txResult.mode === 'retry-wake') {
@@ -978,7 +1039,7 @@ function handleQueueNext(db, args, nowIso, leaseExpiresIso) {
       FROM work_queue
       WHERE status = 'claimed'
         AND (lease_expires_utc IS NULL OR lease_expires_utc > ?)
-        AND UPPER(COALESCE(risk_class, '')) IN ('H', 'M')
+        AND UPPER(TRIM(COALESCE(risk_class, ''))) != 'L'
     `).get(nowIso);
     const activeClaimedCodeCount = Number(activeCodeRow?.cnt ?? 0);
     const effectiveCodeWip = baseCodeWip + activeClaimedCodeCount;
@@ -987,7 +1048,7 @@ function handleQueueNext(db, args, nowIso, leaseExpiresIso) {
     const candidateSql = restrictToLowRisk
       ? `SELECT * FROM work_queue
          WHERE (status = 'queued' OR (status = 'claimed' AND lease_expires_utc <= ?))
-           AND UPPER(COALESCE(risk_class, '')) = 'L'
+           AND UPPER(TRIM(COALESCE(risk_class, ''))) = 'L'
          ORDER BY priority ASC, id ASC
          LIMIT 1`
       : `SELECT * FROM work_queue
