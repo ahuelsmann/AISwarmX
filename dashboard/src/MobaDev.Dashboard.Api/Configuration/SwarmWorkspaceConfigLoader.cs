@@ -497,32 +497,28 @@ public static partial class SwarmWorkspaceConfigLoader
 
         var prohibitedModels = ParseLiteralStringArray(dto.ProhibitedModels, $"{pathPrefix}.prohibitedModels", allowMissing: false);
 
-        foreach (var allowed in allowedModels)
+        var forbiddenAllowed = allowedModels.FirstOrDefault(
+            allowed => allowed.Contains("fable", StringComparison.OrdinalIgnoreCase));
+        if (forbiddenAllowed is not null)
         {
-            if (allowed.Contains("fable", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new SwarmConfigValidationException(
-                    $"Field '{pathPrefix}.allowedModels' must not permit prohibited model '{allowed}'.");
-            }
+            throw new SwarmConfigValidationException(
+                $"Field '{pathPrefix}.allowedModels' must not permit prohibited model '{forbiddenAllowed}'.");
         }
 
         var prohibitedSet = new HashSet<string>(prohibitedModels, StringComparer.OrdinalIgnoreCase);
-        foreach (var requiredBan in RequiredProhibitedFableModels)
+        var missingBan = RequiredProhibitedFableModels.FirstOrDefault(
+            requiredBan => !prohibitedSet.Contains(requiredBan));
+        if (missingBan is not null)
         {
-            if (!prohibitedSet.Contains(requiredBan))
-            {
-                throw new SwarmConfigValidationException(
-                    $"Field '{pathPrefix}.prohibitedModels' must explicitly prohibit '{requiredBan}'.");
-            }
+            throw new SwarmConfigValidationException(
+                $"Field '{pathPrefix}.prohibitedModels' must explicitly prohibit '{missingBan}'.");
         }
 
-        foreach (var allowed in allowedModels)
+        var overlappingModel = allowedModels.FirstOrDefault(prohibitedSet.Contains);
+        if (overlappingModel is not null)
         {
-            if (prohibitedSet.Contains(allowed))
-            {
-                throw new SwarmConfigValidationException(
-                    $"Model '{allowed}' in '{pathPrefix}' cannot appear in both 'allowedModels' and 'prohibitedModels'.");
-            }
+            throw new SwarmConfigValidationException(
+                $"Model '{overlappingModel}' in '{pathPrefix}' cannot appear in both 'allowedModels' and 'prohibitedModels'.");
         }
 
         return new CapabilityProfileDefinition(description, allowedModels, prohibitedModels);
@@ -540,81 +536,98 @@ public static partial class SwarmWorkspaceConfigLoader
 
         var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var result = new List<StandingAgentDefinition>(dtos.Count);
-
         for (var i = 0; i < dtos.Count; i++)
         {
-            var dto = dtos[i] ?? throw new SwarmConfigValidationException($"standingAgents[{i}] must not be null.");
-            var id = RequireSlug(dto.Id, $"standingAgents[{i}].id");
-            if (!seenIds.Add(id))
-            {
-                throw new SwarmConfigValidationException($"Duplicate standing agent id '{id}' in 'standingAgents'.");
-            }
-
-            var displayName = RequireNonEmptyLiteral(dto.DisplayName, $"standingAgents[{i}].displayName");
-            var family = RequireNonEmptyLiteral(dto.Family, $"standingAgents[{i}].family");
-            if (!AllowedFamilies.Contains(family))
-            {
-                throw new SwarmConfigValidationException(
-                    $"Field 'standingAgents[{i}].family' value '{family}' must be one of: claude, openai, gemini.");
-            }
-
-            var profile = RequireNonEmptyLiteral(dto.Profile, $"standingAgents[{i}].profile");
-            if (!AllowedProfiles.Contains(profile) || !capabilityProfiles.ContainsKey(profile))
-            {
-                throw new SwarmConfigValidationException(
-                    $"Field 'standingAgents[{i}].profile' value '{profile}' must be one of: P1, P2, P3, P4.");
-            }
-
-            var role = RequireNonEmptyLiteral(dto.Role, $"standingAgents[{i}].role");
-            if (dto.WakeAdapter is null)
-            {
-                throw new SwarmConfigValidationException($"Field 'standingAgents[{i}].wakeAdapter' is required.");
-            }
-
-            var adapterKind = RequireNonEmptyLiteral(dto.WakeAdapter.Kind, $"standingAgents[{i}].wakeAdapter.kind");
-            if (!AllowedWakeAdapterKinds.Contains(adapterKind))
-            {
-                throw new SwarmConfigValidationException(
-                    $"Field 'standingAgents[{i}].wakeAdapter.kind' value '{adapterKind}' is invalid.");
-            }
-
-            var threadIdOrEnv = ExpandOptionalString(dto.WakeAdapter.ThreadIdOrEnv, envLookup);
-            var executableOrEnv = ExpandOptionalString(dto.WakeAdapter.ExecutableOrEnv, envLookup);
-            var endpointOrEnv = ExpandOptionalString(dto.WakeAdapter.EndpointOrEnv, envLookup);
-
-            if (string.Equals(adapterKind, "codex-queue", StringComparison.Ordinal) &&
-                string.IsNullOrWhiteSpace(threadIdOrEnv))
-            {
-                throw new SwarmConfigValidationException(
-                    $"Field 'standingAgents[{i}].wakeAdapter.threadIdOrEnv' is required for 'codex-queue' adapters.");
-            }
-
-            if (string.Equals(adapterKind, "antigravity-http", StringComparison.Ordinal) &&
-                !string.IsNullOrWhiteSpace(endpointOrEnv) &&
-                !ContainsUnexpandedPlaceholder(endpointOrEnv))
-            {
-                try
-                {
-                    endpointOrEnv = LoopbackBindingGuard.EnsureLoopbackUrl(endpointOrEnv);
-                }
-                catch (InvalidOperationException ex)
-                {
-                    throw new SwarmConfigValidationException(
-                        $"Field 'standingAgents[{i}].wakeAdapter.endpointOrEnv' must be a loopback URL: {ex.Message}",
-                        ex);
-                }
-            }
-
-            var wakeAdapter = new WakeAdapterConfig(
-                adapterKind,
-                threadIdOrEnv,
-                executableOrEnv,
-                endpointOrEnv);
-
-            result.Add(new StandingAgentDefinition(id, displayName, family, profile, role, wakeAdapter));
+            result.Add(ParseStandingAgent(dtos[i], i, capabilityProfiles, seenIds, envLookup));
         }
 
         return result;
+    }
+
+    private static StandingAgentDefinition ParseStandingAgent(
+        StandingAgentDto? rawDto,
+        int index,
+        IReadOnlyDictionary<string, CapabilityProfileDefinition> capabilityProfiles,
+        HashSet<string> seenIds,
+        Func<string, string?> envLookup)
+    {
+        var dto = rawDto ?? throw new SwarmConfigValidationException($"standingAgents[{index}] must not be null.");
+        var id = RequireSlug(dto.Id, $"standingAgents[{index}].id");
+        if (!seenIds.Add(id))
+        {
+            throw new SwarmConfigValidationException($"Duplicate standing agent id '{id}' in 'standingAgents'.");
+        }
+
+        var displayName = RequireNonEmptyLiteral(dto.DisplayName, $"standingAgents[{index}].displayName");
+        var family = RequireNonEmptyLiteral(dto.Family, $"standingAgents[{index}].family");
+        if (!AllowedFamilies.Contains(family))
+        {
+            throw new SwarmConfigValidationException(
+                $"Field 'standingAgents[{index}].family' value '{family}' must be one of: claude, openai, gemini.");
+        }
+
+        var profile = RequireNonEmptyLiteral(dto.Profile, $"standingAgents[{index}].profile");
+        if (!AllowedProfiles.Contains(profile) || !capabilityProfiles.ContainsKey(profile))
+        {
+            throw new SwarmConfigValidationException(
+                $"Field 'standingAgents[{index}].profile' value '{profile}' must be one of: P1, P2, P3, P4.");
+        }
+
+        var role = RequireNonEmptyLiteral(dto.Role, $"standingAgents[{index}].role");
+        var wakeAdapter = ParseWakeAdapter(dto.WakeAdapter, index, envLookup);
+        return new StandingAgentDefinition(id, displayName, family, profile, role, wakeAdapter);
+    }
+
+    private static WakeAdapterConfig ParseWakeAdapter(
+        WakeAdapterDto? dto,
+        int agentIndex,
+        Func<string, string?> envLookup)
+    {
+        if (dto is null)
+        {
+            throw new SwarmConfigValidationException($"Field 'standingAgents[{agentIndex}].wakeAdapter' is required.");
+        }
+
+        var adapterKind = RequireNonEmptyLiteral(dto.Kind, $"standingAgents[{agentIndex}].wakeAdapter.kind");
+        if (!AllowedWakeAdapterKinds.Contains(adapterKind))
+        {
+            throw new SwarmConfigValidationException(
+                $"Field 'standingAgents[{agentIndex}].wakeAdapter.kind' value '{adapterKind}' is invalid.");
+        }
+
+        var threadIdOrEnv = ExpandOptionalString(dto.ThreadIdOrEnv, envLookup);
+        var executableOrEnv = ExpandOptionalString(dto.ExecutableOrEnv, envLookup);
+        var endpointOrEnv = ExpandOptionalString(dto.EndpointOrEnv, envLookup);
+
+        if (string.Equals(adapterKind, "codex-queue", StringComparison.Ordinal) &&
+            string.IsNullOrWhiteSpace(threadIdOrEnv))
+        {
+            throw new SwarmConfigValidationException(
+                $"Field 'standingAgents[{agentIndex}].wakeAdapter.threadIdOrEnv' is required for 'codex-queue' adapters.");
+        }
+
+        if (string.Equals(adapterKind, "antigravity-http", StringComparison.Ordinal) &&
+            !string.IsNullOrWhiteSpace(endpointOrEnv) &&
+            !ContainsUnexpandedPlaceholder(endpointOrEnv))
+        {
+            endpointOrEnv = EnsureAdapterLoopbackEndpoint(endpointOrEnv, agentIndex);
+        }
+
+        return new WakeAdapterConfig(adapterKind, threadIdOrEnv, executableOrEnv, endpointOrEnv);
+    }
+
+    private static string EnsureAdapterLoopbackEndpoint(string endpoint, int agentIndex)
+    {
+        try
+        {
+            return LoopbackBindingGuard.EnsureLoopbackUrl(endpoint);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new SwarmConfigValidationException(
+                $"Field 'standingAgents[{agentIndex}].wakeAdapter.endpointOrEnv' must be a loopback URL: {ex.Message}",
+                ex);
+        }
     }
 
     private static SwarmBusConfig ParseBus(
