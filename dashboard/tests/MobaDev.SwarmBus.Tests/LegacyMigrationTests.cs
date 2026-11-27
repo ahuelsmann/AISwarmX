@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using MobaDev.SwarmBus.Core.Contracts;
@@ -241,6 +242,104 @@ public sealed class LegacyMigrationTests
             Priority: 1,
             WorkspaceId: "mobaflow"));
         Assert.True(flowUpsert.Ok);
+    }
+
+    [Fact]
+    public void DirectoryJunctionOrSymlinkAliasToProtectedLegacyDbIsRejected()
+    {
+        using var fx = new TempBusFixture();
+        var originalLegacyEnv = Environment.GetEnvironmentVariable("MOBADEV_SWARM_BUS_DB");
+        var originalV2Env = Environment.GetEnvironmentVariable("MOBADEV_SWARM_BUS_V2_DB");
+
+        var realLegacyDir = Path.Combine(fx.RootPath, "real-legacy");
+        var junctionDir = Path.Combine(fx.RootPath, "junction-legacy");
+        var realV2Dir = Path.Combine(fx.RootPath, "real-v2");
+        var junctionV2Dir = Path.Combine(fx.RootPath, "junction-v2");
+        Directory.CreateDirectory(realLegacyDir);
+        Directory.CreateDirectory(realV2Dir);
+
+        var realLegacyDb = Path.Combine(realLegacyDir, "swarm-bus.db");
+        TempBusFixture.ExecuteRawSql(realLegacyDb, """
+            CREATE TABLE messages (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              created_at_utc TEXT NOT NULL,
+              sender TEXT NOT NULL,
+              recipient TEXT NOT NULL,
+              topic TEXT NOT NULL,
+              body TEXT NOT NULL
+            );
+            """);
+
+        CreateDirectoryJunctionOrSymlink(junctionDir, realLegacyDir);
+        CreateDirectoryJunctionOrSymlink(junctionV2Dir, realV2Dir);
+
+        try
+        {
+            var junctionedLegacyDb = Path.Combine(junctionDir, "swarm-bus.db");
+            Assert.Equal(
+                SwarmBusStore.ResolveCanonicalPhysicalPath(realLegacyDb),
+                SwarmBusStore.ResolveCanonicalPhysicalPath(junctionedLegacyDb),
+                OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+            // Protect realLegacyDb via MOBADEV_SWARM_BUS_DB, then try opening via junction alias.
+            Environment.SetEnvironmentVariable("MOBADEV_SWARM_BUS_DB", realLegacyDb);
+            Assert.Throws<InvalidOperationException>(() => new SwarmBusStore(junctionedLegacyDb));
+
+            // Also reject MOBADEV_SWARM_BUS_V2_DB pointing through the junction alias.
+            Environment.SetEnvironmentVariable("MOBADEV_SWARM_BUS_V2_DB", junctionedLegacyDb);
+            Assert.Throws<InvalidOperationException>(() => new SwarmBusStore());
+
+            // Also reject self-import when source and target resolve to the same physical file via a junction.
+            var realV2Db = Path.Combine(realV2Dir, "swarm-bus-v2.db");
+            var junctionedV2Db = Path.Combine(junctionV2Dir, "swarm-bus-v2.db");
+            Environment.SetEnvironmentVariable("MOBADEV_SWARM_BUS_V2_DB", null);
+            var v2Store = new SwarmBusStore(realV2Db);
+            v2Store.EnsureInitialized();
+            Assert.Throws<ArgumentException>(() => v2Store.ImportFromLegacyDb(junctionedV2Db));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("MOBADEV_SWARM_BUS_DB", originalLegacyEnv);
+            Environment.SetEnvironmentVariable("MOBADEV_SWARM_BUS_V2_DB", originalV2Env);
+            DeleteDirectoryLinkIfExists(junctionDir);
+            DeleteDirectoryLinkIfExists(junctionV2Dir);
+        }
+    }
+
+    private static void CreateDirectoryJunctionOrSymlink(string linkPath, string targetPath)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            using var proc = Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c mklink /J \"{linkPath}\" \"{targetPath}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            })!;
+            proc.WaitForExit(5000);
+            Assert.Equal(0, proc.ExitCode);
+            return;
+        }
+
+        Directory.CreateSymbolicLink(linkPath, targetPath);
+    }
+
+    private static void DeleteDirectoryLinkIfExists(string linkPath)
+    {
+        try
+        {
+            if (Directory.Exists(linkPath))
+            {
+                Directory.Delete(linkPath, recursive: false);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup.
+        }
     }
 
     private static string ComputeFileSha256(string path)

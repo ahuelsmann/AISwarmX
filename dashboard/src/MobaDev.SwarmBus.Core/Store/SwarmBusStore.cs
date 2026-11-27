@@ -47,6 +47,7 @@ public sealed partial class SwarmBusStore
     private const string IsoFormat = "yyyy-MM-ddTHH:mm:ss.fffZ";
     private const string V2DbEnvVar = "MOBADEV_SWARM_BUS_V2_DB";
     private const string LegacyDbEnvVar = "MOBADEV_SWARM_BUS_DB";
+    private const int MaxCanonicalLinkHops = 16;
 
     private const string AllWildcard = "*";
     private const string AllRecipient = "all";
@@ -285,14 +286,106 @@ public sealed partial class SwarmBusStore
         Path.Combine(ResolveLocalAppDataDir(), AppFolderName, SwarmBusConstants.LegacyDbFileName);
 
     private static string NormalizePathForComparison(string path) =>
-        Path.GetFullPath(path.Trim()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        TrimTrailingSeparatorsUnlessRoot(Path.GetFullPath(path.Trim()));
+
+    private static string TrimTrailingSeparatorsUnlessRoot(string fullPath)
+    {
+        var root = Path.GetPathRoot(fullPath);
+        return string.Equals(fullPath, root, StringComparison.Ordinal)
+            ? fullPath
+            : fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    internal static string ResolveCanonicalPhysicalPath(string rawPath) =>
+        ResolveCanonicalPhysicalPathCore(rawPath, MaxCanonicalLinkHops);
+
+    private static string ResolveCanonicalPhysicalPathCore(string rawPath, int remainingHops)
+    {
+        var full = NormalizePathForComparison(rawPath);
+        if (remainingHops <= 0)
+        {
+            return full;
+        }
+
+        var root = Path.GetPathRoot(full);
+        if (string.IsNullOrEmpty(root))
+        {
+            return full;
+        }
+
+        var relative = full[root.Length..];
+        var segments = relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        var resolved = root;
+        var hitMissingSegment = false;
+
+        foreach (var segment in segments)
+        {
+            if (hitMissingSegment)
+            {
+                resolved = Path.Combine(resolved, segment);
+                continue;
+            }
+
+            resolved = ResolveSegment(resolved, segment, remainingHops, out var existsOnDisk);
+            hitMissingSegment = !existsOnDisk;
+        }
+
+        return TrimTrailingSeparatorsUnlessRoot(resolved);
+    }
+
+    private static string ResolveSegment(string parentDir, string segment, int remainingHops, out bool existsOnDisk)
+    {
+        var candidate = Path.Combine(parentDir, segment);
+        var linkTarget = TryResolveLinkTarget(candidate, out existsOnDisk);
+        if (linkTarget is null)
+        {
+            return candidate;
+        }
+
+        return ResolveCanonicalPhysicalPathCore(linkTarget, remainingHops - 1);
+    }
+
+    private static string? TryResolveLinkTarget(string candidate, out bool existsOnDisk)
+    {
+        FileSystemInfo? info = File.Exists(candidate)
+            ? new FileInfo(candidate)
+            : Directory.Exists(candidate)
+                ? new DirectoryInfo(candidate)
+                : null;
+
+        if (info is null)
+        {
+            existsOnDisk = false;
+            return null;
+        }
+
+        existsOnDisk = true;
+        var resolvedTarget = info.ResolveLinkTarget(returnFinalTarget: true);
+        if (resolvedTarget is null)
+        {
+            return null;
+        }
+
+        return StripExtendedDrivePrefix(resolvedTarget.FullName);
+    }
+
+    private static string StripExtendedDrivePrefix(string path)
+    {
+        // Strip Windows \\?\C:\ prefix if returned by ResolveLinkTarget so Path.GetFullPath/comparisons stay uniform.
+        if (path.StartsWith(@"\\?\", StringComparison.Ordinal) && path.Length > 6 && path[5] == ':')
+        {
+            return path[4..];
+        }
+
+        return path;
+    }
 
     private static bool PathsEqual(string leftPath, string rightPath)
     {
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         return string.Equals(
-            NormalizePathForComparison(leftPath),
-            NormalizePathForComparison(rightPath),
+            ResolveCanonicalPhysicalPath(leftPath),
+            ResolveCanonicalPhysicalPath(rightPath),
             comparison);
     }
 
