@@ -16,7 +16,15 @@ public sealed class LockFencingTests
     [InlineData("SharedUI/*.cs", "SharedUI/Desktop/App.cs", false)]
     [InlineData("SharedUI/**/*.cs", "SharedUI/Desktop/App.cs", true)]
     [InlineData("SharedUI/**/*.cs", "SharedUI/Desktop", true)]
+    [InlineData("SharedUI/**/*.cs", "SharedUI/Desktop/*.txt", false)]
     [InlineData("SharedUI/Desktop", "SharedUI/Web", false)]
+    [InlineData("src/Area*", "src/Area1/File.cs", true)]
+    [InlineData("src/Area1/File.cs", "src/Area*", true)]
+    [InlineData("SharedUI/*/Desktop", "SharedUI/x/Desktop/App.cs", true)]
+    [InlineData("SharedUI/x/Desktop/App.cs", "SharedUI/*/Desktop", true)]
+    [InlineData("src/*.cs", "src/Foo.cs", true)]
+    [InlineData("src/*.cs", "src/Sub/Bar.cs", false)]
+    [InlineData("MobaDev.SwarmBus.*", "MobaDev.SwarmBus.Core/Store.cs", true)]
     public void PathPatternMatcherDetectsHierarchicalAndGlobOverlaps(string pathA, string pathB, bool expectedOverlap)
     {
         Assert.Equal(expectedOverlap, PathPatternMatcher.PathsOverlap(pathA, pathB));

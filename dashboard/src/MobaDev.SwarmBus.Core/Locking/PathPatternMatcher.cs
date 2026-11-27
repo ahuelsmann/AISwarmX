@@ -49,7 +49,7 @@ public static class PathPatternMatcher
 
     /// <summary>
     /// Returns <c>true</c> if two normalized path patterns overlap via equality, directory-prefix containment,
-    /// or <c>*</c> / <c>**</c> glob intersection.
+    /// or <c>*</c> / <c>**</c> glob intersection (including subtrees beneath directory/prefix globs).
     /// </summary>
     public static bool PathsOverlap(string? aRaw, string? bRaw)
     {
@@ -109,16 +109,29 @@ public static class PathPatternMatcher
     private static string[] ToPatternSegments(string normalizedPath, bool hasWildcard)
     {
         var parts = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (hasWildcard)
+        if (parts.Length == 0)
         {
             return parts;
         }
 
-        // Plain path/directory locks cover the path itself and everything beneath it.
+        // Plain directory/prefix paths and non-file-extension glob prefixes (e.g. src/Area*, SharedUI/*/Desktop)
+        // cover the matched path itself and its entire subtree. Single-segment file-extension globs (e.g. *.cs)
+        // remain scoped to that segment depth unless preceded by **.
+        if (hasWildcard && (string.Equals(parts[^1], "**", StringComparison.Ordinal) || IsFileExtensionWildcard(parts[^1])))
+        {
+            return parts;
+        }
+
         var expanded = new string[parts.Length + 1];
         Array.Copy(parts, expanded, parts.Length);
         expanded[^1] = "**";
         return expanded;
+    }
+
+    private static bool IsFileExtensionWildcard(string segment)
+    {
+        var starIdx = segment.IndexOf('*', StringComparison.Ordinal);
+        return starIdx >= 0 && segment.LastIndexOf('.') > starIdx;
     }
 
     private static bool SegmentArraysOverlap(string[] segsA, string[] segsB) =>

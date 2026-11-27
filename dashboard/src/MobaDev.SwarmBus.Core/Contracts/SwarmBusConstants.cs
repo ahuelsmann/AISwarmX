@@ -6,6 +6,8 @@ namespace MobaDev.SwarmBus.Core.Contracts;
 public static class SwarmBusConstants
 {
     public const string DefaultWorkspaceId = "default";
+    public const string DefaultDbFileName = "swarm-bus-v2.db";
+    public const string LegacyDbFileName = "swarm-bus.db";
     public const int DefaultWakeAttemptTtlSeconds = 120;
     public const int DefaultLockTtlMinutes = 120;
     public const int MinLockTtlMinutes = 5;

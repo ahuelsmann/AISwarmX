@@ -299,4 +299,100 @@ public sealed class MessagingAndDeduplicationTests
         Assert.Equal(3, allStatus.TotalUnread);
         Assert.Equal(2, allStatus.UnreadByRecipient.Count);
     }
+
+    [Fact]
+    public async Task LateWakeCompletionCannotClobberNewerPendingOrOkWakeLease()
+    {
+        using var fx = new TempBusFixture();
+        var clock = new TestTimeProvider();
+        var storeNoDispatcher = fx.CreateStore(new SwarmBusStoreOptions { TimeProvider = clock });
+
+        var first = await storeNoDispatcher.SendMessageAsync(new SwarmSendRequest(
+            From: "watchdog",
+            To: "codex",
+            Topic: "AllChecksGreenReady",
+            Body: "PR #600 green",
+            PrNumber: 600,
+            State: "green:sha1",
+            Wake: true));
+        var staleLease = storeNoDispatcher.GetInbox("codex").Messages.Single().WakeAttemptExpiresAtUtc!.Value;
+
+        // Advance past 120s lease so a retry claims a fresh lease.
+        clock.Advance(TimeSpan.FromSeconds(125));
+        var retry = await storeNoDispatcher.SendMessageAsync(new SwarmSendRequest(
+            From: "watchdog",
+            To: "codex",
+            Topic: "AllChecksGreenReady",
+            Body: "PR #600 green",
+            PrNumber: 600,
+            State: "green:sha1",
+            Wake: true));
+        Assert.True(retry.WakeRetried);
+
+        // Stale worker finishing late with the old lease token must be fenced off.
+        var staleApplied = storeNoDispatcher.CompleteWakeAttempt(first.Id, ok: false, staleLease);
+        Assert.False(staleApplied);
+
+        var currentMsg = storeNoDispatcher.GetInbox("codex").Messages.Single();
+        Assert.Equal("pending", currentMsg.WakeState);
+        var currentLease = currentMsg.WakeAttemptExpiresAtUtc!.Value;
+        Assert.NotEqual(staleLease, currentLease);
+
+        // Current holder with matching lease token succeeds.
+        Assert.True(storeNoDispatcher.CompleteWakeAttempt(first.Id, ok: true, currentLease));
+        Assert.Equal("ok", storeNoDispatcher.GetInbox("codex").Messages.Single().WakeState);
+    }
+
+    [Fact]
+    public async Task WakeDispatchTimeoutAndCancellationTransitionWakeStateToFailed()
+    {
+        using var fx = new TempBusFixture();
+        var timeoutStore = fx.CreateStore(new SwarmBusStoreOptions
+        {
+            WakeDispatchTimeout = TimeSpan.FromMilliseconds(80),
+            WakeDispatcher = async (ctx, ct) =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), ct);
+                return new SwarmWakeResult(Attempted: true, Ok: true, Target: ctx.Recipient);
+            }
+        });
+
+        var timedOut = await timeoutStore.SendMessageAsync(new SwarmSendRequest(
+            From: "watchdog",
+            To: "codex",
+            Topic: "TimeoutCheck",
+            Body: "Slow wake",
+            PrNumber: 601,
+            State: "timeout:1",
+            Wake: true));
+
+        Assert.Equal("failed", timedOut.WakeState);
+        Assert.False(timedOut.WakeResults![0].Ok);
+        Assert.Equal("timeout", timedOut.WakeResults[0].Reason);
+
+        using var cts = new CancellationTokenSource();
+        var cancelStore = fx.CreateStore(new SwarmBusStoreOptions
+        {
+            WakeDispatchTimeout = TimeSpan.FromSeconds(10),
+            WakeDispatcher = async (ctx, ct) =>
+            {
+                await cts.CancelAsync();
+                ct.ThrowIfCancellationRequested();
+                return new SwarmWakeResult(Attempted: true, Ok: true, Target: ctx.Recipient);
+            }
+        });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelStore.SendMessageAsync(new SwarmSendRequest(
+            From: "watchdog",
+            To: "codex",
+            Topic: "CancelCheck",
+            Body: "Cancelled wake",
+            PrNumber: 602,
+            State: "cancel:1",
+            Wake: true), cts.Token));
+
+        var msg = cancelStore.GetInbox("codex").Messages.Single(m => m.PrNumber == 602);
+        Assert.Equal("failed", msg.WakeState);
+        Assert.Null(msg.WakeAttemptExpiresAtUtc);
+    }
 }

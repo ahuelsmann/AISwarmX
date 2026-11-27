@@ -59,4 +59,36 @@ public sealed class ConcurrencyTests
         Assert.Equal(workers, finalStatus.ActiveLocks.Count);
         Assert.Equal(workers, verifier.QueueList().Items.Count);
     }
+
+    [Fact]
+    public async Task AsyncBusyRetryExhaustionThrowsSqliteBusyWithoutBlockingIndefinitely()
+    {
+        using var fx = new TempBusFixture();
+        var store = new SwarmBusStore(fx.DbPath, new SwarmBusStoreOptions { MaxBusyRetries = 2 });
+        await store.EnsureInitializedAsync();
+
+        var cs = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+        {
+            DataSource = fx.DbPath,
+            Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadWrite,
+            Pooling = false
+        }.ToString();
+
+        await using var lockHolder = new Microsoft.Data.Sqlite.SqliteConnection(cs);
+        await lockHolder.OpenAsync();
+        await using (var beginCmd = lockHolder.CreateCommand())
+        {
+            beginCmd.CommandText = "BEGIN EXCLUSIVE;";
+            await beginCmd.ExecuteNonQueryAsync();
+        }
+
+        var ex = await Assert.ThrowsAsync<Microsoft.Data.Sqlite.SqliteException>(() =>
+            store.SendMessageAsync(new SwarmSendRequest(
+                From: "codex",
+                To: "claude-opus",
+                Topic: "busy-test",
+                Body: "Should exhaust retries cleanly")));
+
+        Assert.Equal(5, ex.SqliteErrorCode);
+    }
 }

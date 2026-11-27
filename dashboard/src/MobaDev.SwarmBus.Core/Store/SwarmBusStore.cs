@@ -23,9 +23,14 @@ public sealed class SwarmBusStoreOptions
     public Func<SwarmWakeContext, CancellationToken, Task<SwarmWakeResult>>? WakeDispatcher { get; init; }
 
     /// <summary>
-    /// Maximum retry attempts when SQLite returns <c>SQLITE_BUSY</c> (5) or <c>SQLITE_LOCKED</c> (6).
+    /// Maximum retry attempts when SQLite returns <c>SQLITE_BUSY</c> (5) or <c>SQLITE_LOCKED</c> (6), clamped to <c>1..10</c>.
     /// </summary>
-    public int MaxBusyRetries { get; init; } = 24;
+    public int MaxBusyRetries { get; init; } = 5;
+
+    /// <summary>
+    /// Timeout applied to each wake dispatch attempt. Defaults to 15 seconds.
+    /// </summary>
+    public TimeSpan WakeDispatchTimeout { get; init; } = TimeSpan.FromSeconds(15);
 }
 
 /// <summary>
@@ -44,6 +49,7 @@ public sealed partial class SwarmBusStore
     private const string CodeWipMetaKey = "code_wip";
     private const string ColWorkspaceId = "workspace_id";
     private const string ColStatus = "status";
+    private const string AppFolderName = "MOBAdev";
 
     private const string StatusUnread = "unread";
     private const string StatusAcked = "acked";
@@ -89,6 +95,23 @@ public sealed partial class SwarmBusStore
     private const string ParamLimit = "@limit";
     private const string ParamKey = "@key";
     private const string ParamValue = "@value";
+    private const string ParamSender = "@sender";
+    private const string ParamRecipient = "@recipient";
+    private const string ParamTopic = "@topic";
+    private const string ParamBody = "@body";
+    private const string ParamPriority = "@priority";
+    private const string ParamReplyToId = "@replyToId";
+    private const string ParamAckedBy = "@ackedBy";
+    private const string ParamState = "@state";
+    private const string ParamWakeOk = "@wakeOk";
+    private const string ParamWakeState = "@wakeState";
+    private const string ParamWakeExpires = "@wakeExpires";
+    private const string ParamTitle = "@title";
+    private const string ParamRiskClass = "@riskClass";
+    private const string ParamClaimedBy = "@claimedBy";
+    private const string ParamLeaseExpires = "@leaseExpires";
+    private const string ParamCreatedAt = "@createdAt";
+    private const string ParamPathPattern = "@pathPattern";
 
     private const string DeleteLockByIdSql = "DELETE FROM locks WHERE id = @id";
 
@@ -96,7 +119,8 @@ public sealed partial class SwarmBusStore
     private readonly TimeProvider _timeProvider;
     private readonly Func<SwarmWakeContext, CancellationToken, Task<SwarmWakeResult>>? _wakeDispatcher;
     private readonly int _maxBusyRetries;
-    private readonly Lock _initGate = new();
+    private readonly TimeSpan _wakeDispatchTimeout;
+    private readonly SemaphoreSlim _initGate = new(1, 1);
     private volatile bool _initialized;
 
     [GeneratedRegex("^[0-9a-fA-F]{40}$", RegexOptions.CultureInvariant)]
@@ -128,7 +152,8 @@ public sealed partial class SwarmBusStore
         DateTimeOffset CreatedAt,
         string? Body = null,
         string? WakeState = null,
-        bool WakeInProgress = false);
+        bool WakeInProgress = false,
+        string? WakeLeaseToken = null);
 
     private sealed record MatchedMessageRow(
         long Id,
@@ -144,19 +169,95 @@ public sealed partial class SwarmBusStore
         DateTimeOffset Now,
         string WakeExpiresIso);
 
+    private sealed record LockUpsertEntry(
+        string WorkspaceId,
+        string Agent,
+        string PathPattern,
+        int? PrNumber,
+        string ClaimedAtIso,
+        string ExpiresAtIso);
+
+    private sealed record LegacyMessageRow(
+        long Id,
+        string WorkspaceId,
+        string CreatedAtUtc,
+        string Sender,
+        string Recipient,
+        string Topic,
+        string Body,
+        int? PrNumber,
+        int? IssueNumber,
+        string Priority,
+        long? ReplyToId,
+        string Status,
+        string? AckedBy,
+        string? AckedAtUtc,
+        string? State,
+        int? WakeOk,
+        string? WakeState,
+        string? WakeAttemptExpiresAtUtc);
+
+    private sealed record LegacyLockRow(
+        string WorkspaceId,
+        string Agent,
+        string PathPattern,
+        int? PrNumber,
+        string ClaimedAtUtc,
+        string ExpiresAtUtc);
+
+    private sealed record LegacyReviewClaimRow(
+        string WorkspaceId,
+        int PrNumber,
+        string HeadSha,
+        string Role,
+        string Agent,
+        string ClaimedAtUtc,
+        string Status,
+        string? ExpiresAtUtc,
+        string? CompletedAtUtc);
+
+    private sealed record LegacyWorkQueueRow(
+        string WorkspaceId,
+        int IssueNumber,
+        string Title,
+        int Priority,
+        string? RiskClass,
+        string Status,
+        string? ClaimedBy,
+        string? ClaimedAtUtc,
+        string? LeaseExpiresUtc,
+        string UpdatedAtUtc);
+
+    private sealed record LegacyMetaRow(
+        string WorkspaceId,
+        string Key,
+        string Value,
+        string UpdatedAtUtc);
+
+    private sealed record LegacyDbSnapshot(
+        IReadOnlyList<LegacyMessageRow> Messages,
+        IReadOnlyList<LegacyLockRow> Locks,
+        IReadOnlyList<LegacyReviewClaimRow> ReviewClaims,
+        IReadOnlyList<LegacyWorkQueueRow> WorkQueueItems,
+        IReadOnlyList<LegacyMetaRow> MetaEntries);
+
     public SwarmBusStore(string? dbPath = null, SwarmBusStoreOptions? options = null)
     {
         _dbPath = string.IsNullOrWhiteSpace(dbPath) ? ResolveDefaultDbPath() : Path.GetFullPath(dbPath.Trim());
         var resolved = options ?? new SwarmBusStoreOptions();
         _timeProvider = resolved.TimeProvider;
         _wakeDispatcher = resolved.WakeDispatcher;
-        _maxBusyRetries = Math.Max(1, resolved.MaxBusyRetries);
+        _maxBusyRetries = Math.Clamp(resolved.MaxBusyRetries, 1, 10);
+        _wakeDispatchTimeout = resolved.WakeDispatchTimeout < TimeSpan.FromMilliseconds(50)
+            ? TimeSpan.FromMilliseconds(50)
+            : resolved.WakeDispatchTimeout;
     }
 
     public string DatabasePath => _dbPath;
 
     /// <summary>
-    /// Resolves the default Swarm Bus database path (<c>MOBADEV_SWARM_BUS_DB</c> or <c>%LOCALAPPDATA%\MOBAdev\swarm-bus.db</c>).
+    /// Resolves the default v2 Swarm Bus database path (<c>MOBADEV_SWARM_BUS_DB</c> or <c>%LOCALAPPDATA%\MOBAdev\swarm-bus-v2.db</c>),
+    /// keeping the live Node MCP <c>swarm-bus.db</c> untouched.
     /// </summary>
     public static string ResolveDefaultDbPath()
     {
@@ -166,17 +267,28 @@ public sealed partial class SwarmBusStore
             return Path.GetFullPath(overridePath.Trim());
         }
 
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (string.IsNullOrWhiteSpace(localAppData))
-        {
-            localAppData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AppData", "Local");
-        }
-
-        return Path.Combine(localAppData, "MOBAdev", "swarm-bus.db");
+        return Path.Combine(ResolveLocalAppDataDir(), AppFolderName, SwarmBusConstants.DefaultDbFileName);
     }
 
     /// <summary>
-    /// Explicitly ensures the SQLite database directory exists, WAL mode is active, and all v3.14.0+ tables/columns are migrated.
+    /// Resolves the legacy single-repo Swarm Bus database path (<c>%LOCALAPPDATA%\MOBAdev\swarm-bus.db</c>).
+    /// </summary>
+    public static string ResolveLegacyDefaultDbPath() =>
+        Path.Combine(ResolveLocalAppDataDir(), AppFolderName, SwarmBusConstants.LegacyDbFileName);
+
+    private static string ResolveLocalAppDataDir()
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            return localAppData;
+        }
+
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AppData", "Local");
+    }
+
+    /// <summary>
+    /// Explicitly ensures the SQLite database directory exists, WAL mode is active, and v2 tables/columns are initialized.
     /// </summary>
     public void EnsureInitialized()
     {
@@ -185,39 +297,106 @@ public sealed partial class SwarmBusStore
             return;
         }
 
-        lock (_initGate)
+        _initGate.Wait();
+        try
         {
             if (_initialized)
             {
                 return;
             }
 
-            var directory = Path.GetDirectoryName(_dbPath);
-            if (!string.IsNullOrEmpty(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
+            EnsureDirectoryExists();
             ExecuteWithBusyRetry(() =>
             {
-                using var connection = OpenConnectionCore();
-                ExecuteNonQuery(connection, "PRAGMA journal_mode = WAL;");
-
-                RunInImmediateTransactionCore(connection, () =>
-                {
-                    MigrateAndCreateSchema(connection);
-                    return 0;
-                });
-
+                InitializeDatabaseOnConnection();
                 return 0;
             });
 
             _initialized = true;
         }
+        finally
+        {
+            _initGate.Release();
+        }
     }
 
-    public SwarmSendResult SendMessage(SwarmSendRequest request) =>
-        SendMessageAsync(request, CancellationToken.None).GetAwaiter().GetResult();
+    /// <summary>
+    /// Asynchronously ensures the SQLite database directory exists, WAL mode is active, and v2 tables/columns are initialized.
+    /// </summary>
+    public async Task EnsureInitializedAsync(CancellationToken cancellationToken = default)
+    {
+        if (_initialized)
+        {
+            return;
+        }
+
+        await _initGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_initialized)
+            {
+                return;
+            }
+
+            EnsureDirectoryExists();
+            await ExecuteWithBusyRetryAsync(_ =>
+            {
+                InitializeDatabaseOnConnection();
+                return Task.FromResult(0);
+            }, cancellationToken).ConfigureAwait(false);
+
+            _initialized = true;
+        }
+        finally
+        {
+            _initGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Reads an existing legacy single-repo <c>swarm-bus.db</c> strictly in <c>Mode=ReadOnly</c> (never mutating the source file)
+    /// and imports its messages, locks, review claims, work queue items, and metadata into this v2 store idempotently.
+    /// </summary>
+    public LegacyImportResult ImportFromLegacyDb(string legacyDbPath)
+    {
+        var fullLegacyPath = ValidateLegacySourcePath(legacyDbPath);
+        var snapshot = ReadLegacySnapshotWithRetry(fullLegacyPath);
+        return ExecuteInImmediateTransaction(connection => WriteLegacyImportInTx(connection, fullLegacyPath, snapshot));
+    }
+
+    /// <summary>
+    /// Asynchronously reads an existing legacy single-repo <c>swarm-bus.db</c> strictly in <c>Mode=ReadOnly</c>
+    /// and imports its data into this v2 store idempotently.
+    /// </summary>
+    public async Task<LegacyImportResult> ImportFromLegacyDbAsync(string legacyDbPath, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var fullLegacyPath = ValidateLegacySourcePath(legacyDbPath);
+        var snapshot = await ExecuteWithBusyRetryAsync(
+            _ => Task.FromResult(ReadLegacySnapshot(fullLegacyPath)),
+            cancellationToken).ConfigureAwait(false);
+
+        return await ExecuteInImmediateTransactionAsync(
+            connection => WriteLegacyImportInTx(connection, fullLegacyPath, snapshot),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public SwarmSendResult SendMessage(SwarmSendRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var input = BuildSendTxInput(request);
+        var txResult = ExecuteInImmediateTransaction(connection => SendOrDeduplicateInTx(connection, input));
+
+        return txResult.Mode switch
+        {
+            SendTxMode.Deduplicated => CreateDeduplicatedSendResult(txResult, input),
+            SendTxMode.RetryWake when _wakeDispatcher is null => CreatePendingRetrySendResult(txResult, input),
+            SendTxMode.RetryWake => RunWakeSync(txResult, input, request.CodexThreadId, isRetry: true),
+            _ when input.WakeTargetMatches && _wakeDispatcher is not null => RunWakeSync(txResult, input, request.CodexThreadId, isRetry: false),
+            _ => CreateInsertedSendResult(txResult, input, [], input.WakeTargetMatches ? WakeStatePending : null)
+        };
+    }
 
     public async Task<SwarmSendResult> SendMessageAsync(SwarmSendRequest request, CancellationToken cancellationToken = default)
     {
@@ -225,18 +404,13 @@ public sealed partial class SwarmBusStore
         cancellationToken.ThrowIfCancellationRequested();
 
         var input = BuildSendTxInput(request);
-        var txResult = ExecuteInImmediateTransaction(connection => SendOrDeduplicateInTx(connection, input));
+        var txResult = await ExecuteInImmediateTransactionAsync(
+            connection => SendOrDeduplicateInTx(connection, input),
+            cancellationToken).ConfigureAwait(false);
 
         return txResult.Mode switch
         {
-            SendTxMode.Deduplicated => new SwarmSendResult(
-                Ok: true,
-                Id: txResult.Id,
-                WorkspaceId: input.WorkspaceId,
-                State: input.State,
-                Deduplicated: true,
-                WakeInProgress: txResult.WakeInProgress,
-                WakeState: txResult.WakeState),
+            SendTxMode.Deduplicated => CreateDeduplicatedSendResult(txResult, input),
             SendTxMode.RetryWake => await HandleRetryWakeAsync(
                 txResult,
                 input,
@@ -251,12 +425,15 @@ public sealed partial class SwarmBusStore
     }
 
     /// <summary>
-    /// Completes an in-flight wake attempt for <paramref name="messageId"/>, transitioning <c>wake_state</c>
-    /// to <c>'ok'</c> or <c>'failed'</c> and clearing <c>wake_attempt_expires_at_utc</c>.
+    /// Completes an in-flight wake attempt for <paramref name="messageId"/> only if the row is still <c>'pending'</c>
+    /// and its <c>wake_attempt_expires_at_utc</c> matches <paramref name="expectedLeaseExpiresAtUtc"/> (fencing token).
     /// </summary>
-    public void CompleteWakeAttempt(long messageId, bool ok)
+    public bool CompleteWakeAttempt(long messageId, bool ok, DateTimeOffset expectedLeaseExpiresAtUtc) =>
+        CompleteWakeAttemptCore(messageId, ok, FormatUtc(expectedLeaseExpiresAtUtc));
+
+    private bool CompleteWakeAttemptCore(long messageId, bool ok, string expectedLeaseIso)
     {
-        ExecuteInImmediateTransaction(connection =>
+        return ExecuteInImmediateTransaction(connection =>
         {
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
@@ -265,13 +442,37 @@ public sealed partial class SwarmBusStore
                     wake_ok = @wakeOk,
                     wake_attempt_expires_at_utc = NULL
                 WHERE id = @id
+                  AND wake_state = 'pending'
+                  AND wake_attempt_expires_at_utc = @expectedLease
                 """;
-            cmd.Parameters.AddWithValue("@wakeState", ok ? WakeStateOk : WakeStateFailed);
-            cmd.Parameters.AddWithValue("@wakeOk", ok ? 1 : 0);
+            cmd.Parameters.AddWithValue(ParamWakeState, ok ? WakeStateOk : WakeStateFailed);
+            cmd.Parameters.AddWithValue(ParamWakeOk, ok ? 1 : 0);
             cmd.Parameters.AddWithValue(ParamId, messageId);
-            cmd.ExecuteNonQuery();
-            return 0;
+            cmd.Parameters.AddWithValue("@expectedLease", expectedLeaseIso);
+            return cmd.ExecuteNonQuery() > 0;
         });
+    }
+
+    private Task<bool> CompleteWakeAttemptAsync(long messageId, bool ok, string expectedLeaseIso, CancellationToken cancellationToken)
+    {
+        return ExecuteInImmediateTransactionAsync(connection =>
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                UPDATE messages
+                SET wake_state = @wakeState,
+                    wake_ok = @wakeOk,
+                    wake_attempt_expires_at_utc = NULL
+                WHERE id = @id
+                  AND wake_state = 'pending'
+                  AND wake_attempt_expires_at_utc = @expectedLease
+                """;
+            cmd.Parameters.AddWithValue(ParamWakeState, ok ? WakeStateOk : WakeStateFailed);
+            cmd.Parameters.AddWithValue(ParamWakeOk, ok ? 1 : 0);
+            cmd.Parameters.AddWithValue(ParamId, messageId);
+            cmd.Parameters.AddWithValue("@expectedLease", expectedLeaseIso);
+            return cmd.ExecuteNonQuery() > 0;
+        }, cancellationToken);
     }
 
     public SwarmInboxResult GetInbox(
@@ -280,35 +481,11 @@ public sealed partial class SwarmBusStore
         int limit = 20,
         string? workspaceId = null)
     {
-        var normalizedAgent = string.IsNullOrWhiteSpace(agent) ? AllRecipient : agent.Trim();
-        var clampedLimit = Math.Clamp(limit, 1, 100);
-        var (allWorkspaces, normalizedWorkspace) = ResolveWorkspaceFilter(workspaceId);
-        var includeAllRecipients = normalizedAgent.Equals(AllRecipient, StringComparison.OrdinalIgnoreCase) ||
-                                   normalizedAgent == AllWildcard;
+        var (normalizedAgent, clampedLimit, allWorkspaces, normalizedWorkspace, includeAllRecipients) =
+            NormalizeInboxQuery(agent, limit, workspaceId);
 
         var messages = ExecuteRead(connection =>
-        {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT id, workspace_id, created_at_utc, sender, recipient, topic, body,
-                       pr_number, issue_number, priority, reply_to_id, status,
-                       acked_by, acked_at_utc, state, wake_ok, wake_state, wake_attempt_expires_at_utc
-                FROM messages
-                WHERE (@allWorkspaces = 1 OR workspace_id = @workspaceId)
-                  AND (@allRecipients = 1 OR lower(recipient) = lower(@agent) OR lower(recipient) = 'all')
-                  AND (@unreadOnly = 0 OR status = 'unread')
-                ORDER BY id DESC
-                LIMIT @limit
-                """;
-            cmd.Parameters.AddWithValue(ParamAllWorkspaces, allWorkspaces ? 1 : 0);
-            cmd.Parameters.AddWithValue(ParamWorkspaceId, normalizedWorkspace);
-            cmd.Parameters.AddWithValue(ParamAllRecipients, includeAllRecipients ? 1 : 0);
-            cmd.Parameters.AddWithValue(ParamAgent, normalizedAgent);
-            cmd.Parameters.AddWithValue(ParamUnreadOnly, unreadOnly ? 1 : 0);
-            cmd.Parameters.AddWithValue(ParamLimit, clampedLimit);
-
-            return ReadMessages(cmd);
-        });
+            ReadInboxMessages(connection, allWorkspaces, normalizedWorkspace, includeAllRecipients, normalizedAgent, unreadOnly, clampedLimit));
 
         return new SwarmInboxResult(
             Agent: normalizedAgent,
@@ -318,7 +495,7 @@ public sealed partial class SwarmBusStore
             Messages: messages);
     }
 
-    public Task<SwarmInboxResult> GetInboxAsync(
+    public async Task<SwarmInboxResult> GetInboxAsync(
         string agent = AllRecipient,
         bool unreadOnly = true,
         int limit = 20,
@@ -326,11 +503,55 @@ public sealed partial class SwarmBusStore
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(GetInbox(agent, unreadOnly, limit, workspaceId));
+        var (normalizedAgent, clampedLimit, allWorkspaces, normalizedWorkspace, includeAllRecipients) =
+            NormalizeInboxQuery(agent, limit, workspaceId);
+
+        var messages = await ExecuteReadAsync(
+            connection => ReadInboxMessages(connection, allWorkspaces, normalizedWorkspace, includeAllRecipients, normalizedAgent, unreadOnly, clampedLimit),
+            cancellationToken).ConfigureAwait(false);
+
+        return new SwarmInboxResult(
+            Agent: normalizedAgent,
+            WorkspaceId: normalizedWorkspace,
+            UnreadOnly: unreadOnly,
+            Count: messages.Count,
+            Messages: messages);
     }
 
-    public SwarmAckResult AckMessage(long messageId, string agent, string? reply = null) =>
-        AckMessageAsync(messageId, agent, reply, CancellationToken.None).GetAwaiter().GetResult();
+    public SwarmAckResult AckMessage(long messageId, string agent, string? reply = null)
+    {
+        if (messageId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(messageId), "bus_ack requires positive \"message_id\".");
+        }
+
+        var normalizedAgent = RequireNonEmpty(agent, "bus_ack requires non-empty \"agent\".", nameof(agent));
+        var trimmedReply = string.IsNullOrWhiteSpace(reply) ? null : reply.Trim();
+
+        var ackInfo = ExecuteInImmediateTransaction(connection =>
+            MarkMessageAckedInTx(connection, messageId, normalizedAgent));
+
+        SwarmSendResult? replyResult = null;
+        if (trimmedReply is not null)
+        {
+            replyResult = SendMessage(new SwarmSendRequest(
+                From: normalizedAgent,
+                To: ackInfo.OrigSender,
+                Topic: $"re:{ackInfo.OrigTopic}",
+                Body: trimmedReply,
+                PrNumber: ackInfo.PrNumber,
+                IssueNumber: ackInfo.IssueNumber,
+                ReplyToId: messageId,
+                WorkspaceId: ackInfo.WorkspaceId));
+        }
+
+        return new SwarmAckResult(
+            Ok: true,
+            AckedMessageId: messageId,
+            AckedBy: normalizedAgent,
+            AckedAtUtc: ackInfo.AckedAt,
+            ReplyMessage: replyResult);
+    }
 
     public async Task<SwarmAckResult> AckMessageAsync(
         long messageId,
@@ -347,8 +568,9 @@ public sealed partial class SwarmBusStore
         var normalizedAgent = RequireNonEmpty(agent, "bus_ack requires non-empty \"agent\".", nameof(agent));
         var trimmedReply = string.IsNullOrWhiteSpace(reply) ? null : reply.Trim();
 
-        var ackInfo = ExecuteInImmediateTransaction(connection =>
-            MarkMessageAckedInTx(connection, messageId, normalizedAgent));
+        var ackInfo = await ExecuteInImmediateTransactionAsync(
+            connection => MarkMessageAckedInTx(connection, messageId, normalizedAgent),
+            cancellationToken).ConfigureAwait(false);
 
         SwarmSendResult? replyResult = null;
         if (trimmedReply is not null)
@@ -374,128 +596,44 @@ public sealed partial class SwarmBusStore
 
     public LockClaimResult ClaimLocks(LockClaimRequest request)
     {
-        ArgumentNullException.ThrowIfNull(request);
-
-        var agent = RequireNonEmpty(request.Agent, "bus_locks claim requires non-empty \"agent\".", nameof(request));
-        var workspaceId = PathPatternMatcher.NormalizeWorkspaceId(request.WorkspaceId);
-        var cleanPaths = (request.Paths ?? [])
-            .Select(PathPatternMatcher.CanonicalizeForStorage)
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (cleanPaths.Count == 0)
-        {
-            throw new ArgumentException("bus_locks claim requires non-empty \"paths\".", nameof(request));
-        }
-
-        var ttlMinutes = Math.Clamp(request.TtlMinutes, SwarmBusConstants.MinLockTtlMinutes, SwarmBusConstants.MaxLockTtlMinutes);
-
-        return ExecuteInImmediateTransaction(connection =>
-        {
-            var now = _timeProvider.GetUtcNow();
-            var nowIso = FormatUtc(now);
-            var expiresIso = FormatUtc(now.AddMinutes(ttlMinutes));
-
-            PruneExpiredLocksInTx(connection, now);
-
-            var existingLocks = ReadLocksInWorkspace(connection, workspaceId);
-            var conflicts = FindLockConflicts(cleanPaths, existingLocks, agent, workspaceId);
-            if (conflicts.Count > 0)
-            {
-                return new LockClaimResult(
-                    Ok: false,
-                    WorkspaceId: workspaceId,
-                    ClaimedPaths: [],
-                    Conflicts: conflicts,
-                    Locks: existingLocks);
-            }
-
-            foreach (var reqPath in cleanPaths)
-            {
-                UpsertLockPathInTx(connection, existingLocks, new LockUpsertEntry(
-                    WorkspaceId: workspaceId,
-                    Agent: agent,
-                    PathPattern: reqPath,
-                    PrNumber: request.PrNumber,
-                    ClaimedAtIso: nowIso,
-                    ExpiresAtIso: expiresIso));
-            }
-
-            return new LockClaimResult(
-                Ok: true,
-                WorkspaceId: workspaceId,
-                ClaimedPaths: cleanPaths,
-                Conflicts: [],
-                Locks: ReadLocksInWorkspace(connection, workspaceId));
-        });
+        var (agent, workspaceId, cleanPaths, ttlMinutes) = ValidateLockClaimRequest(request);
+        return ExecuteInImmediateTransaction(connection => ClaimLocksInTx(connection, agent, workspaceId, cleanPaths, request.PrNumber, ttlMinutes));
     }
 
     public Task<LockClaimResult> ClaimLocksAsync(LockClaimRequest request, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(ClaimLocks(request));
+        var (agent, workspaceId, cleanPaths, ttlMinutes) = ValidateLockClaimRequest(request);
+        return ExecuteInImmediateTransactionAsync(
+            connection => ClaimLocksInTx(connection, agent, workspaceId, cleanPaths, request.PrNumber, ttlMinutes),
+            cancellationToken);
     }
 
     public LockReleaseResult ReleaseLocks(LockReleaseRequest request)
     {
-        ArgumentNullException.ThrowIfNull(request);
-
-        var agent = string.IsNullOrWhiteSpace(request.Agent) ? null : request.Agent.Trim();
-        var cleanPaths = (request.Paths ?? [])
-            .Select(PathPatternMatcher.NormalizePath)
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .ToHashSet(StringComparer.Ordinal);
-        var workspaceId = PathPatternMatcher.NormalizeWorkspaceId(request.WorkspaceId);
-
-        if (agent is null && cleanPaths.Count == 0 && !request.PrNumber.HasValue)
-        {
-            throw new ArgumentException("bus_locks release requires \"agent\", \"paths\", or \"prNumber\".", nameof(request));
-        }
-
-        return ExecuteInImmediateTransaction(connection =>
-        {
-            PruneExpiredLocksInTx(connection, _timeProvider.GetUtcNow());
-
-            var candidates = ReadLocksInWorkspace(connection, workspaceId);
-            var idsToDelete = candidates
-                .Where(c => MatchesReleaseFilter(c, agent, request.PrNumber, cleanPaths))
-                .Select(c => c.Id)
-                .ToList();
-
-            DeleteLocksByIdInTx(connection, idsToDelete);
-
-            return new LockReleaseResult(
-                Ok: true,
-                WorkspaceId: workspaceId,
-                RemovedCount: idsToDelete.Count,
-                RemainingLocks: ReadLocksInWorkspace(connection, workspaceId));
-        });
+        var (agent, cleanPaths, workspaceId) = ValidateLockReleaseRequest(request);
+        return ExecuteInImmediateTransaction(connection => ReleaseLocksInTx(connection, agent, cleanPaths, request.PrNumber, workspaceId));
     }
 
     public Task<LockReleaseResult> ReleaseLocksAsync(LockReleaseRequest request, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(ReleaseLocks(request));
+        var (agent, cleanPaths, workspaceId) = ValidateLockReleaseRequest(request);
+        return ExecuteInImmediateTransactionAsync(
+            connection => ReleaseLocksInTx(connection, agent, cleanPaths, request.PrNumber, workspaceId),
+            cancellationToken);
     }
 
     public IReadOnlyList<PathLockLease> ListLocks(string? workspaceId = null)
     {
         var (allWorkspaces, normalizedWorkspace) = ResolveWorkspaceFilter(workspaceId);
-
-        return ExecuteInImmediateTransaction(connection =>
-        {
-            PruneExpiredLocksInTx(connection, _timeProvider.GetUtcNow());
-            return allWorkspaces
-                ? ReadAllLocks(connection)
-                : ReadLocksInWorkspace(connection, normalizedWorkspace);
-        });
+        return ExecuteInImmediateTransaction(connection => ListLocksInTx(connection, allWorkspaces, normalizedWorkspace));
     }
 
     public Task<IReadOnlyList<PathLockLease>> ListLocksAsync(string? workspaceId = null, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(ListLocks(workspaceId));
+        var (allWorkspaces, normalizedWorkspace) = ResolveWorkspaceFilter(workspaceId);
+        return ExecuteInImmediateTransactionAsync(
+            connection => ListLocksInTx(connection, allWorkspaces, normalizedWorkspace),
+            cancellationToken);
     }
 
     public ReviewClaimResult ReviewClaim(ReviewClaimRequest request)
@@ -517,47 +655,26 @@ public sealed partial class SwarmBusStore
 
     public Task<ReviewClaimResult> ReviewClaimAsync(ReviewClaimRequest request, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(ReviewClaim(request));
+
+        var action = string.IsNullOrWhiteSpace(request.Action) ? ActionClaim : request.Action.Trim().ToLowerInvariant();
+        var workspaceId = PathPatternMatcher.NormalizeWorkspaceId(request.WorkspaceId);
+
+        return action switch
+        {
+            ActionClaim => ClaimReviewSlotAsync(request, workspaceId, cancellationToken),
+            ActionComplete => CompleteReviewSlotAsync(request, workspaceId, cancellationToken),
+            ActionRelease => ReleaseReviewSlotAsync(request, workspaceId, cancellationToken),
+            ActionList => ListReviewSlotsAsync(request, cancellationToken),
+            _ => throw new ArgumentException($"Unsupported bus_review_claim action '{action}'. Use: claim, complete, release, list.", nameof(request))
+        };
     }
 
     public WorkQueueMutationResult QueueUpsert(WorkQueueUpsertRequest request)
     {
-        ArgumentNullException.ThrowIfNull(request);
-
-        if (request.IssueNumber <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(request), "bus_queue upsert requires positive integer \"issue_number\".");
-        }
-
-        var workspaceId = PathPatternMatcher.NormalizeWorkspaceId(request.WorkspaceId);
-        var incomingStatus = string.IsNullOrWhiteSpace(request.Status) ? StatusQueued : request.Status.Trim().ToLowerInvariant();
-        if (!SwarmBusConstants.ValidQueueStatuses.Contains(incomingStatus))
-        {
-            throw new ArgumentException($"Invalid work_queue status '{incomingStatus}'. Expected: queued, claimed, done, removed.", nameof(request));
-        }
-
-        var rawTitle = string.IsNullOrWhiteSpace(request.Title) ? null : request.Title.Trim();
-        var isTerminalWithoutTitle = rawTitle is null && incomingStatus is StatusDone or StatusRemoved;
-        if (rawTitle is null && !isTerminalWithoutTitle)
-        {
-            throw new ArgumentException("bus_queue upsert requires non-empty \"title\".", nameof(request));
-        }
-
-        var priority = request.Priority ?? 2;
-        var riskClass = string.IsNullOrWhiteSpace(request.RiskClass) ? null : request.RiskClass.Trim().ToUpperInvariant();
-
-        var result = ExecuteInImmediateTransaction(connection =>
-        {
-            var nowIso = FormatUtc(_timeProvider.GetUtcNow());
-            if (isTerminalWithoutTitle)
-            {
-                return TryMarkDoneOrRemovedWithoutTitleInTx(connection, workspaceId, request.IssueNumber, incomingStatus, nowIso);
-            }
-
-            return UpsertQueueItemInTx(connection, workspaceId, request.IssueNumber, rawTitle!, priority, riskClass, incomingStatus, nowIso);
-        });
-
+        var parsed = ValidateQueueUpsertRequest(request);
+        var result = ExecuteInImmediateTransaction(connection => ExecuteQueueUpsertInTx(connection, parsed));
         if (result is null)
         {
             throw new ArgumentException("bus_queue upsert requires non-empty \"title\".", nameof(request));
@@ -566,102 +683,40 @@ public sealed partial class SwarmBusStore
         return result;
     }
 
-    public Task<WorkQueueMutationResult> QueueUpsertAsync(WorkQueueUpsertRequest request, CancellationToken cancellationToken = default)
+    public async Task<WorkQueueMutationResult> QueueUpsertAsync(WorkQueueUpsertRequest request, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(QueueUpsert(request));
+        var parsed = ValidateQueueUpsertRequest(request);
+        var result = await ExecuteInImmediateTransactionAsync(
+            connection => ExecuteQueueUpsertInTx(connection, parsed),
+            cancellationToken).ConfigureAwait(false);
+        if (result is null)
+        {
+            throw new ArgumentException("bus_queue upsert requires non-empty \"title\".", nameof(request));
+        }
+
+        return result;
     }
 
     public WorkQueueNextResult QueueNext(string agent, string? workspaceId = null)
     {
         var normalizedAgent = RequireNonEmpty(agent, "bus_queue next requires non-empty \"agent\".", nameof(agent));
         var normalizedWorkspace = PathPatternMatcher.NormalizeWorkspaceId(workspaceId);
-
-        return ExecuteInImmediateTransaction(connection =>
-        {
-            var now = _timeProvider.GetUtcNow();
-            var nowIso = FormatUtc(now);
-            var leaseExpiresIso = FormatUtc(now.AddHours(SwarmBusConstants.DefaultQueueLeaseHours));
-
-            var resumed = TryResumeOwnClaimInTx(connection, normalizedWorkspace, normalizedAgent, now, nowIso, leaseExpiresIso);
-            if (resumed is not null)
-            {
-                return resumed;
-            }
-
-            var (baseCodeWip, activeClaimedCodeCount, effectiveCodeWip) = ComputeEffectiveCodeWipInTx(connection, normalizedWorkspace, now);
-            var restrictToLowRisk = effectiveCodeWip >= SwarmBusConstants.CodeWipClaimLimit;
-            var candidate = SelectNextCandidate(connection, normalizedWorkspace, now, restrictToLowRisk);
-
-            if (candidate is null)
-            {
-                return new WorkQueueNextResult(
-                    Ok: true,
-                    WorkspaceId: normalizedWorkspace,
-                    Resumed: false,
-                    CodeWip: baseCodeWip,
-                    ActiveClaimedCodeCount: activeClaimedCodeCount,
-                    EffectiveCodeWip: effectiveCodeWip,
-                    Item: null,
-                    Reason: restrictToLowRisk
-                        ? $"effective_code_wip ({effectiveCodeWip}) >= {SwarmBusConstants.CodeWipClaimLimit} and no eligible L-class work item is queued."
-                        : "No queued or expired-lease work items available.");
-            }
-
-            var claimed = ClaimQueueItemInTx(connection, candidate.Id, normalizedAgent, nowIso, leaseExpiresIso);
-            return new WorkQueueNextResult(
-                Ok: true,
-                WorkspaceId: normalizedWorkspace,
-                Resumed: false,
-                CodeWip: baseCodeWip,
-                ActiveClaimedCodeCount: activeClaimedCodeCount,
-                EffectiveCodeWip: effectiveCodeWip,
-                Item: claimed);
-        });
+        return ExecuteInImmediateTransaction(connection => ExecuteQueueNextInTx(connection, normalizedAgent, normalizedWorkspace));
     }
 
     public Task<WorkQueueNextResult> QueueNextAsync(string agent, string? workspaceId = null, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(QueueNext(agent, workspaceId));
+        var normalizedAgent = RequireNonEmpty(agent, "bus_queue next requires non-empty \"agent\".", nameof(agent));
+        var normalizedWorkspace = PathPatternMatcher.NormalizeWorkspaceId(workspaceId);
+        return ExecuteInImmediateTransactionAsync(
+            connection => ExecuteQueueNextInTx(connection, normalizedAgent, normalizedWorkspace),
+            cancellationToken);
     }
 
     public WorkQueueMutationResult QueueRelease(int issueNumber, string? agent = null, string? workspaceId = null)
     {
-        if (issueNumber <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(issueNumber), "bus_queue release requires positive integer \"issue_number\".");
-        }
-
-        var normalizedWorkspace = PathPatternMatcher.NormalizeWorkspaceId(workspaceId);
-        var normalizedAgent = string.IsNullOrWhiteSpace(agent) ? null : agent.Trim();
-
-        return ExecuteInImmediateTransaction(connection =>
-        {
-            var nowIso = FormatUtc(_timeProvider.GetUtcNow());
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                UPDATE work_queue
-                SET status = 'queued', claimed_by = NULL, claimed_at_utc = NULL, lease_expires_utc = NULL, updated_at_utc = @updatedAt
-                WHERE workspace_id = @workspaceId
-                  AND issue_number = @issueNumber
-                  AND status = 'claimed'
-                  AND (@agent IS NULL OR lower(claimed_by) = lower(@agent))
-                """;
-            cmd.Parameters.AddWithValue(ParamUpdatedAt, nowIso);
-            cmd.Parameters.AddWithValue(ParamWorkspaceId, normalizedWorkspace);
-            cmd.Parameters.AddWithValue(ParamIssueNumber, issueNumber);
-            cmd.Parameters.AddWithValue(ParamAgent, (object?)normalizedAgent ?? DBNull.Value);
-
-            var changed = cmd.ExecuteNonQuery() > 0;
-            return new WorkQueueMutationResult(
-                Ok: true,
-                Action: ActionRelease,
-                WorkspaceId: normalizedWorkspace,
-                IssueNumber: issueNumber,
-                Changed: changed,
-                Item: ReadWorkQueueItem(connection, normalizedWorkspace, issueNumber));
-        });
+        var (normalizedWorkspace, normalizedAgent) = ValidateQueueReleaseArgs(issueNumber, agent, workspaceId);
+        return ExecuteInImmediateTransaction(connection => ExecuteQueueReleaseInTx(connection, issueNumber, normalizedAgent, normalizedWorkspace));
     }
 
     public Task<WorkQueueMutationResult> QueueReleaseAsync(
@@ -670,8 +725,10 @@ public sealed partial class SwarmBusStore
         string? workspaceId = null,
         CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(QueueRelease(issueNumber, agent, workspaceId));
+        var (normalizedWorkspace, normalizedAgent) = ValidateQueueReleaseArgs(issueNumber, agent, workspaceId);
+        return ExecuteInImmediateTransactionAsync(
+            connection => ExecuteQueueReleaseInTx(connection, issueNumber, normalizedAgent, normalizedWorkspace),
+            cancellationToken);
     }
 
     public WorkQueueMutationResult QueueDone(int issueNumber, string? workspaceId = null)
@@ -682,29 +739,7 @@ public sealed partial class SwarmBusStore
         }
 
         var normalizedWorkspace = PathPatternMatcher.NormalizeWorkspaceId(workspaceId);
-
-        return ExecuteInImmediateTransaction(connection =>
-        {
-            var nowIso = FormatUtc(_timeProvider.GetUtcNow());
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                UPDATE work_queue
-                SET status = 'done', lease_expires_utc = NULL, updated_at_utc = @updatedAt
-                WHERE workspace_id = @workspaceId AND issue_number = @issueNumber
-                """;
-            cmd.Parameters.AddWithValue(ParamUpdatedAt, nowIso);
-            cmd.Parameters.AddWithValue(ParamWorkspaceId, normalizedWorkspace);
-            cmd.Parameters.AddWithValue(ParamIssueNumber, issueNumber);
-
-            var changed = cmd.ExecuteNonQuery() > 0;
-            return new WorkQueueMutationResult(
-                Ok: true,
-                Action: StatusDone,
-                WorkspaceId: normalizedWorkspace,
-                IssueNumber: issueNumber,
-                Changed: changed,
-                Item: ReadWorkQueueItem(connection, normalizedWorkspace, issueNumber));
-        });
+        return ExecuteInImmediateTransaction(connection => ExecuteQueueDoneInTx(connection, issueNumber, normalizedWorkspace));
     }
 
     public Task<WorkQueueMutationResult> QueueDoneAsync(
@@ -712,34 +747,21 @@ public sealed partial class SwarmBusStore
         string? workspaceId = null,
         CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(QueueDone(issueNumber, workspaceId));
+        if (issueNumber <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(issueNumber), "bus_queue done requires positive integer \"issue_number\".");
+        }
+
+        var normalizedWorkspace = PathPatternMatcher.NormalizeWorkspaceId(workspaceId);
+        return ExecuteInImmediateTransactionAsync(
+            connection => ExecuteQueueDoneInTx(connection, issueNumber, normalizedWorkspace),
+            cancellationToken);
     }
 
     public WorkQueueListResult QueueList(string? status = null, string? workspaceId = null)
     {
-        var normalizedWorkspace = PathPatternMatcher.NormalizeWorkspaceId(workspaceId);
-        var statusFilter = string.IsNullOrWhiteSpace(status) ? null : status.Trim().ToLowerInvariant();
-        if (statusFilter is not null && !SwarmBusConstants.ValidQueueStatuses.Contains(statusFilter))
-        {
-            throw new ArgumentException($"Invalid status '{statusFilter}'. Expected: queued, claimed, done, removed.", nameof(status));
-        }
-
-        return ExecuteRead(connection =>
-        {
-            var items = ReadWorkQueueItems(connection, normalizedWorkspace, statusFilter);
-            var meta = ReadMetaMap(connection, normalizedWorkspace);
-            var codeWip = meta.TryGetValue(CodeWipMetaKey, out var rawWip) && int.TryParse(rawWip, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
-                ? parsed
-                : 0;
-
-            return new WorkQueueListResult(
-                Ok: true,
-                WorkspaceId: normalizedWorkspace,
-                CodeWip: codeWip,
-                Meta: meta,
-                Items: items);
-        });
+        var (normalizedWorkspace, statusFilter) = ValidateQueueListArgs(status, workspaceId);
+        return ExecuteReadTransaction(connection => ReadQueueListSnapshot(connection, normalizedWorkspace, statusFilter));
     }
 
     public Task<WorkQueueListResult> QueueListAsync(
@@ -747,8 +769,10 @@ public sealed partial class SwarmBusStore
         string? workspaceId = null,
         CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(QueueList(status, workspaceId));
+        var (normalizedWorkspace, statusFilter) = ValidateQueueListArgs(status, workspaceId);
+        return ExecuteReadTransactionAsync(
+            connection => ReadQueueListSnapshot(connection, normalizedWorkspace, statusFilter),
+            cancellationToken);
     }
 
     public void SyncMeta(string key, string value, string? workspaceId = null)
@@ -759,71 +783,611 @@ public sealed partial class SwarmBusStore
 
         ExecuteInImmediateTransaction(connection =>
         {
-            var nowIso = FormatUtc(_timeProvider.GetUtcNow());
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO meta (workspace_id, key, value, updated_at_utc)
-                VALUES (@workspaceId, @key, @value, @updatedAt)
-                ON CONFLICT(workspace_id, key) DO UPDATE SET
-                    value = excluded.value,
-                    updated_at_utc = excluded.updated_at_utc
-                """;
-            cmd.Parameters.AddWithValue(ParamWorkspaceId, normalizedWorkspace);
-            cmd.Parameters.AddWithValue(ParamKey, normalizedKey);
-            cmd.Parameters.AddWithValue(ParamValue, value);
-            cmd.Parameters.AddWithValue(ParamUpdatedAt, nowIso);
-            cmd.ExecuteNonQuery();
+            UpsertMetaInTx(connection, normalizedWorkspace, normalizedKey, value, FormatUtc(_timeProvider.GetUtcNow()));
             return 0;
         });
     }
 
     public Task SyncMetaAsync(string key, string value, string? workspaceId = null, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        SyncMeta(key, value, workspaceId);
-        return Task.CompletedTask;
+        var normalizedKey = RequireNonEmpty(key, "bus_queue sync-meta requires non-empty \"meta_key\".", nameof(key));
+        ArgumentNullException.ThrowIfNull(value);
+        var normalizedWorkspace = PathPatternMatcher.NormalizeWorkspaceId(workspaceId);
+
+        return ExecuteInImmediateTransactionAsync(connection =>
+        {
+            UpsertMetaInTx(connection, normalizedWorkspace, normalizedKey, value, FormatUtc(_timeProvider.GetUtcNow()));
+            return 0;
+        }, cancellationToken);
     }
 
     public SwarmBusStatusSnapshot GetStatus(int limit = 15, string? workspaceId = null)
     {
         var clampedLimit = Math.Clamp(limit, 1, 50);
         var (allWorkspaces, normalizedWorkspace) = ResolveWorkspaceFilter(workspaceId);
-
-        return ExecuteInImmediateTransaction(connection =>
-        {
-            var now = _timeProvider.GetUtcNow();
-            PruneExpiredLocksInTx(connection, now);
-
-            var unreadByRecipient = ReadUnreadByRecipient(connection, allWorkspaces, normalizedWorkspace);
-            var totalUnread = ReadTotalUnreadCount(connection, allWorkspaces, normalizedWorkspace);
-            var activeLocks = allWorkspaces
-                ? ReadAllLocks(connection)
-                : ReadLocksInWorkspace(connection, normalizedWorkspace);
-            var recentMessages = ReadRecentMessages(connection, allWorkspaces, normalizedWorkspace, clampedLimit);
-
-            return new SwarmBusStatusSnapshot(
-                GeneratedAtUtc: now,
-                WorkspaceId: normalizedWorkspace,
-                TotalUnread: totalUnread,
-                UnreadByRecipient: unreadByRecipient,
-                ActiveLocks: activeLocks,
-                RecentMessages: recentMessages);
-        });
+        return ExecuteInImmediateTransaction(connection => BuildStatusSnapshotInTx(connection, allWorkspaces, normalizedWorkspace, clampedLimit));
     }
 
     public Task<SwarmBusStatusSnapshot> GetStatusAsync(int limit = 15, string? workspaceId = null, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(GetStatus(limit, workspaceId));
+        var clampedLimit = Math.Clamp(limit, 1, 50);
+        var (allWorkspaces, normalizedWorkspace) = ResolveWorkspaceFilter(workspaceId);
+        return ExecuteInImmediateTransactionAsync(
+            connection => BuildStatusSnapshotInTx(connection, allWorkspaces, normalizedWorkspace, clampedLimit),
+            cancellationToken);
     }
 
-    private sealed record LockUpsertEntry(
+    private sealed record ParsedQueueUpsert(
         string WorkspaceId,
-        string Agent,
-        string PathPattern,
-        int? PrNumber,
-        string ClaimedAtIso,
-        string ExpiresAtIso);
+        int IssueNumber,
+        string? Title,
+        int Priority,
+        string? RiskClass,
+        string Status,
+        bool IsTerminalWithoutTitle);
+
+    private void EnsureDirectoryExists()
+    {
+        var directory = Path.GetDirectoryName(_dbPath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+    }
+
+    private void InitializeDatabaseOnConnection()
+    {
+        using var connection = OpenConnectionCore();
+        ExecuteNonQuery(connection, "PRAGMA journal_mode = WAL;");
+
+        RunInImmediateTransactionCore(connection, () =>
+        {
+            MigrateAndCreateSchema(connection);
+            return 0;
+        });
+    }
+
+    private static string ValidateLegacySourcePath(string legacyDbPath)
+    {
+        var path = RequireNonEmpty(legacyDbPath, "Legacy database path must not be empty.", nameof(legacyDbPath));
+        var fullPath = Path.GetFullPath(path);
+        if (!File.Exists(fullPath))
+        {
+            throw new FileNotFoundException($"Legacy Swarm Bus database not found: {fullPath}", fullPath);
+        }
+
+        return fullPath;
+    }
+
+    private LegacyDbSnapshot ReadLegacySnapshotWithRetry(string fullLegacyPath) =>
+        ExecuteWithBusyRetry(() => ReadLegacySnapshot(fullLegacyPath));
+
+    private static LegacyDbSnapshot ReadLegacySnapshot(string fullLegacyPath)
+    {
+        var cs = new SqliteConnectionStringBuilder
+        {
+            DataSource = fullLegacyPath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Cache = SqliteCacheMode.Default,
+            Pooling = false,
+            DefaultTimeout = 1
+        }.ToString();
+
+        using var conn = new SqliteConnection(cs);
+        conn.Open();
+        ExecuteNonQuery(conn, "PRAGMA busy_timeout = 1000;");
+
+        return RunInReadTransactionCore(conn, () => new LegacyDbSnapshot(
+            Messages: ReadLegacyMessages(conn),
+            Locks: ReadLegacyLocks(conn),
+            ReviewClaims: ReadLegacyReviewClaims(conn),
+            WorkQueueItems: ReadLegacyWorkQueue(conn),
+            MetaEntries: ReadLegacyMeta(conn)));
+    }
+
+    private static List<LegacyMessageRow> ReadLegacyMessages(SqliteConnection conn)
+    {
+        if (!TableExists(conn, TableMessages))
+        {
+            return [];
+        }
+
+        var cols = GetTableColumns(conn, TableMessages);
+        var hasWorkspace = cols.Contains(ColWorkspaceId);
+        var hasState = cols.Contains("state");
+        var hasWakeOk = cols.Contains("wake_ok");
+        var hasWakeState = cols.Contains("wake_state");
+        var hasWakeExpires = cols.Contains("wake_attempt_expires_at_utc");
+
+        var rows = new List<LegacyMessageRow>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, created_at_utc, sender, recipient, topic, body,
+                   pr_number, issue_number, priority, reply_to_id, status, acked_by, acked_at_utc
+            FROM messages
+            ORDER BY id ASC
+            """;
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var id = reader.GetInt64(0);
+            var createdAt = GetStringOrDefault(reader, 1, FormatUtc(DateTimeOffset.UtcNow));
+            var sender = GetStringOrDefault(reader, 2, "unknown");
+            var recipient = GetStringOrDefault(reader, 3, AllRecipient);
+            var topic = GetStringOrDefault(reader, 4, "legacy");
+            var body = GetStringOrDefault(reader, 5, string.Empty);
+            var pr = GetNullableInt32(reader, 6);
+            var issue = GetNullableInt32(reader, 7);
+            var priority = NormalizePriority(GetNullableString(reader, 8));
+            var replyTo = GetNullableInt64(reader, 9);
+            var status = NormalizeMessageStatus(GetNullableString(reader, 10));
+            var ackedBy = GetNullableString(reader, 11);
+            var ackedAt = GetNullableString(reader, 12);
+
+            rows.Add(new LegacyMessageRow(
+                Id: id,
+                WorkspaceId: SwarmBusConstants.DefaultWorkspaceId,
+                CreatedAtUtc: createdAt,
+                Sender: sender,
+                Recipient: recipient,
+                Topic: topic,
+                Body: body,
+                PrNumber: pr,
+                IssueNumber: issue,
+                Priority: priority,
+                ReplyToId: replyTo,
+                Status: status,
+                AckedBy: ackedBy,
+                AckedAtUtc: ackedAt,
+                State: null,
+                WakeOk: null,
+                WakeState: null,
+                WakeAttemptExpiresAtUtc: null));
+        }
+
+        if (!hasWorkspace && !hasState && !hasWakeOk && !hasWakeState && !hasWakeExpires)
+        {
+            return rows;
+        }
+
+        return EnrichLegacyMessageExtras(conn, rows, hasWorkspace, hasState, hasWakeOk, hasWakeState, hasWakeExpires);
+    }
+
+    private static List<LegacyMessageRow> EnrichLegacyMessageExtras(
+        SqliteConnection conn,
+        List<LegacyMessageRow> baseRows,
+        bool hasWorkspace,
+        bool hasState,
+        bool hasWakeOk,
+        bool hasWakeState,
+        bool hasWakeExpires)
+    {
+        var extrasById = new Dictionary<long, (string WorkspaceId, string? State, int? WakeOk, string? WakeState, string? WakeExpires)>();
+        var workspaceById = hasWorkspace ? ReadColumnById(conn, "SELECT id, workspace_id FROM messages") : [];
+        var stateById = hasState ? ReadColumnById(conn, "SELECT id, state FROM messages") : [];
+        var wakeOkById = hasWakeOk ? ReadNullableIntColumnById(conn, "SELECT id, wake_ok FROM messages") : [];
+        var wakeStateById = hasWakeState ? ReadColumnById(conn, "SELECT id, wake_state FROM messages") : [];
+        var wakeExpiresById = hasWakeExpires ? ReadColumnById(conn, "SELECT id, wake_attempt_expires_at_utc FROM messages") : [];
+
+        foreach (var row in baseRows)
+        {
+            var ws = workspaceById.TryGetValue(row.Id, out var rawWs)
+                ? PathPatternMatcher.NormalizeWorkspaceId(rawWs)
+                : SwarmBusConstants.DefaultWorkspaceId;
+            stateById.TryGetValue(row.Id, out var st);
+            int? wakeOk = wakeOkById.TryGetValue(row.Id, out var wOk) ? wOk : null;
+            wakeStateById.TryGetValue(row.Id, out var rawWakeState);
+            wakeExpiresById.TryGetValue(row.Id, out var rawWakeExp);
+            extrasById[row.Id] = (ws, st, wakeOk, NormalizeLegacyWakeState(rawWakeState, wakeOk), rawWakeExp);
+        }
+
+        return baseRows
+            .Select(r =>
+            {
+                var ex = extrasById[r.Id];
+                return r with
+                {
+                    WorkspaceId = ex.WorkspaceId,
+                    State = ex.State,
+                    WakeOk = ex.WakeOk,
+                    WakeState = ex.WakeState,
+                    WakeAttemptExpiresAtUtc = ex.WakeExpires
+                };
+            })
+            .ToList();
+    }
+
+    private static Dictionary<long, string?> ReadColumnById(SqliteConnection conn, string sql)
+    {
+        var map = new Dictionary<long, string?>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            map[reader.GetInt64(0)] = GetNullableString(reader, 1);
+        }
+
+        return map;
+    }
+
+    private static Dictionary<long, int?> ReadNullableIntColumnById(SqliteConnection conn, string sql)
+    {
+        var map = new Dictionary<long, int?>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            map[reader.GetInt64(0)] = GetNullableInt32(reader, 1);
+        }
+
+        return map;
+    }
+
+    private static List<LegacyLockRow> ReadLegacyLocks(SqliteConnection conn)
+    {
+        if (!TableExists(conn, TableLocks))
+        {
+            return [];
+        }
+
+        var hasWorkspace = GetTableColumns(conn, TableLocks).Contains(ColWorkspaceId);
+        var rows = new List<LegacyLockRow>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = hasWorkspace
+            ? "SELECT workspace_id, agent, path_pattern, pr_number, claimed_at_utc, expires_at_utc FROM locks ORDER BY id ASC"
+            : "SELECT 'default', agent, path_pattern, pr_number, claimed_at_utc, expires_at_utc FROM locks ORDER BY id ASC";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var agent = GetNullableString(reader, 1);
+            var pathPattern = GetNullableString(reader, 2);
+            if (string.IsNullOrWhiteSpace(agent) || string.IsNullOrWhiteSpace(pathPattern))
+            {
+                continue;
+            }
+
+            rows.Add(new LegacyLockRow(
+                WorkspaceId: PathPatternMatcher.NormalizeWorkspaceId(GetNullableString(reader, 0)),
+                Agent: agent.Trim(),
+                PathPattern: pathPattern.Trim(),
+                PrNumber: GetNullableInt32(reader, 3),
+                ClaimedAtUtc: GetStringOrDefault(reader, 4, FormatUtc(DateTimeOffset.UtcNow)),
+                ExpiresAtUtc: GetStringOrDefault(reader, 5, FormatUtc(DateTimeOffset.UtcNow))));
+        }
+
+        return rows;
+    }
+
+    private static List<LegacyReviewClaimRow> ReadLegacyReviewClaims(SqliteConnection conn)
+    {
+        if (!TableExists(conn, TableReviewClaims))
+        {
+            return [];
+        }
+
+        var cols = GetTableColumns(conn, TableReviewClaims);
+        var hasWorkspace = cols.Contains(ColWorkspaceId);
+        var hasStatus = cols.Contains(ColStatus);
+        var hasExpires = cols.Contains("expires_at_utc");
+        var hasCompleted = cols.Contains("completed_at_utc");
+
+        var rows = new List<LegacyReviewClaimRow>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = hasWorkspace
+            ? "SELECT id, workspace_id, pr_number, head_sha, role, agent, claimed_at_utc FROM review_claims ORDER BY id ASC"
+            : "SELECT id, 'default', pr_number, head_sha, role, agent, claimed_at_utc FROM review_claims ORDER BY id ASC";
+        var statusById = hasStatus ? ReadColumnById(conn, "SELECT id, status FROM review_claims") : [];
+        var expiresById = hasExpires ? ReadColumnById(conn, "SELECT id, expires_at_utc FROM review_claims") : [];
+        var completedById = hasCompleted ? ReadColumnById(conn, "SELECT id, completed_at_utc FROM review_claims") : [];
+
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var id = reader.GetInt64(0);
+            var prNumber = reader.GetInt32(2);
+            var rawSha = GetNullableString(reader, 3);
+            var rawRole = GetNullableString(reader, 4);
+            var agent = GetNullableString(reader, 5);
+            if (prNumber <= 0 || string.IsNullOrWhiteSpace(rawSha) || !HeadShaRegex().IsMatch(rawSha.Trim()) ||
+                string.IsNullOrWhiteSpace(rawRole) || string.IsNullOrWhiteSpace(agent))
+            {
+                continue;
+            }
+
+            statusById.TryGetValue(id, out var rawStatus);
+            expiresById.TryGetValue(id, out var expiresAt);
+            completedById.TryGetValue(id, out var completedAt);
+
+            rows.Add(new LegacyReviewClaimRow(
+                WorkspaceId: PathPatternMatcher.NormalizeWorkspaceId(GetNullableString(reader, 1)),
+                PrNumber: prNumber,
+                HeadSha: rawSha.Trim().ToLowerInvariant(),
+                Role: rawRole.Trim().ToLowerInvariant(),
+                Agent: agent.Trim(),
+                ClaimedAtUtc: GetStringOrDefault(reader, 6, FormatUtc(DateTimeOffset.UtcNow)),
+                Status: NormalizeLegacyReviewClaimStatus(rawStatus),
+                ExpiresAtUtc: expiresAt,
+                CompletedAtUtc: completedAt));
+        }
+
+        return rows;
+    }
+
+    private static List<LegacyWorkQueueRow> ReadLegacyWorkQueue(SqliteConnection conn)
+    {
+        if (!TableExists(conn, TableWorkQueue))
+        {
+            return [];
+        }
+
+        var hasWorkspace = GetTableColumns(conn, TableWorkQueue).Contains(ColWorkspaceId);
+        var rows = new List<LegacyWorkQueueRow>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = hasWorkspace
+            ? "SELECT workspace_id, issue_number, title, priority, risk_class, status, claimed_by, claimed_at_utc, lease_expires_utc, updated_at_utc FROM work_queue ORDER BY id ASC"
+            : "SELECT 'default', issue_number, title, priority, risk_class, status, claimed_by, claimed_at_utc, lease_expires_utc, updated_at_utc FROM work_queue ORDER BY id ASC";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var issueNumber = reader.GetInt32(1);
+            var title = GetNullableString(reader, 2);
+            if (issueNumber <= 0 || string.IsNullOrWhiteSpace(title))
+            {
+                continue;
+            }
+
+            var normalizedStatus = NormalizeLegacyWorkQueueStatus(GetNullableString(reader, 5));
+            var claimedBy = normalizedStatus == StatusClaimed ? GetNullableString(reader, 6) : null;
+            var claimedAt = normalizedStatus == StatusClaimed ? GetNullableString(reader, 7) : null;
+            var leaseExpires = normalizedStatus == StatusClaimed ? GetNullableString(reader, 8) : null;
+
+            rows.Add(new LegacyWorkQueueRow(
+                WorkspaceId: PathPatternMatcher.NormalizeWorkspaceId(GetNullableString(reader, 0)),
+                IssueNumber: issueNumber,
+                Title: title.Trim(),
+                Priority: reader.IsDBNull(3) ? 2 : reader.GetInt32(3),
+                RiskClass: GetNullableString(reader, 4),
+                Status: normalizedStatus,
+                ClaimedBy: claimedBy,
+                ClaimedAtUtc: claimedAt,
+                LeaseExpiresUtc: leaseExpires,
+                UpdatedAtUtc: GetStringOrDefault(reader, 9, FormatUtc(DateTimeOffset.UtcNow))));
+        }
+
+        return rows;
+    }
+
+    private static List<LegacyMetaRow> ReadLegacyMeta(SqliteConnection conn)
+    {
+        if (!TableExists(conn, TableMeta))
+        {
+            return [];
+        }
+
+        var hasWorkspace = GetTableColumns(conn, TableMeta).Contains(ColWorkspaceId);
+        var rows = new List<LegacyMetaRow>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = hasWorkspace
+            ? "SELECT workspace_id, key, value, updated_at_utc FROM meta"
+            : "SELECT 'default', key, value, updated_at_utc FROM meta";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var key = GetNullableString(reader, 1);
+            var value = GetNullableString(reader, 2);
+            if (string.IsNullOrWhiteSpace(key) || value is null)
+            {
+                continue;
+            }
+
+            rows.Add(new LegacyMetaRow(
+                WorkspaceId: PathPatternMatcher.NormalizeWorkspaceId(GetNullableString(reader, 0)),
+                Key: key.Trim(),
+                Value: value,
+                UpdatedAtUtc: GetStringOrDefault(reader, 3, FormatUtc(DateTimeOffset.UtcNow))));
+        }
+
+        return rows;
+    }
+
+    private static LegacyImportResult WriteLegacyImportInTx(SqliteConnection connection, string sourcePath, LegacyDbSnapshot snapshot)
+    {
+        var msgCount = ImportMessagesInTx(connection, snapshot.Messages);
+        var lockCount = ImportLocksInTx(connection, snapshot.Locks);
+        var claimCount = ImportReviewClaimsInTx(connection, snapshot.ReviewClaims);
+        var queueCount = ImportWorkQueueInTx(connection, snapshot.WorkQueueItems);
+        var metaCount = ImportMetaInTx(connection, snapshot.MetaEntries);
+
+        return new LegacyImportResult(
+            SourcePath: sourcePath,
+            MessagesImported: msgCount,
+            LocksImported: lockCount,
+            ReviewClaimsImported: claimCount,
+            WorkQueueItemsImported: queueCount,
+            MetaEntriesImported: metaCount);
+    }
+
+    private static int ImportMessagesInTx(SqliteConnection connection, IReadOnlyList<LegacyMessageRow> rows)
+    {
+        var imported = 0;
+        foreach (var row in rows)
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO messages (
+                    id, workspace_id, created_at_utc, sender, recipient, topic, body,
+                    pr_number, issue_number, priority, reply_to_id, status,
+                    acked_by, acked_at_utc, state, wake_ok, wake_state, wake_attempt_expires_at_utc)
+                VALUES (
+                    @id, @workspaceId, @createdAt, @sender, @recipient, @topic, @body,
+                    @prNumber, @issueNumber, @priority, @replyToId, @status,
+                    @ackedBy, @ackedAt, @state, @wakeOk, @wakeState, @wakeExpires)
+                ON CONFLICT(id) DO NOTHING
+                """;
+            cmd.Parameters.AddWithValue(ParamId, row.Id);
+            cmd.Parameters.AddWithValue(ParamWorkspaceId, row.WorkspaceId);
+            cmd.Parameters.AddWithValue(ParamCreatedAt, row.CreatedAtUtc);
+            cmd.Parameters.AddWithValue(ParamSender, row.Sender);
+            cmd.Parameters.AddWithValue(ParamRecipient, row.Recipient);
+            cmd.Parameters.AddWithValue(ParamTopic, row.Topic);
+            cmd.Parameters.AddWithValue(ParamBody, row.Body);
+            cmd.Parameters.AddWithValue(ParamPrNumber, (object?)row.PrNumber ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(ParamIssueNumber, (object?)row.IssueNumber ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(ParamPriority, row.Priority);
+            cmd.Parameters.AddWithValue(ParamReplyToId, (object?)row.ReplyToId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(ParamStatus, row.Status);
+            cmd.Parameters.AddWithValue(ParamAckedBy, (object?)row.AckedBy ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(ParamAckedAt, (object?)row.AckedAtUtc ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(ParamState, (object?)row.State ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(ParamWakeOk, (object?)row.WakeOk ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(ParamWakeState, (object?)row.WakeState ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(ParamWakeExpires, (object?)row.WakeAttemptExpiresAtUtc ?? DBNull.Value);
+            imported += cmd.ExecuteNonQuery();
+        }
+
+        return imported;
+    }
+
+    private static int ImportLocksInTx(SqliteConnection connection, IReadOnlyList<LegacyLockRow> rows)
+    {
+        var imported = 0;
+        foreach (var row in rows)
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO locks (workspace_id, agent, path_pattern, pr_number, claimed_at_utc, expires_at_utc)
+                VALUES (@workspaceId, @agent, @pathPattern, @prNumber, @claimedAt, @expiresAt)
+                ON CONFLICT(workspace_id, path_pattern) DO NOTHING
+                """;
+            cmd.Parameters.AddWithValue(ParamWorkspaceId, row.WorkspaceId);
+            cmd.Parameters.AddWithValue(ParamAgent, row.Agent);
+            cmd.Parameters.AddWithValue(ParamPathPattern, row.PathPattern);
+            cmd.Parameters.AddWithValue(ParamPrNumber, (object?)row.PrNumber ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(ParamClaimedAt, row.ClaimedAtUtc);
+            cmd.Parameters.AddWithValue(ParamExpiresAt, row.ExpiresAtUtc);
+            imported += cmd.ExecuteNonQuery();
+        }
+
+        return imported;
+    }
+
+    private static int ImportReviewClaimsInTx(SqliteConnection connection, IReadOnlyList<LegacyReviewClaimRow> rows)
+    {
+        var imported = 0;
+        foreach (var row in rows)
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO review_claims (workspace_id, pr_number, head_sha, role, agent, claimed_at_utc, status, expires_at_utc, completed_at_utc)
+                VALUES (@workspaceId, @prNumber, @headSha, @role, @agent, @claimedAt, @status, @expiresAt, @completedAt)
+                ON CONFLICT(workspace_id, pr_number, head_sha, role) DO NOTHING
+                """;
+            cmd.Parameters.AddWithValue(ParamWorkspaceId, row.WorkspaceId);
+            cmd.Parameters.AddWithValue(ParamPrNumber, row.PrNumber);
+            cmd.Parameters.AddWithValue(ParamHeadSha, row.HeadSha);
+            cmd.Parameters.AddWithValue(ParamRole, row.Role);
+            cmd.Parameters.AddWithValue(ParamAgent, row.Agent);
+            cmd.Parameters.AddWithValue(ParamClaimedAt, row.ClaimedAtUtc);
+            cmd.Parameters.AddWithValue(ParamStatus, row.Status);
+            cmd.Parameters.AddWithValue(ParamExpiresAt, (object?)row.ExpiresAtUtc ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(ParamCompletedAt, (object?)row.CompletedAtUtc ?? DBNull.Value);
+            imported += cmd.ExecuteNonQuery();
+        }
+
+        return imported;
+    }
+
+    private static int ImportWorkQueueInTx(SqliteConnection connection, IReadOnlyList<LegacyWorkQueueRow> rows)
+    {
+        var imported = 0;
+        foreach (var row in rows)
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO work_queue (workspace_id, issue_number, title, priority, risk_class, status, claimed_by, claimed_at_utc, lease_expires_utc, updated_at_utc)
+                VALUES (@workspaceId, @issueNumber, @title, @priority, @riskClass, @status, @claimedBy, @claimedAt, @leaseExpires, @updatedAt)
+                ON CONFLICT(workspace_id, issue_number) DO NOTHING
+                """;
+            cmd.Parameters.AddWithValue(ParamWorkspaceId, row.WorkspaceId);
+            cmd.Parameters.AddWithValue(ParamIssueNumber, row.IssueNumber);
+            cmd.Parameters.AddWithValue(ParamTitle, row.Title);
+            cmd.Parameters.AddWithValue(ParamPriority, row.Priority);
+            cmd.Parameters.AddWithValue(ParamRiskClass, (object?)row.RiskClass ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(ParamStatus, row.Status);
+            cmd.Parameters.AddWithValue(ParamClaimedBy, (object?)row.ClaimedBy ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(ParamClaimedAt, (object?)row.ClaimedAtUtc ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(ParamLeaseExpires, (object?)row.LeaseExpiresUtc ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(ParamUpdatedAt, row.UpdatedAtUtc);
+            imported += cmd.ExecuteNonQuery();
+        }
+
+        return imported;
+    }
+
+    private static int ImportMetaInTx(SqliteConnection connection, IReadOnlyList<LegacyMetaRow> rows)
+    {
+        var imported = 0;
+        foreach (var row in rows)
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO meta (workspace_id, key, value, updated_at_utc)
+                VALUES (@workspaceId, @key, @value, @updatedAt)
+                ON CONFLICT(workspace_id, key) DO NOTHING
+                """;
+            cmd.Parameters.AddWithValue(ParamWorkspaceId, row.WorkspaceId);
+            cmd.Parameters.AddWithValue(ParamKey, row.Key);
+            cmd.Parameters.AddWithValue(ParamValue, row.Value);
+            cmd.Parameters.AddWithValue(ParamUpdatedAt, row.UpdatedAtUtc);
+            imported += cmd.ExecuteNonQuery();
+        }
+
+        return imported;
+    }
+
+    private static string NormalizeMessageStatus(string? rawStatus)
+    {
+        var candidate = rawStatus?.Trim().ToLowerInvariant();
+        return candidate is StatusUnread or StatusAcked ? candidate : StatusUnread;
+    }
+
+    private static string? NormalizeLegacyWakeState(string? rawWakeState, int? wakeOk)
+    {
+        var candidate = rawWakeState?.Trim().ToLowerInvariant();
+        if (candidate is WakeStatePending or WakeStateOk or WakeStateFailed)
+        {
+            return candidate;
+        }
+
+        return wakeOk switch
+        {
+            1 => WakeStateOk,
+            0 => WakeStateFailed,
+            _ => null
+        };
+    }
+
+    private static string NormalizeLegacyReviewClaimStatus(string? rawStatus)
+    {
+        var candidate = rawStatus?.Trim().ToLowerInvariant();
+        return candidate is StatusClaimed or StatusCompleted or StatusReleased
+            ? candidate
+            : StatusReleased;
+    }
+
+    private static string NormalizeLegacyWorkQueueStatus(string? rawStatus)
+    {
+        var candidate = rawStatus?.Trim().ToLowerInvariant();
+        return candidate switch
+        {
+            StatusQueued or StatusClaimed or StatusDone or StatusRemoved => candidate,
+            "completed" or "closed" => StatusDone,
+            "deleted" or "cancelled" => StatusRemoved,
+            _ => StatusQueued
+        };
+    }
 
     private static SendTxInput BuildSendTxInput(SwarmSendRequest request)
     {
@@ -852,56 +1416,38 @@ public sealed partial class SwarmBusStore
             WakeTargetMatches: wakeTargetMatches);
     }
 
-    private async Task<SwarmSendResult> HandleRetryWakeAsync(
-        SendTxResult txResult,
-        SendTxInput input,
-        string? rawCodexThreadId,
-        CancellationToken cancellationToken)
-    {
-        if (_wakeDispatcher is null)
-        {
-            return new SwarmSendResult(
-                Ok: true,
-                Id: txResult.Id,
-                WorkspaceId: input.WorkspaceId,
-                State: input.State,
-                Deduplicated: true,
-                WakeRetried: true,
-                WakeInProgress: true,
-                WakeState: WakeStatePending);
-        }
+    private SwarmSendResult RunWakeSync(SendTxResult txResult, SendTxInput input, string? rawCodexThreadId, bool isRetry) =>
+        isRetry
+            ? Task.Run(() => HandleRetryWakeAsync(txResult, input, rawCodexThreadId, CancellationToken.None)).GetAwaiter().GetResult()
+            : Task.Run(() => HandleInsertedMessageAsync(txResult, input, rawCodexThreadId, CancellationToken.None)).GetAwaiter().GetResult();
 
-        var context = BuildWakeContext(txResult.Id, input, txResult.Body ?? input.Body, rawCodexThreadId);
-        var wakeRes = await DispatchWakeAsync(context, cancellationToken).ConfigureAwait(false);
-        return new SwarmSendResult(
+    private static SwarmSendResult CreateDeduplicatedSendResult(SendTxResult txResult, SendTxInput input) =>
+        new(
+            Ok: true,
+            Id: txResult.Id,
+            WorkspaceId: input.WorkspaceId,
+            State: input.State,
+            Deduplicated: true,
+            WakeInProgress: txResult.WakeInProgress,
+            WakeState: txResult.WakeState);
+
+    private static SwarmSendResult CreatePendingRetrySendResult(SendTxResult txResult, SendTxInput input) =>
+        new(
             Ok: true,
             Id: txResult.Id,
             WorkspaceId: input.WorkspaceId,
             State: input.State,
             Deduplicated: true,
             WakeRetried: true,
-            WakeState: wakeRes.Ok ? WakeStateOk : WakeStateFailed,
-            WakeResults: [wakeRes]);
-    }
+            WakeInProgress: true,
+            WakeState: WakeStatePending);
 
-    private async Task<SwarmSendResult> HandleInsertedMessageAsync(
+    private static SwarmSendResult CreateInsertedSendResult(
         SendTxResult txResult,
         SendTxInput input,
-        string? rawCodexThreadId,
-        CancellationToken cancellationToken)
-    {
-        List<SwarmWakeResult> wakeResults = [];
-        string? finalWakeState = input.WakeTargetMatches ? WakeStatePending : null;
-
-        if (input.WakeTargetMatches && _wakeDispatcher is not null)
-        {
-            var context = BuildWakeContext(txResult.Id, input, input.Body, rawCodexThreadId);
-            var wakeRes = await DispatchWakeAsync(context, cancellationToken).ConfigureAwait(false);
-            wakeResults = [wakeRes];
-            finalWakeState = wakeRes.Ok ? WakeStateOk : WakeStateFailed;
-        }
-
-        return new SwarmSendResult(
+        IReadOnlyList<SwarmWakeResult> wakeResults,
+        string? wakeState) =>
+        new(
             Ok: true,
             Id: txResult.Id,
             WorkspaceId: input.WorkspaceId,
@@ -913,8 +1459,50 @@ public sealed partial class SwarmBusStore
             IssueNumber: input.IssueNumber,
             Priority: input.Priority,
             State: input.State,
-            WakeState: finalWakeState,
+            WakeState: wakeState,
             WakeResults: wakeResults);
+
+    private async Task<SwarmSendResult> HandleRetryWakeAsync(
+        SendTxResult txResult,
+        SendTxInput input,
+        string? rawCodexThreadId,
+        CancellationToken cancellationToken)
+    {
+        if (_wakeDispatcher is null)
+        {
+            return CreatePendingRetrySendResult(txResult, input);
+        }
+
+        var context = BuildWakeContext(txResult.Id, input, txResult.Body ?? input.Body, rawCodexThreadId);
+        var (wakeRes, fenceApplied) = await DispatchWakeAsync(context, txResult.WakeLeaseToken!, cancellationToken).ConfigureAwait(false);
+        var finalState = fenceApplied ? (wakeRes.Ok ? WakeStateOk : WakeStateFailed) : WakeStatePending;
+
+        return new SwarmSendResult(
+            Ok: true,
+            Id: txResult.Id,
+            WorkspaceId: input.WorkspaceId,
+            State: input.State,
+            Deduplicated: true,
+            WakeRetried: true,
+            WakeState: finalState,
+            WakeResults: [wakeRes]);
+    }
+
+    private async Task<SwarmSendResult> HandleInsertedMessageAsync(
+        SendTxResult txResult,
+        SendTxInput input,
+        string? rawCodexThreadId,
+        CancellationToken cancellationToken)
+    {
+        if (!input.WakeTargetMatches || _wakeDispatcher is null)
+        {
+            return CreateInsertedSendResult(txResult, input, [], input.WakeTargetMatches ? WakeStatePending : null);
+        }
+
+        var context = BuildWakeContext(txResult.Id, input, input.Body, rawCodexThreadId);
+        var (wakeRes, fenceApplied) = await DispatchWakeAsync(context, txResult.WakeLeaseToken!, cancellationToken).ConfigureAwait(false);
+        var finalWakeState = fenceApplied ? (wakeRes.Ok ? WakeStateOk : WakeStateFailed) : WakeStatePending;
+        return CreateInsertedSendResult(txResult, input, [wakeRes], finalWakeState);
     }
 
     private static SwarmWakeContext BuildWakeContext(
@@ -937,6 +1525,49 @@ public sealed partial class SwarmBusStore
             Body: effectiveBody,
             CodexThreadId: codexThreadId,
             FormattedMessage: wakeMsg);
+    }
+
+    private static (string Agent, int Limit, bool AllWorkspaces, string WorkspaceId, bool AllRecipients) NormalizeInboxQuery(
+        string agent,
+        int limit,
+        string? workspaceId)
+    {
+        var normalizedAgent = string.IsNullOrWhiteSpace(agent) ? AllRecipient : agent.Trim();
+        var clampedLimit = Math.Clamp(limit, 1, 100);
+        var (allWorkspaces, normalizedWorkspace) = ResolveWorkspaceFilter(workspaceId);
+        var includeAllRecipients = normalizedAgent.Equals(AllRecipient, StringComparison.OrdinalIgnoreCase) ||
+                                   normalizedAgent == AllWildcard;
+        return (normalizedAgent, clampedLimit, allWorkspaces, normalizedWorkspace, includeAllRecipients);
+    }
+
+    private static List<SwarmMessageEnvelope> ReadInboxMessages(
+        SqliteConnection connection,
+        bool allWorkspaces,
+        string workspaceId,
+        bool includeAllRecipients,
+        string normalizedAgent,
+        bool unreadOnly,
+        int limit)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, workspace_id, created_at_utc, sender, recipient, topic, body,
+                   pr_number, issue_number, priority, reply_to_id, status,
+                   acked_by, acked_at_utc, state, wake_ok, wake_state, wake_attempt_expires_at_utc
+            FROM messages
+            WHERE (@allWorkspaces = 1 OR workspace_id = @workspaceId)
+              AND (@allRecipients = 1 OR lower(recipient) = lower(@agent) OR lower(recipient) = 'all')
+              AND (@unreadOnly = 0 OR status = 'unread')
+            ORDER BY id DESC
+            LIMIT @limit
+            """;
+        cmd.Parameters.AddWithValue(ParamAllWorkspaces, allWorkspaces ? 1 : 0);
+        cmd.Parameters.AddWithValue(ParamWorkspaceId, workspaceId);
+        cmd.Parameters.AddWithValue(ParamAllRecipients, includeAllRecipients ? 1 : 0);
+        cmd.Parameters.AddWithValue(ParamAgent, normalizedAgent);
+        cmd.Parameters.AddWithValue(ParamUnreadOnly, unreadOnly ? 1 : 0);
+        cmd.Parameters.AddWithValue(ParamLimit, limit);
+        return ReadMessages(cmd);
     }
 
     private (string WorkspaceId, string OrigSender, string OrigTopic, int? PrNumber, int? IssueNumber, DateTimeOffset AckedAt) MarkMessageAckedInTx(
@@ -978,6 +1609,123 @@ public sealed partial class SwarmBusStore
         updateCmd.ExecuteNonQuery();
 
         return (workspaceId, origSender, origTopic, prNumber, issueNumber, ackedAt);
+    }
+
+    private static (string Agent, string WorkspaceId, List<string> CleanPaths, int TtlMinutes) ValidateLockClaimRequest(LockClaimRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var agent = RequireNonEmpty(request.Agent, "bus_locks claim requires non-empty \"agent\".", nameof(request));
+        var workspaceId = PathPatternMatcher.NormalizeWorkspaceId(request.WorkspaceId);
+        var cleanPaths = (request.Paths ?? [])
+            .Select(PathPatternMatcher.CanonicalizeForStorage)
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (cleanPaths.Count == 0)
+        {
+            throw new ArgumentException("bus_locks claim requires non-empty \"paths\".", nameof(request));
+        }
+
+        var ttlMinutes = Math.Clamp(request.TtlMinutes, SwarmBusConstants.MinLockTtlMinutes, SwarmBusConstants.MaxLockTtlMinutes);
+        return (agent, workspaceId, cleanPaths, ttlMinutes);
+    }
+
+    private LockClaimResult ClaimLocksInTx(
+        SqliteConnection connection,
+        string agent,
+        string workspaceId,
+        List<string> cleanPaths,
+        int? prNumber,
+        int ttlMinutes)
+    {
+        var now = _timeProvider.GetUtcNow();
+        var nowIso = FormatUtc(now);
+        var expiresIso = FormatUtc(now.AddMinutes(ttlMinutes));
+
+        PruneExpiredLocksInTx(connection, now);
+
+        var existingLocks = ReadLocksInWorkspace(connection, workspaceId);
+        var conflicts = FindLockConflicts(cleanPaths, existingLocks, agent, workspaceId);
+        if (conflicts.Count > 0)
+        {
+            return new LockClaimResult(
+                Ok: false,
+                WorkspaceId: workspaceId,
+                ClaimedPaths: [],
+                Conflicts: conflicts,
+                Locks: existingLocks);
+        }
+
+        foreach (var reqPath in cleanPaths)
+        {
+            UpsertLockPathInTx(connection, existingLocks, new LockUpsertEntry(
+                WorkspaceId: workspaceId,
+                Agent: agent,
+                PathPattern: reqPath,
+                PrNumber: prNumber,
+                ClaimedAtIso: nowIso,
+                ExpiresAtIso: expiresIso));
+        }
+
+        return new LockClaimResult(
+            Ok: true,
+            WorkspaceId: workspaceId,
+            ClaimedPaths: cleanPaths,
+            Conflicts: [],
+            Locks: ReadLocksInWorkspace(connection, workspaceId));
+    }
+
+    private static (string? Agent, HashSet<string> CleanPaths, string WorkspaceId) ValidateLockReleaseRequest(LockReleaseRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var agent = string.IsNullOrWhiteSpace(request.Agent) ? null : request.Agent.Trim();
+        var cleanPaths = (request.Paths ?? [])
+            .Select(PathPatternMatcher.NormalizePath)
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .ToHashSet(StringComparer.Ordinal);
+        var workspaceId = PathPatternMatcher.NormalizeWorkspaceId(request.WorkspaceId);
+
+        if (agent is null && cleanPaths.Count == 0 && !request.PrNumber.HasValue)
+        {
+            throw new ArgumentException("bus_locks release requires \"agent\", \"paths\", or \"prNumber\".", nameof(request));
+        }
+
+        return (agent, cleanPaths, workspaceId);
+    }
+
+    private LockReleaseResult ReleaseLocksInTx(
+        SqliteConnection connection,
+        string? agent,
+        HashSet<string> cleanPaths,
+        int? prNumber,
+        string workspaceId)
+    {
+        PruneExpiredLocksInTx(connection, _timeProvider.GetUtcNow());
+
+        var candidates = ReadLocksInWorkspace(connection, workspaceId);
+        var idsToDelete = candidates
+            .Where(c => MatchesReleaseFilter(c, agent, prNumber, cleanPaths))
+            .Select(c => c.Id)
+            .ToList();
+
+        DeleteLocksByIdInTx(connection, idsToDelete);
+
+        return new LockReleaseResult(
+            Ok: true,
+            WorkspaceId: workspaceId,
+            RemovedCount: idsToDelete.Count,
+            RemainingLocks: ReadLocksInWorkspace(connection, workspaceId));
+    }
+
+    private IReadOnlyList<PathLockLease> ListLocksInTx(SqliteConnection connection, bool allWorkspaces, string normalizedWorkspace)
+    {
+        PruneExpiredLocksInTx(connection, _timeProvider.GetUtcNow());
+        return allWorkspaces
+            ? ReadAllLocks(connection)
+            : ReadLocksInWorkspace(connection, normalizedWorkspace);
     }
 
     private static List<LockConflict> FindLockConflicts(
@@ -1026,7 +1774,7 @@ public sealed partial class SwarmBusStore
             """;
         upsert.Parameters.AddWithValue(ParamWorkspaceId, entry.WorkspaceId);
         upsert.Parameters.AddWithValue(ParamAgent, entry.Agent);
-        upsert.Parameters.AddWithValue("@pathPattern", entry.PathPattern);
+        upsert.Parameters.AddWithValue(ParamPathPattern, entry.PathPattern);
         upsert.Parameters.AddWithValue(ParamPrNumber, (object?)entry.PrNumber ?? DBNull.Value);
         upsert.Parameters.AddWithValue(ParamClaimedAt, entry.ClaimedAtIso);
         upsert.Parameters.AddWithValue(ParamExpiresAt, entry.ExpiresAtIso);
@@ -1061,6 +1809,45 @@ public sealed partial class SwarmBusStore
             delCmd.Parameters.AddWithValue(ParamId, id);
             delCmd.ExecuteNonQuery();
         }
+    }
+
+    private static ParsedQueueUpsert ValidateQueueUpsertRequest(WorkQueueUpsertRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.IssueNumber <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "bus_queue upsert requires positive integer \"issue_number\".");
+        }
+
+        var workspaceId = PathPatternMatcher.NormalizeWorkspaceId(request.WorkspaceId);
+        var incomingStatus = string.IsNullOrWhiteSpace(request.Status) ? StatusQueued : request.Status.Trim().ToLowerInvariant();
+        if (!SwarmBusConstants.ValidQueueStatuses.Contains(incomingStatus))
+        {
+            throw new ArgumentException($"Invalid work_queue status '{incomingStatus}'. Expected: queued, claimed, done, removed.", nameof(request));
+        }
+
+        var rawTitle = string.IsNullOrWhiteSpace(request.Title) ? null : request.Title.Trim();
+        var isTerminalWithoutTitle = rawTitle is null && incomingStatus is StatusDone or StatusRemoved;
+        if (rawTitle is null && !isTerminalWithoutTitle)
+        {
+            throw new ArgumentException("bus_queue upsert requires non-empty \"title\".", nameof(request));
+        }
+
+        var priority = request.Priority ?? 2;
+        var riskClass = string.IsNullOrWhiteSpace(request.RiskClass) ? null : request.RiskClass.Trim().ToUpperInvariant();
+        return new ParsedQueueUpsert(workspaceId, request.IssueNumber, rawTitle, priority, riskClass, incomingStatus, isTerminalWithoutTitle);
+    }
+
+    private WorkQueueMutationResult? ExecuteQueueUpsertInTx(SqliteConnection connection, ParsedQueueUpsert parsed)
+    {
+        var nowIso = FormatUtc(_timeProvider.GetUtcNow());
+        if (parsed.IsTerminalWithoutTitle)
+        {
+            return TryMarkDoneOrRemovedWithoutTitleInTx(connection, parsed.WorkspaceId, parsed.IssueNumber, parsed.Status, nowIso);
+        }
+
+        return UpsertQueueItemInTx(connection, parsed, nowIso);
     }
 
     private static WorkQueueMutationResult? TryMarkDoneOrRemovedWithoutTitleInTx(
@@ -1103,12 +1890,7 @@ public sealed partial class SwarmBusStore
 
     private static WorkQueueMutationResult UpsertQueueItemInTx(
         SqliteConnection connection,
-        string workspaceId,
-        int issueNumber,
-        string title,
-        int priority,
-        string? riskClass,
-        string incomingStatus,
+        ParsedQueueUpsert parsed,
         string nowIso)
     {
         using var upsertCmd = connection.CreateCommand();
@@ -1129,22 +1911,173 @@ public sealed partial class SwarmBusStore
                 lease_expires_utc = CASE WHEN excluded.status IN ('done', 'removed') THEN NULL ELSE work_queue.lease_expires_utc END,
                 updated_at_utc = excluded.updated_at_utc
             """;
-        upsertCmd.Parameters.AddWithValue(ParamWorkspaceId, workspaceId);
-        upsertCmd.Parameters.AddWithValue(ParamIssueNumber, issueNumber);
-        upsertCmd.Parameters.AddWithValue("@title", title);
-        upsertCmd.Parameters.AddWithValue("@priority", priority);
-        upsertCmd.Parameters.AddWithValue("@riskClass", (object?)riskClass ?? DBNull.Value);
-        upsertCmd.Parameters.AddWithValue(ParamStatus, incomingStatus);
+        upsertCmd.Parameters.AddWithValue(ParamWorkspaceId, parsed.WorkspaceId);
+        upsertCmd.Parameters.AddWithValue(ParamIssueNumber, parsed.IssueNumber);
+        upsertCmd.Parameters.AddWithValue(ParamTitle, parsed.Title!);
+        upsertCmd.Parameters.AddWithValue(ParamPriority, parsed.Priority);
+        upsertCmd.Parameters.AddWithValue(ParamRiskClass, (object?)parsed.RiskClass ?? DBNull.Value);
+        upsertCmd.Parameters.AddWithValue(ParamStatus, parsed.Status);
         upsertCmd.Parameters.AddWithValue(ParamUpdatedAt, nowIso);
         upsertCmd.ExecuteNonQuery();
 
         return new WorkQueueMutationResult(
             Ok: true,
             Action: ActionUpsert,
-            WorkspaceId: workspaceId,
-            IssueNumber: issueNumber,
+            WorkspaceId: parsed.WorkspaceId,
+            IssueNumber: parsed.IssueNumber,
             Changed: true,
-            Item: ReadWorkQueueItem(connection, workspaceId, issueNumber));
+            Item: ReadWorkQueueItem(connection, parsed.WorkspaceId, parsed.IssueNumber));
+    }
+
+    private WorkQueueNextResult ExecuteQueueNextInTx(SqliteConnection connection, string normalizedAgent, string normalizedWorkspace)
+    {
+        var now = _timeProvider.GetUtcNow();
+        var nowIso = FormatUtc(now);
+        var leaseExpiresIso = FormatUtc(now.AddHours(SwarmBusConstants.DefaultQueueLeaseHours));
+
+        var resumed = TryResumeOwnClaimInTx(connection, normalizedWorkspace, normalizedAgent, now, nowIso, leaseExpiresIso);
+        if (resumed is not null)
+        {
+            return resumed;
+        }
+
+        var (baseCodeWip, activeClaimedCodeCount, effectiveCodeWip) = ComputeEffectiveCodeWipInTx(connection, normalizedWorkspace, now);
+        var restrictToLowRisk = effectiveCodeWip >= SwarmBusConstants.CodeWipClaimLimit;
+        var candidate = SelectNextCandidate(connection, normalizedWorkspace, now, restrictToLowRisk);
+
+        if (candidate is null)
+        {
+            return new WorkQueueNextResult(
+                Ok: true,
+                WorkspaceId: normalizedWorkspace,
+                Resumed: false,
+                CodeWip: baseCodeWip,
+                ActiveClaimedCodeCount: activeClaimedCodeCount,
+                EffectiveCodeWip: effectiveCodeWip,
+                Item: null,
+                Reason: restrictToLowRisk
+                    ? $"effective_code_wip ({effectiveCodeWip}) >= {SwarmBusConstants.CodeWipClaimLimit} and no eligible L-class work item is queued."
+                    : "No queued or expired-lease work items available.");
+        }
+
+        var claimed = ClaimQueueItemInTx(connection, candidate.Id, normalizedAgent, nowIso, leaseExpiresIso);
+        return new WorkQueueNextResult(
+            Ok: true,
+            WorkspaceId: normalizedWorkspace,
+            Resumed: false,
+            CodeWip: baseCodeWip,
+            ActiveClaimedCodeCount: activeClaimedCodeCount,
+            EffectiveCodeWip: effectiveCodeWip,
+            Item: claimed);
+    }
+
+    private static (string WorkspaceId, string? Agent) ValidateQueueReleaseArgs(int issueNumber, string? agent, string? workspaceId)
+    {
+        if (issueNumber <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(issueNumber), "bus_queue release requires positive integer \"issue_number\".");
+        }
+
+        return (PathPatternMatcher.NormalizeWorkspaceId(workspaceId), string.IsNullOrWhiteSpace(agent) ? null : agent.Trim());
+    }
+
+    private WorkQueueMutationResult ExecuteQueueReleaseInTx(
+        SqliteConnection connection,
+        int issueNumber,
+        string? normalizedAgent,
+        string normalizedWorkspace)
+    {
+        var nowIso = FormatUtc(_timeProvider.GetUtcNow());
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE work_queue
+            SET status = 'queued', claimed_by = NULL, claimed_at_utc = NULL, lease_expires_utc = NULL, updated_at_utc = @updatedAt
+            WHERE workspace_id = @workspaceId
+              AND issue_number = @issueNumber
+              AND status = 'claimed'
+              AND (@agent IS NULL OR lower(claimed_by) = lower(@agent))
+            """;
+        cmd.Parameters.AddWithValue(ParamUpdatedAt, nowIso);
+        cmd.Parameters.AddWithValue(ParamWorkspaceId, normalizedWorkspace);
+        cmd.Parameters.AddWithValue(ParamIssueNumber, issueNumber);
+        cmd.Parameters.AddWithValue(ParamAgent, (object?)normalizedAgent ?? DBNull.Value);
+
+        var changed = cmd.ExecuteNonQuery() > 0;
+        return new WorkQueueMutationResult(
+            Ok: true,
+            Action: ActionRelease,
+            WorkspaceId: normalizedWorkspace,
+            IssueNumber: issueNumber,
+            Changed: changed,
+            Item: ReadWorkQueueItem(connection, normalizedWorkspace, issueNumber));
+    }
+
+    private WorkQueueMutationResult ExecuteQueueDoneInTx(SqliteConnection connection, int issueNumber, string normalizedWorkspace)
+    {
+        var nowIso = FormatUtc(_timeProvider.GetUtcNow());
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE work_queue
+            SET status = 'done', lease_expires_utc = NULL, updated_at_utc = @updatedAt
+            WHERE workspace_id = @workspaceId AND issue_number = @issueNumber
+            """;
+        cmd.Parameters.AddWithValue(ParamUpdatedAt, nowIso);
+        cmd.Parameters.AddWithValue(ParamWorkspaceId, normalizedWorkspace);
+        cmd.Parameters.AddWithValue(ParamIssueNumber, issueNumber);
+
+        var changed = cmd.ExecuteNonQuery() > 0;
+        return new WorkQueueMutationResult(
+            Ok: true,
+            Action: StatusDone,
+            WorkspaceId: normalizedWorkspace,
+            IssueNumber: issueNumber,
+            Changed: changed,
+            Item: ReadWorkQueueItem(connection, normalizedWorkspace, issueNumber));
+    }
+
+    private static (string WorkspaceId, string? StatusFilter) ValidateQueueListArgs(string? status, string? workspaceId)
+    {
+        var normalizedWorkspace = PathPatternMatcher.NormalizeWorkspaceId(workspaceId);
+        var statusFilter = string.IsNullOrWhiteSpace(status) ? null : status.Trim().ToLowerInvariant();
+        if (statusFilter is not null && !SwarmBusConstants.ValidQueueStatuses.Contains(statusFilter))
+        {
+            throw new ArgumentException($"Invalid status '{statusFilter}'. Expected: queued, claimed, done, removed.", nameof(status));
+        }
+
+        return (normalizedWorkspace, statusFilter);
+    }
+
+    private static WorkQueueListResult ReadQueueListSnapshot(SqliteConnection connection, string normalizedWorkspace, string? statusFilter)
+    {
+        var items = ReadWorkQueueItems(connection, normalizedWorkspace, statusFilter);
+        var meta = ReadMetaMap(connection, normalizedWorkspace);
+        var codeWip = meta.TryGetValue(CodeWipMetaKey, out var rawWip) && int.TryParse(rawWip, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : 0;
+
+        return new WorkQueueListResult(
+            Ok: true,
+            WorkspaceId: normalizedWorkspace,
+            CodeWip: codeWip,
+            Meta: meta,
+            Items: items);
+    }
+
+    private static void UpsertMetaInTx(SqliteConnection connection, string workspaceId, string key, string value, string nowIso)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO meta (workspace_id, key, value, updated_at_utc)
+            VALUES (@workspaceId, @key, @value, @updatedAt)
+            ON CONFLICT(workspace_id, key) DO UPDATE SET
+                value = excluded.value,
+                updated_at_utc = excluded.updated_at_utc
+            """;
+        cmd.Parameters.AddWithValue(ParamWorkspaceId, workspaceId);
+        cmd.Parameters.AddWithValue(ParamKey, key);
+        cmd.Parameters.AddWithValue(ParamValue, value);
+        cmd.Parameters.AddWithValue(ParamUpdatedAt, nowIso);
+        cmd.ExecuteNonQuery();
     }
 
     private static WorkQueueNextResult? TryResumeOwnClaimInTx(
@@ -1174,7 +2107,7 @@ public sealed partial class SwarmBusStore
             SET lease_expires_utc = @leaseExpires, updated_at_utc = @updatedAt
             WHERE id = @id
             """;
-        renewCmd.Parameters.AddWithValue("@leaseExpires", leaseExpiresIso);
+        renewCmd.Parameters.AddWithValue(ParamLeaseExpires, leaseExpiresIso);
         renewCmd.Parameters.AddWithValue(ParamUpdatedAt, nowIso);
         renewCmd.Parameters.AddWithValue(ParamId, ownActive.Id);
         renewCmd.ExecuteNonQuery();
@@ -1245,12 +2178,30 @@ public sealed partial class SwarmBusStore
             """;
         claimCmd.Parameters.AddWithValue(ParamAgent, agent);
         claimCmd.Parameters.AddWithValue(ParamClaimedAt, nowIso);
-        claimCmd.Parameters.AddWithValue("@leaseExpires", leaseExpiresIso);
+        claimCmd.Parameters.AddWithValue(ParamLeaseExpires, leaseExpiresIso);
         claimCmd.Parameters.AddWithValue(ParamUpdatedAt, nowIso);
         claimCmd.Parameters.AddWithValue(ParamId, itemId);
         claimCmd.ExecuteNonQuery();
 
         return ReadWorkQueueItemById(connection, itemId);
+    }
+
+    private SwarmBusStatusSnapshot BuildStatusSnapshotInTx(
+        SqliteConnection connection,
+        bool allWorkspaces,
+        string normalizedWorkspace,
+        int clampedLimit)
+    {
+        var now = _timeProvider.GetUtcNow();
+        PruneExpiredLocksInTx(connection, now);
+
+        return new SwarmBusStatusSnapshot(
+            GeneratedAtUtc: now,
+            WorkspaceId: normalizedWorkspace,
+            TotalUnread: ReadTotalUnreadCount(connection, allWorkspaces, normalizedWorkspace),
+            UnreadByRecipient: ReadUnreadByRecipient(connection, allWorkspaces, normalizedWorkspace),
+            ActiveLocks: allWorkspaces ? ReadAllLocks(connection) : ReadLocksInWorkspace(connection, normalizedWorkspace),
+            RecentMessages: ReadRecentMessages(connection, allWorkspaces, normalizedWorkspace, clampedLimit));
     }
 
     private static List<RecipientUnreadCount> ReadUnreadByRecipient(SqliteConnection connection, bool allWorkspaces, string workspaceId)
@@ -1321,40 +2272,62 @@ public sealed partial class SwarmBusStore
 
     private ReviewClaimResult ClaimReviewSlot(ReviewClaimRequest request, string workspaceId)
     {
+        var (agent, prNumber, headSha, role, ttlMinutes) = ValidateClaimReviewSlotRequest(request);
+        return ExecuteInImmediateTransaction(connection => ClaimReviewSlotInTx(connection, workspaceId, agent, prNumber, headSha, role, ttlMinutes));
+    }
+
+    private Task<ReviewClaimResult> ClaimReviewSlotAsync(ReviewClaimRequest request, string workspaceId, CancellationToken cancellationToken)
+    {
+        var (agent, prNumber, headSha, role, ttlMinutes) = ValidateClaimReviewSlotRequest(request);
+        return ExecuteInImmediateTransactionAsync(
+            connection => ClaimReviewSlotInTx(connection, workspaceId, agent, prNumber, headSha, role, ttlMinutes),
+            cancellationToken);
+    }
+
+    private static (string Agent, int PrNumber, string HeadSha, string Role, int TtlMinutes) ValidateClaimReviewSlotRequest(ReviewClaimRequest request)
+    {
         var agent = RequireNonEmpty(request.Agent, "bus_review_claim claim requires non-empty \"agent\".", nameof(request));
         var (prNumber, headSha, role) = ValidateReviewClaimTarget(request);
         var rawTtl = request.TtlMinutes ?? SwarmBusConstants.DefaultReviewClaimTtlMinutes;
         var ttlMinutes = Math.Clamp(rawTtl, SwarmBusConstants.MinReviewClaimTtlMinutes, SwarmBusConstants.MaxReviewClaimTtlMinutes);
+        return (agent, prNumber, headSha, role, ttlMinutes);
+    }
 
-        return ExecuteInImmediateTransaction(connection =>
+    private ReviewClaimResult ClaimReviewSlotInTx(
+        SqliteConnection connection,
+        string workspaceId,
+        string agent,
+        int prNumber,
+        string headSha,
+        string role,
+        int ttlMinutes)
+    {
+        var now = _timeProvider.GetUtcNow();
+        var claimedAtIso = FormatUtc(now);
+        var expiresAtIso = FormatUtc(now.AddMinutes(ttlMinutes));
+
+        var existing = ReadReviewClaim(connection, workspaceId, prNumber, headSha, role);
+        if (existing is null)
         {
-            var now = _timeProvider.GetUtcNow();
-            var claimedAtIso = FormatUtc(now);
-            var expiresAtIso = FormatUtc(now.AddMinutes(ttlMinutes));
+            return InsertNewReviewClaimInTx(connection, workspaceId, prNumber, headSha, role, agent, claimedAtIso, expiresAtIso);
+        }
 
-            var existing = ReadReviewClaim(connection, workspaceId, prNumber, headSha, role);
-            if (existing is null)
-            {
-                return InsertNewReviewClaimInTx(connection, workspaceId, prNumber, headSha, role, agent, claimedAtIso, expiresAtIso);
-            }
+        if (string.Equals(existing.Status, StatusCompleted, StringComparison.Ordinal))
+        {
+            return CreateBlockedReviewClaimResult(existing, workspaceId, "already_completed", StatusCompleted, alreadyClaimedBySelf: null);
+        }
 
-            if (string.Equals(existing.Status, StatusCompleted, StringComparison.Ordinal))
-            {
-                return CreateBlockedReviewClaimResult(existing, workspaceId, "already_completed", StatusCompleted, alreadyClaimedBySelf: null);
-            }
+        if (IsActiveReviewClaim(existing, now))
+        {
+            return CreateBlockedReviewClaimResult(
+                existing,
+                workspaceId,
+                "already_claimed",
+                StatusClaimed,
+                alreadyClaimedBySelf: existing.Agent.Equals(agent, StringComparison.OrdinalIgnoreCase));
+        }
 
-            if (IsActiveReviewClaim(existing, now))
-            {
-                return CreateBlockedReviewClaimResult(
-                    existing,
-                    workspaceId,
-                    "already_claimed",
-                    StatusClaimed,
-                    alreadyClaimedBySelf: existing.Agent.Equals(agent, StringComparison.OrdinalIgnoreCase));
-            }
-
-            return ReclaimReviewSlotInTx(connection, existing, workspaceId, headSha, agent, claimedAtIso, expiresAtIso);
-        });
+        return ReclaimReviewSlotInTx(connection, existing, workspaceId, headSha, agent, claimedAtIso, expiresAtIso);
     }
 
     private static bool IsActiveReviewClaim(ReviewClaim existing, DateTimeOffset now) =>
@@ -1463,61 +2436,78 @@ public sealed partial class SwarmBusStore
 
     private ReviewClaimResult CompleteReviewSlot(ReviewClaimRequest request, string workspaceId)
     {
+        var (agent, prNumber, headSha, role) = ValidateHolderMutationRequest(request);
+        return ExecuteInImmediateTransaction(connection => CompleteReviewSlotInTx(connection, workspaceId, agent, prNumber, headSha, role));
+    }
+
+    private Task<ReviewClaimResult> CompleteReviewSlotAsync(ReviewClaimRequest request, string workspaceId, CancellationToken cancellationToken)
+    {
+        var (agent, prNumber, headSha, role) = ValidateHolderMutationRequest(request);
+        return ExecuteInImmediateTransactionAsync(
+            connection => CompleteReviewSlotInTx(connection, workspaceId, agent, prNumber, headSha, role),
+            cancellationToken);
+    }
+
+    private ReviewClaimResult ReleaseReviewSlot(ReviewClaimRequest request, string workspaceId)
+    {
+        var (agent, prNumber, headSha, role) = ValidateHolderMutationRequest(request);
+        return ExecuteInImmediateTransaction(connection => ReleaseReviewSlotInTx(connection, workspaceId, agent, prNumber, headSha, role));
+    }
+
+    private Task<ReviewClaimResult> ReleaseReviewSlotAsync(ReviewClaimRequest request, string workspaceId, CancellationToken cancellationToken)
+    {
+        var (agent, prNumber, headSha, role) = ValidateHolderMutationRequest(request);
+        return ExecuteInImmediateTransactionAsync(
+            connection => ReleaseReviewSlotInTx(connection, workspaceId, agent, prNumber, headSha, role),
+            cancellationToken);
+    }
+
+    private static (string Agent, int PrNumber, string HeadSha, string Role) ValidateHolderMutationRequest(ReviewClaimRequest request)
+    {
+        var agent = RequireNonEmpty(request.Agent, "bus_review_claim requires non-empty \"agent\".", nameof(request));
         var (prNumber, headSha, role) = ValidateReviewClaimTarget(request);
-        var agent = string.IsNullOrWhiteSpace(request.Agent) ? null : request.Agent.Trim();
+        return (agent, prNumber, headSha, role);
+    }
 
-        var existingFound = ExecuteInImmediateTransaction(connection =>
+    private ReviewClaimResult CompleteReviewSlotInTx(
+        SqliteConnection connection,
+        string workspaceId,
+        string agent,
+        int prNumber,
+        string headSha,
+        string role)
+    {
+        var now = _timeProvider.GetUtcNow();
+        var existing = RequireOwnedReviewClaim(connection, workspaceId, prNumber, headSha, role, agent);
+
+        if (string.Equals(existing.Status, StatusCompleted, StringComparison.Ordinal))
         {
-            var completedAtIso = FormatUtc(_timeProvider.GetUtcNow());
-            var existing = ReadReviewClaim(connection, workspaceId, prNumber, headSha, role);
-            if (existing is null && agent is null)
-            {
-                return false;
-            }
-
-            if (existing is null)
-            {
-                using var insertCmd = connection.CreateCommand();
-                insertCmd.CommandText = """
-                    INSERT INTO review_claims (workspace_id, pr_number, head_sha, role, agent, claimed_at_utc, status, expires_at_utc, completed_at_utc)
-                    VALUES (@workspaceId, @prNumber, @headSha, @role, @agent, @completedAt, 'completed', NULL, @completedAt)
-                    """;
-                insertCmd.Parameters.AddWithValue(ParamWorkspaceId, workspaceId);
-                insertCmd.Parameters.AddWithValue(ParamPrNumber, prNumber);
-                insertCmd.Parameters.AddWithValue(ParamHeadSha, headSha);
-                insertCmd.Parameters.AddWithValue(ParamRole, role);
-                insertCmd.Parameters.AddWithValue(ParamAgent, agent!);
-                insertCmd.Parameters.AddWithValue(ParamCompletedAt, completedAtIso);
-                insertCmd.ExecuteNonQuery();
-            }
-            else
-            {
-                using var updateCmd = connection.CreateCommand();
-                updateCmd.CommandText = """
-                    UPDATE review_claims
-                    SET head_sha = @headSha,
-                        agent = COALESCE(@agent, agent),
-                        status = 'completed',
-                        expires_at_utc = NULL,
-                        completed_at_utc = @completedAt
-                    WHERE id = @id
-                    """;
-                updateCmd.Parameters.AddWithValue(ParamHeadSha, headSha);
-                updateCmd.Parameters.AddWithValue(ParamAgent, (object?)agent ?? DBNull.Value);
-                updateCmd.Parameters.AddWithValue(ParamCompletedAt, completedAtIso);
-                updateCmd.Parameters.AddWithValue(ParamId, existing.Id);
-                updateCmd.ExecuteNonQuery();
-            }
-
-            return true;
-        });
-
-        if (!existingFound)
-        {
-            throw new InvalidOperationException($"No review claim found for PR #{prNumber} ({headSha}, {role}).");
+            return new ReviewClaimResult(
+                Ok: true,
+                Action: ActionComplete,
+                WorkspaceId: workspaceId,
+                PrNumber: prNumber,
+                HeadSha: headSha,
+                Role: role,
+                Status: StatusCompleted,
+                Claim: existing);
         }
 
-        var claim = ExecuteRead(connection => ReadReviewClaim(connection, workspaceId, prNumber, headSha, role));
+        EnsureActiveClaimLease(existing, now, prNumber, headSha, role);
+
+        using var updateCmd = connection.CreateCommand();
+        updateCmd.CommandText = """
+            UPDATE review_claims
+            SET status = 'completed',
+                expires_at_utc = NULL,
+                completed_at_utc = @completedAt
+            WHERE id = @id
+            """;
+        updateCmd.Parameters.AddWithValue(ParamCompletedAt, FormatUtc(now));
+        updateCmd.Parameters.AddWithValue(ParamId, existing.Id);
+        updateCmd.ExecuteNonQuery();
+
+        var updated = ReadReviewClaim(connection, workspaceId, prNumber, headSha, role);
         return new ReviewClaimResult(
             Ok: true,
             Action: ActionComplete,
@@ -1526,70 +2516,110 @@ public sealed partial class SwarmBusStore
             HeadSha: headSha,
             Role: role,
             Status: StatusCompleted,
-            Claim: claim);
+            Claim: updated);
     }
 
-    private ReviewClaimResult ReleaseReviewSlot(ReviewClaimRequest request, string workspaceId)
+    private ReviewClaimResult ReleaseReviewSlotInTx(
+        SqliteConnection connection,
+        string workspaceId,
+        string agent,
+        int prNumber,
+        string headSha,
+        string role)
     {
-        var (prNumber, headSha, role) = ValidateReviewClaimTarget(request);
+        var now = _timeProvider.GetUtcNow();
+        var existing = RequireOwnedReviewClaim(connection, workspaceId, prNumber, headSha, role, agent);
 
-        return ExecuteInImmediateTransaction(connection =>
+        if (string.Equals(existing.Status, StatusCompleted, StringComparison.Ordinal))
         {
-            var existing = ReadReviewClaim(connection, workspaceId, prNumber, headSha, role);
-            if (existing is null)
-            {
-                return new ReviewClaimResult(
-                    Ok: true,
-                    Action: ActionRelease,
-                    WorkspaceId: workspaceId,
-                    Released: false,
-                    PrNumber: prNumber,
-                    HeadSha: headSha,
-                    Role: role);
-            }
-
-            if (string.Equals(existing.Status, StatusCompleted, StringComparison.Ordinal))
-            {
-                return new ReviewClaimResult(
-                    Ok: true,
-                    Action: ActionRelease,
-                    WorkspaceId: workspaceId,
-                    Released: false,
-                    Reason: "already_completed",
-                    PrNumber: prNumber,
-                    HeadSha: headSha,
-                    Role: role,
-                    Status: StatusCompleted,
-                    Claim: existing);
-            }
-
-            using var updateCmd = connection.CreateCommand();
-            updateCmd.CommandText = """
-                UPDATE review_claims
-                SET head_sha = @headSha,
-                    status = 'released',
-                    expires_at_utc = NULL,
-                    completed_at_utc = NULL
-                WHERE id = @id
-                """;
-            updateCmd.Parameters.AddWithValue(ParamHeadSha, headSha);
-            updateCmd.Parameters.AddWithValue(ParamId, existing.Id);
-            updateCmd.ExecuteNonQuery();
-
             return new ReviewClaimResult(
                 Ok: true,
                 Action: ActionRelease,
                 WorkspaceId: workspaceId,
-                Released: true,
+                Released: false,
+                Reason: "already_completed",
                 PrNumber: prNumber,
                 HeadSha: headSha,
                 Role: role,
-                Status: StatusReleased,
-                Claim: ReadReviewClaim(connection, workspaceId, prNumber, headSha, role));
-        });
+                Status: StatusCompleted,
+                Claim: existing);
+        }
+
+        EnsureActiveClaimLease(existing, now, prNumber, headSha, role);
+
+        using var updateCmd = connection.CreateCommand();
+        updateCmd.CommandText = """
+            UPDATE review_claims
+            SET status = 'released',
+                expires_at_utc = NULL,
+                completed_at_utc = NULL
+            WHERE id = @id
+            """;
+        updateCmd.Parameters.AddWithValue(ParamId, existing.Id);
+        updateCmd.ExecuteNonQuery();
+
+        var updated = ReadReviewClaim(connection, workspaceId, prNumber, headSha, role);
+        return new ReviewClaimResult(
+            Ok: true,
+            Action: ActionRelease,
+            WorkspaceId: workspaceId,
+            Released: true,
+            PrNumber: prNumber,
+            HeadSha: headSha,
+            Role: role,
+            Status: StatusReleased,
+            Claim: updated);
+    }
+
+    private static ReviewClaim RequireOwnedReviewClaim(
+        SqliteConnection connection,
+        string workspaceId,
+        int prNumber,
+        string headSha,
+        string role,
+        string agent)
+    {
+        var existing = ReadReviewClaim(connection, workspaceId, prNumber, headSha, role)
+            ?? throw new InvalidOperationException($"No review claim found for PR #{prNumber} ({headSha}, {role}).");
+
+        if (!existing.Agent.Equals(agent, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Review claim for PR #{prNumber} ({headSha}, {role}) is held by '{existing.Agent}', not '{agent}'.");
+        }
+
+        return existing;
+    }
+
+    private static void EnsureActiveClaimLease(ReviewClaim existing, DateTimeOffset now, int prNumber, string headSha, string role)
+    {
+        if (!string.Equals(existing.Status, StatusClaimed, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Review claim for PR #{prNumber} ({headSha}, {role}) is '{existing.Status}' and not active.");
+        }
+
+        if (!existing.ExpiresAtUtc.HasValue || existing.ExpiresAtUtc.Value <= now)
+        {
+            throw new InvalidOperationException($"Review claim for PR #{prNumber} ({headSha}, {role}) has expired.");
+        }
     }
 
     private ReviewClaimResult ListReviewSlots(ReviewClaimRequest request)
+    {
+        var (allWorkspaces, normalizedWorkspace, headSha, role) = ValidateListReviewSlotsRequest(request);
+        var claims = ExecuteRead(connection => ReadReviewClaimsList(connection, allWorkspaces, normalizedWorkspace, request.PrNumber, headSha, role));
+        return new ReviewClaimResult(Ok: true, Action: ActionList, WorkspaceId: normalizedWorkspace, Claims: claims);
+    }
+
+    private async Task<ReviewClaimResult> ListReviewSlotsAsync(ReviewClaimRequest request, CancellationToken cancellationToken)
+    {
+        var (allWorkspaces, normalizedWorkspace, headSha, role) = ValidateListReviewSlotsRequest(request);
+        var claims = await ExecuteReadAsync(
+            connection => ReadReviewClaimsList(connection, allWorkspaces, normalizedWorkspace, request.PrNumber, headSha, role),
+            cancellationToken).ConfigureAwait(false);
+        return new ReviewClaimResult(Ok: true, Action: ActionList, WorkspaceId: normalizedWorkspace, Claims: claims);
+    }
+
+    private static (bool AllWorkspaces, string WorkspaceId, string? HeadSha, string? Role) ValidateListReviewSlotsRequest(ReviewClaimRequest request)
     {
         var (allWorkspaces, normalizedWorkspace) = ResolveWorkspaceFilter(request.WorkspaceId);
 
@@ -1600,40 +2630,41 @@ public sealed partial class SwarmBusStore
 
         var headSha = NormalizeHeadSha(request.HeadSha, required: false, nameof(request));
         var role = NormalizeOptionalReviewRole(request.Role, nameof(request));
+        return (allWorkspaces, normalizedWorkspace, headSha, role);
+    }
 
-        var claims = ExecuteRead(connection =>
+    private static List<ReviewClaim> ReadReviewClaimsList(
+        SqliteConnection connection,
+        bool allWorkspaces,
+        string normalizedWorkspace,
+        int? prNumber,
+        string? headSha,
+        string? role)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, workspace_id, pr_number, head_sha, role, agent, claimed_at_utc, status, expires_at_utc, completed_at_utc
+            FROM review_claims
+            WHERE (@allWorkspaces = 1 OR workspace_id = @workspaceId)
+              AND (@prNumber IS NULL OR pr_number = @prNumber)
+              AND (@headSha IS NULL OR lower(head_sha) = @headSha)
+              AND (@role IS NULL OR role = @role)
+            ORDER BY id DESC
+            """;
+        cmd.Parameters.AddWithValue(ParamAllWorkspaces, allWorkspaces ? 1 : 0);
+        cmd.Parameters.AddWithValue(ParamWorkspaceId, normalizedWorkspace);
+        cmd.Parameters.AddWithValue(ParamPrNumber, (object?)prNumber ?? DBNull.Value);
+        cmd.Parameters.AddWithValue(ParamHeadSha, (object?)headSha ?? DBNull.Value);
+        cmd.Parameters.AddWithValue(ParamRole, (object?)role ?? DBNull.Value);
+
+        var results = new List<ReviewClaim>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
         {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT id, workspace_id, pr_number, head_sha, role, agent, claimed_at_utc, status, expires_at_utc, completed_at_utc
-                FROM review_claims
-                WHERE (@allWorkspaces = 1 OR workspace_id = @workspaceId)
-                  AND (@prNumber IS NULL OR pr_number = @prNumber)
-                  AND (@headSha IS NULL OR lower(head_sha) = @headSha)
-                  AND (@role IS NULL OR role = @role)
-                ORDER BY id DESC
-                """;
-            cmd.Parameters.AddWithValue(ParamAllWorkspaces, allWorkspaces ? 1 : 0);
-            cmd.Parameters.AddWithValue(ParamWorkspaceId, normalizedWorkspace);
-            cmd.Parameters.AddWithValue(ParamPrNumber, (object?)request.PrNumber ?? DBNull.Value);
-            cmd.Parameters.AddWithValue(ParamHeadSha, (object?)headSha ?? DBNull.Value);
-            cmd.Parameters.AddWithValue(ParamRole, (object?)role ?? DBNull.Value);
+            results.Add(MapReviewClaim(reader));
+        }
 
-            var results = new List<ReviewClaim>();
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
-            {
-                results.Add(MapReviewClaim(reader));
-            }
-
-            return results;
-        });
-
-        return new ReviewClaimResult(
-            Ok: true,
-            Action: ActionList,
-            WorkspaceId: normalizedWorkspace,
-            Claims: claims);
+        return results;
     }
 
     private SendTxResult SendOrDeduplicateInTx(SqliteConnection connection, SendTxInput input)
@@ -1657,7 +2688,11 @@ public sealed partial class SwarmBusStore
         }
 
         var id = InsertMessageInTx(connection, input, createdAtIso, wakeExpiresIso);
-        return new SendTxResult(SendTxMode.Inserted, id, now);
+        return new SendTxResult(
+            SendTxMode.Inserted,
+            id,
+            now,
+            WakeLeaseToken: input.WakeTargetMatches ? wakeExpiresIso : null);
     }
 
     private static SendTxResult? TryDeduplicateLatestMessageInTx(
@@ -1680,9 +2715,9 @@ public sealed partial class SwarmBusStore
             LIMIT 1
             """;
         latestCmd.Parameters.AddWithValue(ParamWorkspaceId, input.WorkspaceId);
-        latestCmd.Parameters.AddWithValue("@sender", input.Sender);
-        latestCmd.Parameters.AddWithValue("@recipient", input.Recipient);
-        latestCmd.Parameters.AddWithValue("@topic", input.Topic);
+        latestCmd.Parameters.AddWithValue(ParamSender, input.Sender);
+        latestCmd.Parameters.AddWithValue(ParamRecipient, input.Recipient);
+        latestCmd.Parameters.AddWithValue(ParamTopic, input.Topic);
         latestCmd.Parameters.AddWithValue(ParamPrNumber, (object?)input.PrNumber ?? DBNull.Value);
         latestCmd.Parameters.AddWithValue(ParamIssueNumber, (object?)input.IssueNumber ?? DBNull.Value);
 
@@ -1761,22 +2796,22 @@ public sealed partial class SwarmBusStore
             SELECT last_insert_rowid();
             """;
         insertCmd.Parameters.AddWithValue(ParamWorkspaceId, input.WorkspaceId);
-        insertCmd.Parameters.AddWithValue("@createdAt", createdAtIso);
-        insertCmd.Parameters.AddWithValue("@sender", input.Sender);
-        insertCmd.Parameters.AddWithValue("@recipient", input.Recipient);
-        insertCmd.Parameters.AddWithValue("@topic", input.Topic);
-        insertCmd.Parameters.AddWithValue("@body", input.Body);
+        insertCmd.Parameters.AddWithValue(ParamCreatedAt, createdAtIso);
+        insertCmd.Parameters.AddWithValue(ParamSender, input.Sender);
+        insertCmd.Parameters.AddWithValue(ParamRecipient, input.Recipient);
+        insertCmd.Parameters.AddWithValue(ParamTopic, input.Topic);
+        insertCmd.Parameters.AddWithValue(ParamBody, input.Body);
         insertCmd.Parameters.AddWithValue(ParamPrNumber, (object?)input.PrNumber ?? DBNull.Value);
         insertCmd.Parameters.AddWithValue(ParamIssueNumber, (object?)input.IssueNumber ?? DBNull.Value);
-        insertCmd.Parameters.AddWithValue("@priority", input.Priority);
-        insertCmd.Parameters.AddWithValue("@replyToId", (object?)input.ReplyToId ?? DBNull.Value);
+        insertCmd.Parameters.AddWithValue(ParamPriority, input.Priority);
+        insertCmd.Parameters.AddWithValue(ParamReplyToId, (object?)input.ReplyToId ?? DBNull.Value);
         insertCmd.Parameters.AddWithValue(ParamStatus, initialStatus);
-        insertCmd.Parameters.AddWithValue("@ackedBy", (object?)initialAckedBy ?? DBNull.Value);
+        insertCmd.Parameters.AddWithValue(ParamAckedBy, (object?)initialAckedBy ?? DBNull.Value);
         insertCmd.Parameters.AddWithValue(ParamAckedAt, (object?)initialAckedAt ?? DBNull.Value);
-        insertCmd.Parameters.AddWithValue("@state", (object?)input.State ?? DBNull.Value);
-        insertCmd.Parameters.AddWithValue("@wakeOk", (object?)initialWakeOk ?? DBNull.Value);
-        insertCmd.Parameters.AddWithValue("@wakeState", (object?)initialWakeState ?? DBNull.Value);
-        insertCmd.Parameters.AddWithValue("@wakeExpires", (object?)initialWakeExpires ?? DBNull.Value);
+        insertCmd.Parameters.AddWithValue(ParamState, (object?)input.State ?? DBNull.Value);
+        insertCmd.Parameters.AddWithValue(ParamWakeOk, (object?)initialWakeOk ?? DBNull.Value);
+        insertCmd.Parameters.AddWithValue(ParamWakeState, (object?)initialWakeState ?? DBNull.Value);
+        insertCmd.Parameters.AddWithValue(ParamWakeExpires, (object?)initialWakeExpires ?? DBNull.Value);
 
         return Convert.ToInt64(insertCmd.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
@@ -1812,7 +2847,8 @@ public sealed partial class SwarmBusStore
                 SendTxMode.RetryWake,
                 latest.Id,
                 ctx.Now,
-                Body: string.IsNullOrWhiteSpace(latest.Body) ? ctx.FallbackBody : latest.Body);
+                Body: string.IsNullOrWhiteSpace(latest.Body) ? ctx.FallbackBody : latest.Body,
+                WakeLeaseToken: ctx.WakeExpiresIso);
         }
 
         return new SendTxResult(SendTxMode.Deduplicated, latest.Id, ctx.Now, WakeState: curWakeState);
@@ -1843,25 +2879,57 @@ public sealed partial class SwarmBusStore
                 wake_ok = 0
             WHERE id = @id
             """;
-        reserveCmd.Parameters.AddWithValue("@wakeExpires", wakeExpiresIso);
+        reserveCmd.Parameters.AddWithValue(ParamWakeExpires, wakeExpiresIso);
         reserveCmd.Parameters.AddWithValue(ParamId, messageId);
         reserveCmd.ExecuteNonQuery();
     }
 
-    private async Task<SwarmWakeResult> DispatchWakeAsync(SwarmWakeContext context, CancellationToken cancellationToken)
+    private async Task<(SwarmWakeResult Result, bool FenceApplied)> DispatchWakeAsync(
+        SwarmWakeContext context,
+        string expectedLeaseIso,
+        CancellationToken cancellationToken)
     {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(_wakeDispatchTimeout);
+
         SwarmWakeResult wakeRes;
         try
         {
-            wakeRes = await _wakeDispatcher!(context, cancellationToken).ConfigureAwait(false);
+            wakeRes = await _wakeDispatcher!(context, timeoutCts.Token).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await CompleteWakeAttemptAsync(context.MessageId, ok: false, expectedLeaseIso, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            wakeRes = new SwarmWakeResult(
+                Attempted: true,
+                Ok: false,
+                Target: context.Recipient,
+                ThreadId: context.CodexThreadId,
+                Reason: "timeout",
+                Error: $"Wake dispatch timed out after {_wakeDispatchTimeout.TotalSeconds:0.##}s.");
+        }
+        catch (Exception ex)
         {
             wakeRes = new SwarmWakeResult(Attempted: true, Ok: false, Target: context.Recipient, ThreadId: context.CodexThreadId, Error: ex.Message);
         }
 
-        CompleteWakeAttempt(context.MessageId, wakeRes.Ok);
-        return wakeRes;
+        var fenceApplied = await CompleteWakeAttemptAsync(context.MessageId, wakeRes.Ok, expectedLeaseIso, cancellationToken).ConfigureAwait(false);
+        if (!fenceApplied)
+        {
+            wakeRes = new SwarmWakeResult(
+                Attempted: true,
+                Ok: false,
+                Target: context.Recipient,
+                ThreadId: context.CodexThreadId,
+                Reason: "stale_lease_fenced",
+                Error: "Wake lease expired or was superseded before completion.");
+        }
+
+        return (wakeRes, fenceApplied);
     }
 
     private static (bool AllWorkspaces, string NormalizedWorkspace) ResolveWorkspaceFilter(string? workspaceId)
@@ -2230,187 +3298,97 @@ public sealed partial class SwarmBusStore
 
     private static void EnsureLocksTable(SqliteConnection connection)
     {
-        if (!TableExists(connection, TableLocks))
-        {
-            ExecuteNonQuery(connection, """
-                CREATE TABLE locks (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  workspace_id TEXT NOT NULL DEFAULT 'default',
-                  agent TEXT NOT NULL,
-                  path_pattern TEXT NOT NULL,
-                  pr_number INTEGER,
-                  claimed_at_utc TEXT NOT NULL,
-                  expires_at_utc TEXT NOT NULL,
-                  UNIQUE(workspace_id, path_pattern)
-                );
-                """);
-        }
-        else if (!GetTableColumns(connection, TableLocks).Contains(ColWorkspaceId))
-        {
-            ExecuteNonQuery(connection, """
-                CREATE TABLE locks_migrated (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  workspace_id TEXT NOT NULL DEFAULT 'default',
-                  agent TEXT NOT NULL,
-                  path_pattern TEXT NOT NULL,
-                  pr_number INTEGER,
-                  claimed_at_utc TEXT NOT NULL,
-                  expires_at_utc TEXT NOT NULL,
-                  UNIQUE(workspace_id, path_pattern)
-                );
-                INSERT INTO locks_migrated (id, workspace_id, agent, path_pattern, pr_number, claimed_at_utc, expires_at_utc)
-                SELECT id, 'default', agent, path_pattern, pr_number, claimed_at_utc, expires_at_utc
-                FROM locks;
-                DROP TABLE locks;
-                ALTER TABLE locks_migrated RENAME TO locks;
-                """);
-        }
+        ExecuteNonQuery(connection, """
+            CREATE TABLE IF NOT EXISTS locks (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              workspace_id TEXT NOT NULL DEFAULT 'default',
+              agent TEXT NOT NULL,
+              path_pattern TEXT NOT NULL,
+              pr_number INTEGER,
+              claimed_at_utc TEXT NOT NULL,
+              expires_at_utc TEXT NOT NULL,
+              UNIQUE(workspace_id, path_pattern)
+            );
+            """);
 
         ExecuteNonQuery(connection, """
             CREATE INDEX IF NOT EXISTS idx_locks_expires
               ON locks (expires_at_utc);
-            CREATE INDEX IF NOT EXISTS idx_locks_workspace
-              ON locks (workspace_id, expires_at_utc);
             """);
+
+        if (GetTableColumns(connection, TableLocks).Contains(ColWorkspaceId))
+        {
+            ExecuteNonQuery(connection, """
+                CREATE INDEX IF NOT EXISTS idx_locks_workspace
+                  ON locks (workspace_id, expires_at_utc);
+                """);
+        }
     }
 
     private static void EnsureReviewClaimsTable(SqliteConnection connection)
     {
-        if (!TableExists(connection, TableReviewClaims))
-        {
-            ExecuteNonQuery(connection, """
-                CREATE TABLE review_claims (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  workspace_id TEXT NOT NULL DEFAULT 'default',
-                  pr_number INTEGER NOT NULL,
-                  head_sha TEXT NOT NULL,
-                  role TEXT NOT NULL,
-                  agent TEXT NOT NULL,
-                  claimed_at_utc TEXT NOT NULL,
-                  status TEXT NOT NULL DEFAULT 'claimed' CHECK(status IN ('claimed','completed','released')),
-                  expires_at_utc TEXT,
-                  completed_at_utc TEXT,
-                  UNIQUE(workspace_id, pr_number, head_sha, role)
-                );
-                """);
-            return;
-        }
+        ExecuteNonQuery(connection, """
+            CREATE TABLE IF NOT EXISTS review_claims (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              workspace_id TEXT NOT NULL DEFAULT 'default',
+              pr_number INTEGER NOT NULL,
+              head_sha TEXT NOT NULL,
+              role TEXT NOT NULL,
+              agent TEXT NOT NULL,
+              claimed_at_utc TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'claimed' CHECK(status IN ('claimed','completed','released')),
+              expires_at_utc TEXT,
+              completed_at_utc TEXT,
+              UNIQUE(workspace_id, pr_number, head_sha, role)
+            );
+            """);
 
         EnsureTableColumns(connection, TableReviewClaims, [
             (ColStatus, "ALTER TABLE review_claims ADD COLUMN status TEXT NOT NULL DEFAULT 'claimed';"),
             ("expires_at_utc", "ALTER TABLE review_claims ADD COLUMN expires_at_utc TEXT;"),
             ("completed_at_utc", "ALTER TABLE review_claims ADD COLUMN completed_at_utc TEXT;")
         ]);
-
-        if (!GetTableColumns(connection, TableReviewClaims).Contains(ColWorkspaceId))
-        {
-            ExecuteNonQuery(connection, """
-                CREATE TABLE review_claims_migrated (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  workspace_id TEXT NOT NULL DEFAULT 'default',
-                  pr_number INTEGER NOT NULL,
-                  head_sha TEXT NOT NULL,
-                  role TEXT NOT NULL,
-                  agent TEXT NOT NULL,
-                  claimed_at_utc TEXT NOT NULL,
-                  status TEXT NOT NULL DEFAULT 'claimed' CHECK(status IN ('claimed','completed','released')),
-                  expires_at_utc TEXT,
-                  completed_at_utc TEXT,
-                  UNIQUE(workspace_id, pr_number, head_sha, role)
-                );
-                INSERT INTO review_claims_migrated (id, workspace_id, pr_number, head_sha, role, agent, claimed_at_utc, status, expires_at_utc, completed_at_utc)
-                SELECT id, 'default', pr_number, head_sha, role, agent, claimed_at_utc, status, expires_at_utc, completed_at_utc
-                FROM review_claims;
-                DROP TABLE review_claims;
-                ALTER TABLE review_claims_migrated RENAME TO review_claims;
-                """);
-        }
     }
 
     private static void EnsureWorkQueueTable(SqliteConnection connection)
     {
-        if (!TableExists(connection, TableWorkQueue))
-        {
-            ExecuteNonQuery(connection, """
-                CREATE TABLE work_queue (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  workspace_id TEXT NOT NULL DEFAULT 'default',
-                  issue_number INTEGER NOT NULL,
-                  title TEXT NOT NULL,
-                  priority INTEGER NOT NULL,
-                  risk_class TEXT,
-                  status TEXT NOT NULL CHECK(status IN ('queued','claimed','done','removed')),
-                  claimed_by TEXT,
-                  claimed_at_utc TEXT,
-                  lease_expires_utc TEXT,
-                  updated_at_utc TEXT NOT NULL,
-                  UNIQUE(workspace_id, issue_number)
-                );
-                """);
-        }
-        else if (!GetTableColumns(connection, TableWorkQueue).Contains(ColWorkspaceId))
-        {
-            ExecuteNonQuery(connection, """
-                DROP INDEX IF EXISTS idx_work_queue_status_priority;
-                CREATE TABLE work_queue_migrated (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  workspace_id TEXT NOT NULL DEFAULT 'default',
-                  issue_number INTEGER NOT NULL,
-                  title TEXT NOT NULL,
-                  priority INTEGER NOT NULL,
-                  risk_class TEXT,
-                  status TEXT NOT NULL CHECK(status IN ('queued','claimed','done','removed')),
-                  claimed_by TEXT,
-                  claimed_at_utc TEXT,
-                  lease_expires_utc TEXT,
-                  updated_at_utc TEXT NOT NULL,
-                  UNIQUE(workspace_id, issue_number)
-                );
-                INSERT INTO work_queue_migrated (id, workspace_id, issue_number, title, priority, risk_class, status, claimed_by, claimed_at_utc, lease_expires_utc, updated_at_utc)
-                SELECT id, 'default', issue_number, title, priority, risk_class, status, claimed_by, claimed_at_utc, lease_expires_utc, updated_at_utc
-                FROM work_queue;
-                DROP TABLE work_queue;
-                ALTER TABLE work_queue_migrated RENAME TO work_queue;
-                """);
-        }
-
         ExecuteNonQuery(connection, """
-            CREATE INDEX IF NOT EXISTS idx_work_queue_status_priority
-              ON work_queue (workspace_id, status, priority ASC, id ASC);
+            CREATE TABLE IF NOT EXISTS work_queue (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              workspace_id TEXT NOT NULL DEFAULT 'default',
+              issue_number INTEGER NOT NULL,
+              title TEXT NOT NULL,
+              priority INTEGER NOT NULL,
+              risk_class TEXT,
+              status TEXT NOT NULL CHECK(status IN ('queued','claimed','done','removed')),
+              claimed_by TEXT,
+              claimed_at_utc TEXT,
+              lease_expires_utc TEXT,
+              updated_at_utc TEXT NOT NULL,
+              UNIQUE(workspace_id, issue_number)
+            );
             """);
+
+        if (GetTableColumns(connection, TableWorkQueue).Contains(ColWorkspaceId))
+        {
+            ExecuteNonQuery(connection, """
+                CREATE INDEX IF NOT EXISTS idx_work_queue_status_priority
+                  ON work_queue (workspace_id, status, priority ASC, id ASC);
+                """);
+        }
     }
 
     private static void EnsureMetaTable(SqliteConnection connection)
     {
-        if (!TableExists(connection, TableMeta))
-        {
-            ExecuteNonQuery(connection, """
-                CREATE TABLE meta (
-                  workspace_id TEXT NOT NULL DEFAULT 'default',
-                  key TEXT NOT NULL,
-                  value TEXT NOT NULL,
-                  updated_at_utc TEXT NOT NULL,
-                  PRIMARY KEY (workspace_id, key)
-                );
-                """);
-        }
-        else if (!GetTableColumns(connection, TableMeta).Contains(ColWorkspaceId))
-        {
-            ExecuteNonQuery(connection, """
-                CREATE TABLE meta_migrated (
-                  workspace_id TEXT NOT NULL DEFAULT 'default',
-                  key TEXT NOT NULL,
-                  value TEXT NOT NULL,
-                  updated_at_utc TEXT NOT NULL,
-                  PRIMARY KEY (workspace_id, key)
-                );
-                INSERT INTO meta_migrated (workspace_id, key, value, updated_at_utc)
-                SELECT 'default', key, value, updated_at_utc
-                FROM meta;
-                DROP TABLE meta;
-                ALTER TABLE meta_migrated RENAME TO meta;
-                """);
-        }
+        ExecuteNonQuery(connection, """
+            CREATE TABLE IF NOT EXISTS meta (
+              workspace_id TEXT NOT NULL DEFAULT 'default',
+              key TEXT NOT NULL,
+              value TEXT NOT NULL,
+              updated_at_utc TEXT NOT NULL,
+              PRIMARY KEY (workspace_id, key)
+            );
+            """);
     }
 
     private static bool TableExists(SqliteConnection connection, string tableName)
@@ -2467,6 +3445,36 @@ public sealed partial class SwarmBusStore
         });
     }
 
+    private async Task<T> ExecuteReadAsync<T>(Func<SqliteConnection, T> action, CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        return await ExecuteWithBusyRetryAsync(_ =>
+        {
+            using var connection = OpenConnectionCore();
+            return Task.FromResult(action(connection));
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private T ExecuteReadTransaction<T>(Func<SqliteConnection, T> action)
+    {
+        EnsureInitialized();
+        return ExecuteWithBusyRetry(() =>
+        {
+            using var connection = OpenConnectionCore();
+            return RunInReadTransactionCore(connection, () => action(connection));
+        });
+    }
+
+    private async Task<T> ExecuteReadTransactionAsync<T>(Func<SqliteConnection, T> action, CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        return await ExecuteWithBusyRetryAsync(_ =>
+        {
+            using var connection = OpenConnectionCore();
+            return Task.FromResult(RunInReadTransactionCore(connection, () => action(connection)));
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
     private T ExecuteInImmediateTransaction<T>(Func<SqliteConnection, T> action)
     {
         EnsureInitialized();
@@ -2477,6 +3485,16 @@ public sealed partial class SwarmBusStore
         });
     }
 
+    private async Task<T> ExecuteInImmediateTransactionAsync<T>(Func<SqliteConnection, T> action, CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        return await ExecuteWithBusyRetryAsync(_ =>
+        {
+            using var connection = OpenConnectionCore();
+            return Task.FromResult(RunInImmediateTransactionCore(connection, () => action(connection)));
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
     private SqliteConnection OpenConnectionCore()
     {
         var connectionString = new SqliteConnectionStringBuilder
@@ -2485,7 +3503,7 @@ public sealed partial class SwarmBusStore
             Mode = SqliteOpenMode.ReadWriteCreate,
             Cache = SqliteCacheMode.Default,
             Pooling = false,
-            DefaultTimeout = 5
+            DefaultTimeout = 1
         }.ToString();
 
         var connection = new SqliteConnection(connectionString);
@@ -2493,12 +3511,28 @@ public sealed partial class SwarmBusStore
         {
             connection.Open();
             // CRITICAL: always set busy_timeout FIRST before any WAL or write pragma.
-            ExecuteNonQuery(connection, "PRAGMA busy_timeout = 5000;");
+            ExecuteNonQuery(connection, "PRAGMA busy_timeout = 1000;");
             return connection;
         }
         catch
         {
             connection.Dispose();
+            throw;
+        }
+    }
+
+    private static T RunInReadTransactionCore<T>(SqliteConnection connection, Func<T> action)
+    {
+        ExecuteNonQuery(connection, "BEGIN;");
+        try
+        {
+            var result = action();
+            ExecuteNonQuery(connection, "COMMIT;");
+            return result;
+        }
+        catch
+        {
+            TryRollback(connection);
             throw;
         }
     }
@@ -2514,16 +3548,20 @@ public sealed partial class SwarmBusStore
         }
         catch
         {
-            try
-            {
-                ExecuteNonQuery(connection, "ROLLBACK;");
-            }
-            catch
-            {
-                // Ignore rollback error if transaction is already closed.
-            }
-
+            TryRollback(connection);
             throw;
+        }
+    }
+
+    private static void TryRollback(SqliteConnection connection)
+    {
+        try
+        {
+            ExecuteNonQuery(connection, "ROLLBACK;");
+        }
+        catch
+        {
+            // Ignore rollback error if transaction is already closed.
         }
     }
 
@@ -2537,13 +3575,36 @@ public sealed partial class SwarmBusStore
             }
             catch (SqliteException ex) when (IsBusyOrLocked(ex) && attempt < _maxBusyRetries)
             {
-                var baseDelayMs = Math.Min(250, 10 * Math.Pow(1.35, attempt));
-                var jitterMs = Random.Shared.Next(1, 20);
-                Thread.Sleep((int)baseDelayMs + jitterMs);
+                Thread.Sleep(ComputeRetryDelayMs(attempt));
             }
         }
 
         throw new InvalidOperationException("Busy retry loop terminated unexpectedly.");
+    }
+
+    private async Task<T> ExecuteWithBusyRetryAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt <= _maxBusyRetries; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return await operation(cancellationToken).ConfigureAwait(false);
+            }
+            catch (SqliteException ex) when (IsBusyOrLocked(ex) && attempt < _maxBusyRetries)
+            {
+                await Task.Delay(ComputeRetryDelayMs(attempt), cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        throw new InvalidOperationException("Async busy retry loop terminated unexpectedly.");
+    }
+
+    private static int ComputeRetryDelayMs(int attempt)
+    {
+        var baseDelayMs = Math.Min(250, 15 * Math.Pow(1.5, attempt));
+        var jitterMs = Random.Shared.Next(1, 25);
+        return (int)baseDelayMs + jitterMs;
     }
 
     private static bool IsBusyOrLocked(SqliteException ex) =>

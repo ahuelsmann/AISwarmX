@@ -1,4 +1,7 @@
+using System.Security.Cryptography;
+using Microsoft.Data.Sqlite;
 using MobaDev.SwarmBus.Core.Contracts;
+using MobaDev.SwarmBus.Core.Store;
 using Xunit;
 
 namespace MobaDev.SwarmBus.Tests;
@@ -6,15 +9,35 @@ namespace MobaDev.SwarmBus.Tests;
 public sealed class LegacyMigrationTests
 {
     [Fact]
-    public void MigratesPreV3140DatabaseWithZeroDataLossAndEnablesMultiWorkspace()
+    public void DefaultDatabasePathUsesSwarmBusV2ToProtectLiveNodeBus()
+    {
+        var originalEnv = Environment.GetEnvironmentVariable("MOBADEV_SWARM_BUS_DB");
+        try
+        {
+            Environment.SetEnvironmentVariable("MOBADEV_SWARM_BUS_DB", null);
+            var defaultPath = SwarmBusStore.ResolveDefaultDbPath();
+            var legacyPath = SwarmBusStore.ResolveLegacyDefaultDbPath();
+
+            Assert.EndsWith("swarm-bus-v2.db", defaultPath, StringComparison.OrdinalIgnoreCase);
+            Assert.EndsWith("swarm-bus.db", legacyPath, StringComparison.OrdinalIgnoreCase);
+            Assert.NotEqual(legacyPath, defaultPath);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("MOBADEV_SWARM_BUS_DB", originalEnv);
+        }
+    }
+
+    [Fact]
+    public void ImportFromLegacyPreV3140DatabaseIsStrictlyReadOnlyAndZeroDataLoss()
     {
         using var fx = new TempBusFixture();
+        var legacyPath = Path.Combine(fx.RootPath, "swarm-bus.db");
+        var v2Path = Path.Combine(fx.RootPath, "swarm-bus-v2.db");
         var createdIso = "2026-11-24T10:00:00.000Z";
         var futureIso = "2099-11-24T10:00:00.000Z";
 
-        // Legacy pre-v3.14.0 schema: no state/wake/workspace_id, locks has global UNIQUE(path_pattern),
-        // no review_claims, no work_queue, no meta.
-        TempBusFixture.ExecuteRawSql(fx.DbPath, $"""
+        TempBusFixture.ExecuteRawSql(legacyPath, $"""
             CREATE TABLE messages (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               created_at_utc TEXT NOT NULL,
@@ -44,23 +67,31 @@ public sealed class LegacyMigrationTests
             VALUES ('codex', 'AGENTS.md', 500, '{createdIso}', '{futureIso}');
             """);
 
-        var store = fx.CreateStore();
-        store.EnsureInitialized();
+        var legacyHashBefore = ComputeFileSha256(legacyPath);
 
-        // Existing message preserved under 'default' workspace.
+        var store = new SwarmBusStore(v2Path);
+        var imported = store.ImportFromLegacyDb(legacyPath);
+
+        Assert.Equal(1, imported.MessagesImported);
+        Assert.Equal(1, imported.LocksImported);
+        Assert.Equal(0, imported.ReviewClaimsImported);
+        Assert.Equal(0, imported.WorkQueueItemsImported);
+
+        // Source legacy DB must remain byte-for-byte untouched (no WAL/schema mutation).
+        Assert.Equal(legacyHashBefore, ComputeFileSha256(legacyPath));
+        Assert.False(File.Exists(legacyPath + "-wal"));
+
+        // Existing message & lock preserved under 'default' workspace in v2 DB.
         var inbox = store.GetInbox("antigravity-gemini", unreadOnly: true);
         var legacyMsg = Assert.Single(inbox.Messages);
         Assert.Equal("Pre-migration message", legacyMsg.Body);
         Assert.Equal("default", legacyMsg.WorkspaceId);
-        Assert.Null(legacyMsg.State);
 
-        // Existing lock preserved under 'default' workspace.
         var defaultLocks = store.ListLocks("default");
         var legacyLock = Assert.Single(defaultLocks);
         Assert.Equal("AGENTS.md", legacyLock.PathPattern);
-        Assert.Equal("codex", legacyLock.Agent);
 
-        // New multi-workspace lock on AGENTS.md succeeds because legacy UNIQUE(path_pattern) was upgraded.
+        // Multi-workspace lock in v2 DB succeeds while legacy DB remains single-repo compatible.
         var flowLock = store.ClaimLocks(new LockClaimRequest(
             Agent: "claude-opus",
             Paths: ["AGENTS.md"],
@@ -68,27 +99,21 @@ public sealed class LegacyMigrationTests
             WorkspaceId: "mobaflow"));
         Assert.True(flowLock.Ok);
 
-        // New v3.14.0 features (review_claims, work_queue, meta, state dedup) work seamlessly.
-        var claim = store.ReviewClaim(new ReviewClaimRequest(
-            Action: "claim",
-            Agent: "claude-opus",
-            PrNumber: 500,
-            HeadSha: "0123456789abcdef0123456789abcdef01234567",
-            Role: "final"));
-        Assert.True(claim.Claimed);
-
-        store.QueueUpsert(new WorkQueueUpsertRequest(IssueNumber: 56, Title: "Migrated queue", Priority: 1));
-        var next = store.QueueNext("codex");
-        Assert.Equal(56, next.Item!.IssueNumber);
+        // Re-importing is idempotent.
+        var reimported = store.ImportFromLegacyDb(legacyPath);
+        Assert.Equal(0, reimported.MessagesImported);
+        Assert.Equal(0, reimported.LocksImported);
     }
 
     [Fact]
-    public void MigratesV3140SingleRepoSchemaToMultiWorkspaceWithZeroDataLoss()
+    public async Task ImportFromLegacyV3140DatabaseNormalizesOutOfSetStatusesWithoutFailingCheckConstraints()
     {
         using var fx = new TempBusFixture();
+        var legacyPath = Path.Combine(fx.RootPath, "legacy-v314.db");
+        var v2Path = Path.Combine(fx.RootPath, "swarm-bus-v2.db");
         var nowIso = "2026-11-27T08:00:00.000Z";
 
-        TempBusFixture.ExecuteRawSql(fx.DbPath, $"""
+        TempBusFixture.ExecuteRawSql(legacyPath, $"""
             CREATE TABLE messages (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               created_at_utc TEXT NOT NULL,
@@ -140,38 +165,61 @@ public sealed class LegacyMigrationTests
               lease_expires_utc TEXT,
               updated_at_utc TEXT NOT NULL
             );
-            CREATE INDEX idx_work_queue_status_priority ON work_queue (status, priority ASC, id ASC);
             CREATE TABLE meta (
               key TEXT PRIMARY KEY,
               value TEXT NOT NULL,
               updated_at_utc TEXT NOT NULL
             );
-            INSERT INTO review_claims (pr_number, head_sha, role, agent, claimed_at_utc, status, completed_at_utc)
-            VALUES (58, '0123456789abcdef0123456789abcdef01234567', 'final', 'claude-opus', '{nowIso}', 'completed', '{nowIso}');
+            INSERT INTO messages (created_at_utc, sender, recipient, topic, body, status, wake_state)
+            VALUES ('{nowIso}', 'watchdog', 'codex', 'ci', 'body', 'weird_status', 'corrupt_wake');
+            INSERT INTO review_claims (pr_number, head_sha, role, agent, claimed_at_utc, status)
+            VALUES (58, '0123456789ABCDEF0123456789ABCDEF01234567', 'final', 'claude-opus', '{nowIso}', 'stale_unknown');
+            INSERT INTO review_claims (pr_number, head_sha, role, agent, claimed_at_utc, status)
+            VALUES (59, 'not-a-valid-sha', 'final', 'claude-opus', '{nowIso}', 'claimed');
             INSERT INTO work_queue (issue_number, title, priority, risk_class, status, updated_at_utc)
-            VALUES (58, 'Existing v3.14 item', 1, 'M', 'queued', '{nowIso}');
+            VALUES (58, 'Unknown queue status', 1, 'M', 'Planned', '{nowIso}');
+            INSERT INTO work_queue (issue_number, title, priority, risk_class, status, updated_at_utc)
+            VALUES (59, 'Completed alias', 1, 'L', 'Completed', '{nowIso}');
             INSERT INTO meta (key, value, updated_at_utc)
             VALUES ('code_wip', '1', '{nowIso}');
             """);
 
-        var store = fx.CreateStore();
-        store.EnsureInitialized();
+        var legacyHashBefore = ComputeFileSha256(legacyPath);
 
-        var claims = store.ReviewClaim(new ReviewClaimRequest(Action: "list", PrNumber: 58));
-        Assert.Single(claims.Claims!);
-        Assert.Equal("completed", claims.Claims![0].Status);
+        var store = new SwarmBusStore(v2Path);
+        var result = await store.ImportFromLegacyDbAsync(legacyPath);
+
+        Assert.Equal(1, result.MessagesImported);
+        Assert.Equal(1, result.ReviewClaimsImported); // invalid SHA row skipped safely
+        Assert.Equal(2, result.WorkQueueItemsImported);
+        Assert.Equal(1, result.MetaEntriesImported);
+        Assert.Equal(legacyHashBefore, ComputeFileSha256(legacyPath));
+
+        var importedMsg = Assert.Single(store.GetInbox("codex", unreadOnly: false).Messages);
+        Assert.Equal("unread", importedMsg.Status);
+        Assert.Null(importedMsg.WakeState);
+
+        var importedClaim = Assert.Single(store.ReviewClaim(new ReviewClaimRequest(Action: "list", PrNumber: 58)).Claims!);
+        Assert.Equal("released", importedClaim.Status);
+        Assert.Equal("0123456789abcdef0123456789abcdef01234567", importedClaim.HeadSha);
 
         var queue = store.QueueList();
         Assert.Equal(1, queue.CodeWip);
-        var item = Assert.Single(queue.Items);
-        Assert.Equal(58, item.IssueNumber);
+        Assert.Equal("queued", queue.Items.Single(i => i.IssueNumber == 58).Status);
+        Assert.Equal("done", queue.Items.Single(i => i.IssueNumber == 59).Status);
 
-        // Same issue number in another workspace must succeed post-migration.
+        // Same issue number in another workspace succeeds in v2.
         var flowUpsert = store.QueueUpsert(new WorkQueueUpsertRequest(
             IssueNumber: 58,
             Title: "MOBAflow #58",
             Priority: 1,
             WorkspaceId: "mobaflow"));
         Assert.True(flowUpsert.Ok);
+    }
+
+    private static string ComputeFileSha256(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexString(SHA256.HashData(stream));
     }
 }

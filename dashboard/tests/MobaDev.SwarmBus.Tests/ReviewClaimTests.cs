@@ -82,9 +82,10 @@ public sealed class ReviewClaimTests
         Assert.True(reclaimed.Reclaimed);
         Assert.Equal("claude-opus", reclaimed.PreviousHolder);
 
-        // Release and reclaim by third agent.
+        // Release by active holder and reclaim by third agent.
         var released = store.ReviewClaim(new ReviewClaimRequest(
             Action: "release",
+            Agent: "antigravity-gemini",
             PrNumber: 56,
             HeadSha: LowerSha,
             Role: "companion"));
@@ -108,6 +109,7 @@ public sealed class ReviewClaimTests
             HeadSha: LowerSha,
             Role: "companion"));
         Assert.Equal("completed", completed.Status);
+        Assert.Equal("completed", completed.Claim?.Status);
 
         var afterComplete = store.ReviewClaim(new ReviewClaimRequest(
             Action: "claim",
@@ -120,6 +122,7 @@ public sealed class ReviewClaimTests
 
         var releaseCompleted = store.ReviewClaim(new ReviewClaimRequest(
             Action: "release",
+            Agent: "codex",
             PrNumber: 56,
             HeadSha: LowerSha,
             Role: "companion"));
@@ -132,5 +135,72 @@ public sealed class ReviewClaimTests
             PrNumber: 56,
             HeadSha: UpperSha));
         Assert.Single(listed.Claims!);
+    }
+
+    [Fact]
+    public void CompleteAndReleaseRejectMissingExpiredOrMismatchedHolderClaims()
+    {
+        using var fx = new TempBusFixture();
+        var clock = new TestTimeProvider();
+        var store = fx.CreateStore(new SwarmBusStoreOptions { TimeProvider = clock });
+
+        // Missing claim cannot be completed or released.
+        Assert.Throws<InvalidOperationException>(() => store.ReviewClaim(new ReviewClaimRequest(
+            Action: "complete",
+            Agent: "codex",
+            PrNumber: 77,
+            HeadSha: LowerSha,
+            Role: "final")));
+        Assert.Throws<InvalidOperationException>(() => store.ReviewClaim(new ReviewClaimRequest(
+            Action: "release",
+            Agent: "codex",
+            PrNumber: 77,
+            HeadSha: LowerSha,
+            Role: "final")));
+
+        // Claim by claude-opus; another agent cannot complete or release it.
+        store.ReviewClaim(new ReviewClaimRequest(
+            Action: "claim",
+            Agent: "claude-opus",
+            PrNumber: 77,
+            HeadSha: LowerSha,
+            Role: "final",
+            TtlMinutes: 15));
+
+        Assert.Throws<InvalidOperationException>(() => store.ReviewClaim(new ReviewClaimRequest(
+            Action: "complete",
+            Agent: "codex",
+            PrNumber: 77,
+            HeadSha: LowerSha,
+            Role: "final")));
+        Assert.Throws<InvalidOperationException>(() => store.ReviewClaim(new ReviewClaimRequest(
+            Action: "release",
+            Agent: "codex",
+            PrNumber: 77,
+            HeadSha: LowerSha,
+            Role: "final")));
+
+        // Empty agent is rejected.
+        Assert.Throws<ArgumentException>(() => store.ReviewClaim(new ReviewClaimRequest(
+            Action: "complete",
+            Agent: "",
+            PrNumber: 77,
+            HeadSha: LowerSha,
+            Role: "final")));
+
+        // Expired lease cannot be completed or released by previous holder without reclaiming.
+        clock.Advance(TimeSpan.FromMinutes(16));
+        Assert.Throws<InvalidOperationException>(() => store.ReviewClaim(new ReviewClaimRequest(
+            Action: "complete",
+            Agent: "claude-opus",
+            PrNumber: 77,
+            HeadSha: LowerSha,
+            Role: "final")));
+        Assert.Throws<InvalidOperationException>(() => store.ReviewClaim(new ReviewClaimRequest(
+            Action: "release",
+            Agent: "claude-opus",
+            PrNumber: 77,
+            HeadSha: LowerSha,
+            Role: "final")));
     }
 }

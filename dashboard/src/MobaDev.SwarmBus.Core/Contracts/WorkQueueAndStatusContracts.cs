@@ -78,3 +78,14 @@ public sealed record SwarmBusStatusSnapshot(
     IReadOnlyList<RecipientUnreadCount> UnreadByRecipient,
     IReadOnlyList<PathLockLease> ActiveLocks,
     IReadOnlyList<SwarmMessageEnvelope> RecentMessages);
+
+/// <summary>
+/// Summary of a read-only import from a legacy single-repo <c>swarm-bus.db</c> into <c>swarm-bus-v2.db</c>.
+/// </summary>
+public sealed record LegacyImportResult(
+    string SourcePath,
+    int MessagesImported,
+    int LocksImported,
+    int ReviewClaimsImported,
+    int WorkQueueItemsImported,
+    int MetaEntriesImported);
