@@ -647,6 +647,51 @@ public sealed partial class SwarmBusStore
             Messages: messages);
     }
 
+    /// <summary>
+    /// Zero-token blocking wait for unread Swarm Bus messages newer than <see cref="SwarmWaitRequest.SinceId"/>.
+    /// Uses <see cref="FileSystemWatcher"/> on the SQLite database/WAL directory with a 250ms fallback poll.
+    /// </summary>
+    public async Task<SwarmWaitResult> WaitForMessagesAsync(SwarmWaitRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var (normalizedAgent, sinceId, timeoutMs, clampedLimit, allWorkspaces, normalizedWorkspace, includeAllRecipients) =
+            ValidateWaitRequest(request);
+
+        var (immediate, hasMore) = await ExecuteReadAsync(
+            connection => ReadWaitMessagesBatch(
+                connection,
+                allWorkspaces,
+                normalizedWorkspace,
+                includeAllRecipients,
+                normalizedAgent,
+                clampedLimit,
+                sinceId),
+            cancellationToken).ConfigureAwait(false);
+
+        if (immediate.Count > 0)
+        {
+            return new SwarmWaitResult(
+                Ok: true,
+                WorkspaceId: normalizedWorkspace,
+                TimedOut: false,
+                LatestId: Math.Max(sinceId, immediate[^1].Id),
+                Messages: immediate,
+                HasMore: hasMore);
+        }
+
+        return await WaitForNewMessagesLoopAsync(
+            normalizedAgent,
+            sinceId,
+            timeoutMs,
+            clampedLimit,
+            allWorkspaces,
+            normalizedWorkspace,
+            includeAllRecipients,
+            cancellationToken).ConfigureAwait(false);
+    }
+
     public SwarmAckResult AckMessage(long messageId, string agent, string? reply = null)
     {
         if (messageId <= 0)
@@ -765,6 +810,29 @@ public sealed partial class SwarmBusStore
             cancellationToken);
     }
 
+    /// <summary>
+    /// Single-roundtrip startup: optionally claims <see cref="SwarmStartWorkRequest.Paths"/>,
+    /// retrieves unread inbox messages for <see cref="SwarmStartWorkRequest.Agent"/>,
+    /// and returns active foreign locks in the same workspace.
+    /// </summary>
+    public SwarmStartWorkResult StartWork(SwarmStartWorkRequest request)
+    {
+        var (agent, workspaceId, cleanPaths, ttlMinutes, messageLimit) = ValidateStartWorkRequest(request);
+        return ExecuteInImmediateTransaction(
+            connection => ExecuteStartWorkInTx(connection, agent, workspaceId, cleanPaths, request.PrNumber, ttlMinutes, messageLimit));
+    }
+
+    /// <summary>
+    /// Asynchronously executes single-roundtrip <see cref="StartWork"/>.
+    /// </summary>
+    public Task<SwarmStartWorkResult> StartWorkAsync(SwarmStartWorkRequest request, CancellationToken cancellationToken = default)
+    {
+        var (agent, workspaceId, cleanPaths, ttlMinutes, messageLimit) = ValidateStartWorkRequest(request);
+        return ExecuteInImmediateTransactionAsync(
+            connection => ExecuteStartWorkInTx(connection, agent, workspaceId, cleanPaths, request.PrNumber, ttlMinutes, messageLimit),
+            cancellationToken);
+    }
+
     public ReviewClaimResult ReviewClaim(ReviewClaimRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -842,6 +910,32 @@ public sealed partial class SwarmBusStore
             cancellationToken);
     }
 
+    /// <summary>
+    /// Strictly resume-only: renews an active claimed lease for <paramref name="issueNumber"/> held by <paramref name="owner"/>.
+    /// Returns <c>Ok = false, Resumed = false, Reason = "lease_lost"</c> when no matching active lease is held; never claims new work.
+    /// </summary>
+    public WorkQueueNextResult QueueResume(int issueNumber, string owner, string? workspaceId = null)
+    {
+        var (normalizedIssue, normalizedOwner, normalizedWorkspace) = ValidateQueueResumeArgs(issueNumber, owner, workspaceId);
+        return ExecuteInImmediateTransaction(connection =>
+            ExecuteQueueResumeInTx(connection, normalizedIssue, normalizedOwner, normalizedWorkspace));
+    }
+
+    /// <summary>
+    /// Asynchronously renews an active claimed lease for <paramref name="issueNumber"/> held by <paramref name="owner"/> without claiming new work.
+    /// </summary>
+    public Task<WorkQueueNextResult> QueueResumeAsync(
+        int issueNumber,
+        string owner,
+        string? workspaceId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var (normalizedIssue, normalizedOwner, normalizedWorkspace) = ValidateQueueResumeArgs(issueNumber, owner, workspaceId);
+        return ExecuteInImmediateTransactionAsync(
+            connection => ExecuteQueueResumeInTx(connection, normalizedIssue, normalizedOwner, normalizedWorkspace),
+            cancellationToken);
+    }
+
     public WorkQueueMutationResult QueueRelease(int issueNumber, string? agent = null, string? workspaceId = null)
     {
         var (normalizedWorkspace, normalizedAgent) = ValidateQueueReleaseArgs(issueNumber, agent, workspaceId);
@@ -860,30 +954,48 @@ public sealed partial class SwarmBusStore
             cancellationToken);
     }
 
-    public WorkQueueMutationResult QueueDone(int issueNumber, string? workspaceId = null)
-    {
-        if (issueNumber <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(issueNumber), "bus_queue done requires positive integer \"issue_number\".");
-        }
+    public WorkQueueMutationResult QueueDone(
+        int issueNumber,
+        string? workspaceId = null,
+        string? expectedStatus = null,
+        string? expectedOwner = null,
+        DateTimeOffset? claimedBeforeUtc = null) =>
+        QueueDone(new WorkQueueDoneRequest(
+            IssueNumber: issueNumber,
+            WorkspaceId: workspaceId,
+            ExpectedStatus: expectedStatus,
+            ExpectedOwner: expectedOwner,
+            ClaimedBeforeUtc: claimedBeforeUtc));
 
-        var normalizedWorkspace = PathPatternMatcher.NormalizeWorkspaceId(workspaceId);
-        return ExecuteInImmediateTransaction(connection => ExecuteQueueDoneInTx(connection, issueNumber, normalizedWorkspace));
+    public WorkQueueMutationResult QueueDone(WorkQueueDoneRequest request)
+    {
+        var parsed = ValidateQueueDoneRequest(request);
+        return ExecuteInImmediateTransaction(connection => ExecuteQueueDoneInTx(connection, parsed));
     }
 
     public Task<WorkQueueMutationResult> QueueDoneAsync(
         int issueNumber,
         string? workspaceId = null,
+        string? expectedStatus = null,
+        string? expectedOwner = null,
+        DateTimeOffset? claimedBeforeUtc = null,
+        CancellationToken cancellationToken = default) =>
+        QueueDoneAsync(
+            new WorkQueueDoneRequest(
+                IssueNumber: issueNumber,
+                WorkspaceId: workspaceId,
+                ExpectedStatus: expectedStatus,
+                ExpectedOwner: expectedOwner,
+                ClaimedBeforeUtc: claimedBeforeUtc),
+            cancellationToken);
+
+    public Task<WorkQueueMutationResult> QueueDoneAsync(
+        WorkQueueDoneRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (issueNumber <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(issueNumber), "bus_queue done requires positive integer \"issue_number\".");
-        }
-
-        var normalizedWorkspace = PathPatternMatcher.NormalizeWorkspaceId(workspaceId);
+        var parsed = ValidateQueueDoneRequest(request);
         return ExecuteInImmediateTransactionAsync(
-            connection => ExecuteQueueDoneInTx(connection, issueNumber, normalizedWorkspace),
+            connection => ExecuteQueueDoneInTx(connection, parsed),
             cancellationToken);
     }
 
@@ -1678,6 +1790,215 @@ public sealed partial class SwarmBusStore
         return (normalizedAgent, clampedLimit, allWorkspaces, normalizedWorkspace, includeAllRecipients);
     }
 
+    private static (
+        string Agent,
+        long SinceId,
+        int TimeoutMs,
+        int Limit,
+        bool AllWorkspaces,
+        string WorkspaceId,
+        bool AllRecipients) ValidateWaitRequest(SwarmWaitRequest request)
+    {
+        var normalizedAgent = RequireNonEmpty(request.Agent, "bus_wait requires non-empty \"agent\".", nameof(request));
+        var sinceId = Math.Max(0, request.SinceId);
+        var timeoutMs = Math.Clamp(request.TimeoutMs, SwarmBusConstants.MinWaitTimeoutMs, SwarmBusConstants.MaxWaitTimeoutMs);
+        var clampedLimit = Math.Clamp(request.Limit, 1, 100);
+        var (allWorkspaces, normalizedWorkspace) = ResolveWorkspaceFilter(request.WorkspaceId);
+        var includeAllRecipients = !request.MentionsOnly &&
+                                   (normalizedAgent.Equals(AllRecipient, StringComparison.OrdinalIgnoreCase) ||
+                                    normalizedAgent == AllWildcard);
+
+        return (normalizedAgent, sinceId, timeoutMs, clampedLimit, allWorkspaces, normalizedWorkspace, includeAllRecipients);
+    }
+
+    private async Task<SwarmWaitResult> WaitForNewMessagesLoopAsync(
+        string normalizedAgent,
+        long sinceId,
+        int timeoutMs,
+        int clampedLimit,
+        bool allWorkspaces,
+        string normalizedWorkspace,
+        bool includeAllRecipients,
+        CancellationToken cancellationToken)
+    {
+        var dbDir = Path.GetDirectoryName(_dbPath);
+        var dbFileName = Path.GetFileName(_dbPath);
+        using var signal = new SemaphoreSlim(0, 1);
+        FileSystemWatcher? watcher = null;
+
+        try
+        {
+            if (!string.IsNullOrEmpty(dbDir) && Directory.Exists(dbDir) && !string.IsNullOrEmpty(dbFileName))
+            {
+                try
+                {
+                    watcher = new FileSystemWatcher(dbDir, $"{dbFileName}*")
+                    {
+                        NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName,
+                        IncludeSubdirectories = false
+                    };
+                    static bool IsShmFile(string? name) =>
+                        !string.IsNullOrEmpty(name) && name.EndsWith("-shm", StringComparison.OrdinalIgnoreCase);
+
+                    void OnFsEvent(object _, FileSystemEventArgs e)
+                    {
+                        if (!IsShmFile(e.Name))
+                        {
+                            TryReleaseWaitSignal(signal);
+                        }
+                    }
+
+                    void OnFsRename(object _, RenamedEventArgs e)
+                    {
+                        if (!IsShmFile(e.Name))
+                        {
+                            TryReleaseWaitSignal(signal);
+                        }
+                    }
+
+                    watcher.Changed += OnFsEvent;
+                    watcher.Created += OnFsEvent;
+                    watcher.Renamed += OnFsRename;
+                    watcher.EnableRaisingEvents = true;
+                }
+                catch (Exception ex) when (ex is IOException or PlatformNotSupportedException or UnauthorizedAccessException)
+                {
+                    watcher?.Dispose();
+                    watcher = null;
+                }
+            }
+
+            // Re-check immediately after arming FileSystemWatcher to close the race window.
+            var (recheck, recheckHasMore) = await ExecuteReadAsync(
+                connection => ReadWaitMessagesBatch(
+                    connection,
+                    allWorkspaces,
+                    normalizedWorkspace,
+                    includeAllRecipients,
+                    normalizedAgent,
+                    clampedLimit,
+                    sinceId),
+                cancellationToken).ConfigureAwait(false);
+            if (recheck.Count > 0)
+            {
+                return new SwarmWaitResult(
+                    Ok: true,
+                    WorkspaceId: normalizedWorkspace,
+                    TimedOut: false,
+                    LatestId: Math.Max(sinceId, recheck[^1].Id),
+                    Messages: recheck,
+                    HasMore: recheckHasMore);
+            }
+
+            var deadlineTick = Environment.TickCount64 + timeoutMs;
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var remainingMs = (int)Math.Max(0, deadlineTick - Environment.TickCount64);
+                if (remainingMs <= 0)
+                {
+                    break;
+                }
+
+                var sliceMs = Math.Min(remainingMs, SwarmBusConstants.WaitFallbackPollMs);
+                await signal.WaitAsync(sliceMs, cancellationToken).ConfigureAwait(false);
+
+                var (messages, hasMore) = await ExecuteReadAsync(
+                    connection => ReadWaitMessagesBatch(
+                        connection,
+                        allWorkspaces,
+                        normalizedWorkspace,
+                        includeAllRecipients,
+                        normalizedAgent,
+                        clampedLimit,
+                        sinceId),
+                    cancellationToken).ConfigureAwait(false);
+                if (messages.Count > 0)
+                {
+                    return new SwarmWaitResult(
+                        Ok: true,
+                        WorkspaceId: normalizedWorkspace,
+                        TimedOut: false,
+                        LatestId: Math.Max(sinceId, messages[^1].Id),
+                        Messages: messages,
+                        HasMore: hasMore);
+                }
+            }
+
+            return new SwarmWaitResult(
+                Ok: true,
+                WorkspaceId: normalizedWorkspace,
+                TimedOut: true,
+                LatestId: sinceId,
+                Messages: [],
+                HasMore: false);
+        }
+        finally
+        {
+            if (watcher is not null)
+            {
+                try
+                {
+                    watcher.EnableRaisingEvents = false;
+                }
+                catch
+                {
+                    // Ignore watcher shutdown error.
+                }
+
+                watcher.Dispose();
+            }
+        }
+    }
+
+    private static void TryReleaseWaitSignal(SemaphoreSlim signal)
+    {
+        try
+        {
+            if (signal.CurrentCount == 0)
+            {
+                signal.Release();
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // Wait loop already exited.
+        }
+        catch (SemaphoreFullException)
+        {
+            // Signal already queued.
+        }
+    }
+
+    private static (List<SwarmMessageEnvelope> Messages, bool HasMore) ReadWaitMessagesBatch(
+        SqliteConnection connection,
+        bool allWorkspaces,
+        string workspaceId,
+        bool includeAllRecipients,
+        string normalizedAgent,
+        int clampedLimit,
+        long sinceId)
+    {
+        var rows = ReadInboxMessages(
+            connection,
+            allWorkspaces,
+            workspaceId,
+            includeAllRecipients,
+            normalizedAgent,
+            unreadOnly: true,
+            limit: clampedLimit + 1,
+            sinceId: sinceId,
+            ascending: true);
+
+        var hasMore = rows.Count > clampedLimit;
+        if (hasMore)
+        {
+            rows.RemoveRange(clampedLimit, rows.Count - clampedLimit);
+        }
+
+        return (rows, hasMore);
+    }
+
     private static List<SwarmMessageEnvelope> ReadInboxMessages(
         SqliteConnection connection,
         bool allWorkspaces,
@@ -1685,10 +2006,13 @@ public sealed partial class SwarmBusStore
         bool includeAllRecipients,
         string normalizedAgent,
         bool unreadOnly,
-        int limit)
+        int limit,
+        long sinceId = 0,
+        bool ascending = false)
     {
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
+        var orderDirection = ascending ? "ASC" : "DESC";
+        cmd.CommandText = $"""
             SELECT id, workspace_id, created_at_utc, sender, recipient, topic, body,
                    pr_number, issue_number, priority, reply_to_id, status,
                    acked_by, acked_at_utc, state, wake_ok, wake_state, wake_attempt_expires_at_utc
@@ -1696,7 +2020,8 @@ public sealed partial class SwarmBusStore
             WHERE (@allWorkspaces = 1 OR workspace_id = @workspaceId)
               AND (@allRecipients = 1 OR lower(recipient) = lower(@agent) OR lower(recipient) = 'all')
               AND (@unreadOnly = 0 OR status = 'unread')
-            ORDER BY id DESC
+              AND (@sinceId <= 0 OR id > @sinceId)
+            ORDER BY id {orderDirection}
             LIMIT @limit
             """;
         cmd.Parameters.AddWithValue(ParamAllWorkspaces, allWorkspaces ? 1 : 0);
@@ -1704,6 +2029,7 @@ public sealed partial class SwarmBusStore
         cmd.Parameters.AddWithValue(ParamAllRecipients, includeAllRecipients ? 1 : 0);
         cmd.Parameters.AddWithValue(ParamAgent, normalizedAgent);
         cmd.Parameters.AddWithValue(ParamUnreadOnly, unreadOnly ? 1 : 0);
+        cmd.Parameters.AddWithValue("@sinceId", sinceId);
         cmd.Parameters.AddWithValue(ParamLimit, limit);
         return ReadMessages(cmd);
     }
@@ -1768,6 +2094,78 @@ public sealed partial class SwarmBusStore
 
         var ttlMinutes = Math.Clamp(request.TtlMinutes, SwarmBusConstants.MinLockTtlMinutes, SwarmBusConstants.MaxLockTtlMinutes);
         return (agent, workspaceId, cleanPaths, ttlMinutes);
+    }
+
+    private static (string Agent, string WorkspaceId, List<string> CleanPaths, int TtlMinutes, int MessageLimit) ValidateStartWorkRequest(
+        SwarmStartWorkRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var agent = RequireNonEmpty(request.Agent, "bus_start_work requires non-empty \"agent\".", nameof(request));
+        var workspaceId = PathPatternMatcher.NormalizeWorkspaceId(request.WorkspaceId);
+        var cleanPaths = (request.Paths ?? [])
+            .Select(PathPatternMatcher.CanonicalizeForStorage)
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var ttlMinutes = Math.Clamp(request.TtlMinutes, SwarmBusConstants.MinLockTtlMinutes, SwarmBusConstants.MaxLockTtlMinutes);
+        var messageLimit = Math.Clamp(request.MessageLimit, 1, 100);
+        return (agent, workspaceId, cleanPaths, ttlMinutes, messageLimit);
+    }
+
+    private SwarmStartWorkResult ExecuteStartWorkInTx(
+        SqliteConnection connection,
+        string agent,
+        string workspaceId,
+        List<string> cleanPaths,
+        int? prNumber,
+        int ttlMinutes,
+        int messageLimit)
+    {
+        bool ok;
+        IReadOnlyList<string> claimedPaths;
+        IReadOnlyList<LockConflict> conflicts;
+        IReadOnlyList<PathLockLease> locks;
+
+        if (cleanPaths.Count > 0)
+        {
+            var claimResult = ClaimLocksInTx(connection, agent, workspaceId, cleanPaths, prNumber, ttlMinutes);
+            ok = claimResult.Ok;
+            claimedPaths = claimResult.ClaimedPaths;
+            conflicts = claimResult.Conflicts;
+            locks = claimResult.Locks;
+        }
+        else
+        {
+            PruneExpiredLocksInTx(connection, _timeProvider.GetUtcNow());
+            ok = true;
+            claimedPaths = [];
+            conflicts = [];
+            locks = ReadLocksInWorkspace(connection, workspaceId);
+        }
+
+        var includeAllRecipients = agent.Equals(AllRecipient, StringComparison.OrdinalIgnoreCase) || agent == AllWildcard;
+        var unreadMessages = ReadInboxMessages(
+            connection,
+            allWorkspaces: false,
+            workspaceId,
+            includeAllRecipients,
+            agent,
+            unreadOnly: true,
+            messageLimit);
+
+        var foreignLocks = locks
+            .Where(l => !string.Equals(l.Agent, agent, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return new SwarmStartWorkResult(
+            Ok: ok,
+            WorkspaceId: workspaceId,
+            ClaimedPaths: claimedPaths,
+            Conflicts: conflicts,
+            Locks: locks,
+            UnreadMessages: unreadMessages,
+            ForeignLocks: foreignLocks);
     }
 
     private LockClaimResult ClaimLocksInTx(
@@ -2109,6 +2507,96 @@ public sealed partial class SwarmBusStore
             Item: claimed);
     }
 
+    private static (int IssueNumber, string Owner, string WorkspaceId) ValidateQueueResumeArgs(
+        int issueNumber,
+        string owner,
+        string? workspaceId)
+    {
+        if (issueNumber <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(issueNumber), "bus_queue resume requires positive integer \"issue_number\".");
+        }
+
+        var normalizedOwner = RequireNonEmpty(owner, "bus_queue resume requires non-empty \"owner\".", nameof(owner));
+        var normalizedWorkspace = PathPatternMatcher.NormalizeWorkspaceId(workspaceId);
+        return (issueNumber, normalizedOwner, normalizedWorkspace);
+    }
+
+    private WorkQueueNextResult ExecuteQueueResumeInTx(
+        SqliteConnection connection,
+        int issueNumber,
+        string normalizedOwner,
+        string normalizedWorkspace)
+    {
+        var now = _timeProvider.GetUtcNow();
+        var nowIso = FormatUtc(now);
+        var leaseExpiresIso = FormatUtc(now.AddHours(SwarmBusConstants.DefaultQueueLeaseHours));
+
+        long? matchedId = null;
+        using (var selectCmd = connection.CreateCommand())
+        {
+            selectCmd.CommandText = """
+                SELECT id
+                FROM work_queue
+                WHERE workspace_id = @workspaceId
+                  AND issue_number = @issueNumber
+                  AND status = 'claimed'
+                  AND lower(claimed_by) = lower(@owner)
+                  AND lease_expires_utc > @nowIso
+                LIMIT 1
+                """;
+            selectCmd.Parameters.AddWithValue(ParamWorkspaceId, normalizedWorkspace);
+            selectCmd.Parameters.AddWithValue(ParamIssueNumber, issueNumber);
+            selectCmd.Parameters.AddWithValue("@owner", normalizedOwner);
+            selectCmd.Parameters.AddWithValue("@nowIso", nowIso);
+            var scalar = selectCmd.ExecuteScalar();
+            if (scalar is not null && scalar != DBNull.Value)
+            {
+                matchedId = Convert.ToInt64(scalar, CultureInfo.InvariantCulture);
+            }
+        }
+
+        if (matchedId.HasValue)
+        {
+            using var updateCmd = connection.CreateCommand();
+            updateCmd.CommandText = """
+                UPDATE work_queue
+                SET lease_expires_utc = @leaseExpires, updated_at_utc = @updatedAt
+                WHERE id = @id
+                  AND status = 'claimed'
+                  AND lower(claimed_by) = lower(@owner)
+                  AND lease_expires_utc > @nowIso
+                """;
+            updateCmd.Parameters.AddWithValue(ParamLeaseExpires, leaseExpiresIso);
+            updateCmd.Parameters.AddWithValue(ParamUpdatedAt, nowIso);
+            updateCmd.Parameters.AddWithValue(ParamId, matchedId.Value);
+            updateCmd.Parameters.AddWithValue("@owner", normalizedOwner);
+            updateCmd.Parameters.AddWithValue("@nowIso", nowIso);
+
+            if (updateCmd.ExecuteNonQuery() > 0)
+            {
+                return new WorkQueueNextResult(
+                    Ok: true,
+                    WorkspaceId: normalizedWorkspace,
+                    Resumed: true,
+                    CodeWip: 0,
+                    ActiveClaimedCodeCount: 0,
+                    EffectiveCodeWip: 0,
+                    Item: ReadWorkQueueItemById(connection, matchedId.Value));
+            }
+        }
+
+        return new WorkQueueNextResult(
+            Ok: false,
+            WorkspaceId: normalizedWorkspace,
+            Resumed: false,
+            CodeWip: 0,
+            ActiveClaimedCodeCount: 0,
+            EffectiveCodeWip: 0,
+            Item: null,
+            Reason: "lease_lost");
+    }
+
     private static (string WorkspaceId, string? Agent) ValidateQueueReleaseArgs(int issueNumber, string? agent, string? workspaceId)
     {
         if (issueNumber <= 0)
@@ -2150,27 +2638,83 @@ public sealed partial class SwarmBusStore
             Item: ReadWorkQueueItem(connection, normalizedWorkspace, issueNumber));
     }
 
-    private WorkQueueMutationResult ExecuteQueueDoneInTx(SqliteConnection connection, int issueNumber, string normalizedWorkspace)
+    private sealed record ParsedQueueDone(
+        string WorkspaceId,
+        int IssueNumber,
+        string? ExpectedStatus,
+        string? ExpectedOwner,
+        string? ClaimedBeforeIso,
+        bool HasGuards);
+
+    private static ParsedQueueDone ValidateQueueDoneRequest(WorkQueueDoneRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.IssueNumber <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "bus_queue done requires positive integer \"issue_number\".");
+        }
+
+        var workspaceId = PathPatternMatcher.NormalizeWorkspaceId(request.WorkspaceId);
+        var expectedStatus = string.IsNullOrWhiteSpace(request.ExpectedStatus)
+            ? null
+            : request.ExpectedStatus.Trim().ToLowerInvariant();
+        if (expectedStatus is not null && !SwarmBusConstants.ValidQueueStatuses.Contains(expectedStatus))
+        {
+            throw new ArgumentException(
+                $"Invalid expected_status '{expectedStatus}'. Expected: queued, claimed, done, removed.",
+                nameof(request));
+        }
+
+        var expectedOwner = string.IsNullOrWhiteSpace(request.ExpectedOwner) ? null : request.ExpectedOwner.Trim();
+        var claimedBeforeIso = request.ClaimedBeforeUtc.HasValue ? FormatUtc(request.ClaimedBeforeUtc.Value) : null;
+        var hasGuards = expectedStatus is not null || expectedOwner is not null || claimedBeforeIso is not null;
+
+        return new ParsedQueueDone(workspaceId, request.IssueNumber, expectedStatus, expectedOwner, claimedBeforeIso, hasGuards);
+    }
+
+    private WorkQueueMutationResult ExecuteQueueDoneInTx(SqliteConnection connection, ParsedQueueDone parsed)
     {
         var nowIso = FormatUtc(_timeProvider.GetUtcNow());
         using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             UPDATE work_queue
             SET status = 'done', lease_expires_utc = NULL, updated_at_utc = @updatedAt
-            WHERE workspace_id = @workspaceId AND issue_number = @issueNumber
+            WHERE workspace_id = @workspaceId
+              AND issue_number = @issueNumber
+              AND (@expectedStatus IS NULL OR status = @expectedStatus)
+              AND (@expectedOwner IS NULL OR lower(claimed_by) = lower(@expectedOwner))
+              AND (@claimedBeforeUtc IS NULL OR (claimed_at_utc IS NOT NULL AND claimed_at_utc < @claimedBeforeUtc))
             """;
         cmd.Parameters.AddWithValue(ParamUpdatedAt, nowIso);
-        cmd.Parameters.AddWithValue(ParamWorkspaceId, normalizedWorkspace);
-        cmd.Parameters.AddWithValue(ParamIssueNumber, issueNumber);
+        cmd.Parameters.AddWithValue(ParamWorkspaceId, parsed.WorkspaceId);
+        cmd.Parameters.AddWithValue(ParamIssueNumber, parsed.IssueNumber);
+        cmd.Parameters.AddWithValue("@expectedStatus", (object?)parsed.ExpectedStatus ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@expectedOwner", (object?)parsed.ExpectedOwner ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@claimedBeforeUtc", (object?)parsed.ClaimedBeforeIso ?? DBNull.Value);
 
         var changed = cmd.ExecuteNonQuery() > 0;
+        var item = ReadWorkQueueItem(connection, parsed.WorkspaceId, parsed.IssueNumber);
+
+        if (!changed && parsed.HasGuards && item is not null)
+        {
+            return new WorkQueueMutationResult(
+                Ok: false,
+                Action: StatusDone,
+                WorkspaceId: parsed.WorkspaceId,
+                IssueNumber: parsed.IssueNumber,
+                Changed: false,
+                Item: item,
+                Reason: "guard_mismatch");
+        }
+
         return new WorkQueueMutationResult(
             Ok: true,
             Action: StatusDone,
-            WorkspaceId: normalizedWorkspace,
-            IssueNumber: issueNumber,
+            WorkspaceId: parsed.WorkspaceId,
+            IssueNumber: parsed.IssueNumber,
             Changed: changed,
-            Item: ReadWorkQueueItem(connection, normalizedWorkspace, issueNumber));
+            Item: item);
     }
 
     private static (string WorkspaceId, string? StatusFilter) ValidateQueueListArgs(string? status, string? workspaceId)

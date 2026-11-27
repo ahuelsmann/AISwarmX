@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\MobaDev.SwarmBus.Core\MobaDev.SwarmBus.Core.csproj" />
+    <ProjectReference Include="..\..\src\MobaDev.SwarmBus.Mcp\MobaDev.SwarmBus.Mcp.csproj" />
   </ItemGroup>
 
   <ItemGroup>

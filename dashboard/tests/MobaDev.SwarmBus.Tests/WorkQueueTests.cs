@@ -133,4 +133,118 @@ public sealed class WorkQueueTests
         Assert.True(done.Changed);
         Assert.Equal("done", done.Item!.Status);
     }
+
+    [Fact]
+    public async Task QueueResumeRenewsActiveLeaseAndReturnsLeaseLostWithoutClaimingNewWork()
+    {
+        using var fx = new TempBusFixture();
+        var clock = new TestTimeProvider();
+        var store = fx.CreateStore(new SwarmBusStoreOptions { TimeProvider = clock });
+
+        store.QueueUpsert(new WorkQueueUpsertRequest(IssueNumber: 10, Title: "Queued item", Priority: 1, RiskClass: "L"));
+        store.QueueUpsert(new WorkQueueUpsertRequest(IssueNumber: 20, Title: "Active item", Priority: 0, RiskClass: "M"));
+
+        // Neither agent holds a claim yet: resume must fail with lease_lost and NOT claim #20.
+        var noLease = store.QueueResume(20, "codex");
+        Assert.False(noLease.Ok);
+        Assert.False(noLease.Resumed);
+        Assert.Null(noLease.Item);
+        Assert.Equal("lease_lost", noLease.Reason);
+        Assert.Equal("queued", store.QueueList().Items.Single(i => i.IssueNumber == 20).Status);
+
+        // Claim #20 via QueueNext.
+        var claimed = await store.QueueNextAsync("codex");
+        Assert.True(claimed.Ok);
+        Assert.Equal(20, claimed.Item!.IssueNumber);
+
+        // Wrong issue_number held by same agent fails with lease_lost and does not claim #10.
+        var wrongIssue = store.QueueResume(10, "codex");
+        Assert.False(wrongIssue.Ok);
+        Assert.False(wrongIssue.Resumed);
+        Assert.Equal("lease_lost", wrongIssue.Reason);
+        Assert.Equal("queued", store.QueueList().Items.Single(i => i.IssueNumber == 10).Status);
+
+        // Foreign agent cannot resume codex's claim and must NOT claim #10.
+        var foreign = await store.QueueResumeAsync(20, "claude-opus");
+        Assert.False(foreign.Ok);
+        Assert.False(foreign.Resumed);
+        Assert.Null(foreign.Item);
+        Assert.Equal("lease_lost", foreign.Reason);
+        Assert.Equal("queued", store.QueueList().Items.Single(i => i.IssueNumber == 10).Status);
+
+        // Same agent renews after 1h -> lease extends +4h from current clock.
+        clock.Advance(TimeSpan.FromHours(1));
+        var renewed = await store.QueueResumeAsync(20, "CODEX");
+        Assert.True(renewed.Ok);
+        Assert.True(renewed.Resumed);
+        Assert.Equal(20, renewed.Item!.IssueNumber);
+        Assert.Equal(clock.GetUtcNow().AddHours(4), renewed.Item.LeaseExpiresUtc);
+
+        // Once lease expires, QueueResume returns lease_lost and never falls through to claim #10 or re-claim #20.
+        clock.Advance(TimeSpan.FromMinutes(241));
+        var expired = store.QueueResume(20, "codex");
+        Assert.False(expired.Ok);
+        Assert.False(expired.Resumed);
+        Assert.Null(expired.Item);
+        Assert.Equal("lease_lost", expired.Reason);
+        Assert.Equal("queued", store.QueueList().Items.Single(i => i.IssueNumber == 10).Status);
+    }
+
+    [Fact]
+    public async Task QueueDoneWithAtomicGuardsEnforcesStatusOwnerAndClaimedBefore()
+    {
+        using var fx = new TempBusFixture();
+        var clock = new TestTimeProvider();
+        var store = fx.CreateStore(new SwarmBusStoreOptions { TimeProvider = clock });
+
+        store.QueueUpsert(new WorkQueueUpsertRequest(IssueNumber: 50, Title: "Guarded task", Priority: 0, RiskClass: "M"));
+        var claimed = store.QueueNext("codex");
+        var claimedAt = claimed.Item!.ClaimedAtUtc!.Value;
+
+        // Wrong owner -> guard_mismatch.
+        var wrongOwner = store.QueueDone(50, expectedStatus: "claimed", expectedOwner: "claude-opus");
+        Assert.False(wrongOwner.Ok);
+        Assert.False(wrongOwner.Changed);
+        Assert.Equal("guard_mismatch", wrongOwner.Reason);
+        Assert.Equal("claimed", wrongOwner.Item!.Status);
+
+        // Wrong status -> guard_mismatch.
+        var wrongStatus = await store.QueueDoneAsync(50, expectedStatus: "queued", expectedOwner: "codex");
+        Assert.False(wrongStatus.Ok);
+        Assert.False(wrongStatus.Changed);
+        Assert.Equal("guard_mismatch", wrongStatus.Reason);
+
+        // ClaimedBeforeUtc equal to claimedAt (strictly '<' fails) -> guard_mismatch.
+        var tooEarly = await store.QueueDoneAsync(new WorkQueueDoneRequest(
+            IssueNumber: 50,
+            ExpectedStatus: "claimed",
+            ExpectedOwner: "codex",
+            ClaimedBeforeUtc: claimedAt));
+        Assert.False(tooEarly.Ok);
+        Assert.False(tooEarly.Changed);
+        Assert.Equal("guard_mismatch", tooEarly.Reason);
+
+        // Matching all guards -> succeeds.
+        var succeeded = await store.QueueDoneAsync(new WorkQueueDoneRequest(
+            IssueNumber: 50,
+            ExpectedStatus: "claimed",
+            ExpectedOwner: "CODEX",
+            ClaimedBeforeUtc: claimedAt.AddSeconds(1)));
+        Assert.True(succeeded.Ok);
+        Assert.True(succeeded.Changed);
+        Assert.Null(succeeded.Reason);
+        Assert.Equal("done", succeeded.Item!.Status);
+
+        // Re-running with expectedStatus='claimed' on now-done row -> guard_mismatch.
+        var staleRepeat = store.QueueDone(50, expectedStatus: "claimed");
+        Assert.False(staleRepeat.Ok);
+        Assert.False(staleRepeat.Changed);
+        Assert.Equal("guard_mismatch", staleRepeat.Reason);
+
+        // Non-existent issue returns Ok = true, Changed = false, Item = null.
+        var missing = store.QueueDone(999, expectedStatus: "claimed");
+        Assert.True(missing.Ok);
+        Assert.False(missing.Changed);
+        Assert.Null(missing.Item);
+    }
 }

@@ -105,3 +105,25 @@ public sealed record SwarmAckResult(
     string AckedBy,
     DateTimeOffset AckedAtUtc,
     SwarmSendResult? ReplyMessage = null);
+
+/// <summary>
+/// Request payload for zero-token blocking wait for unread Swarm Bus messages.
+/// </summary>
+public sealed record SwarmWaitRequest(
+    string Agent,
+    long SinceId = 0,
+    bool MentionsOnly = false,
+    int TimeoutMs = SwarmBusConstants.DefaultWaitTimeoutMs,
+    int Limit = 20,
+    string? WorkspaceId = null);
+
+/// <summary>
+/// Result returned by <c>WaitForMessagesAsync</c>.
+/// </summary>
+public sealed record SwarmWaitResult(
+    bool Ok,
+    string WorkspaceId,
+    bool TimedOut,
+    long LatestId,
+    IReadOnlyList<SwarmMessageEnvelope> Messages,
+    bool HasMore = false);

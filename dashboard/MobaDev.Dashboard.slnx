@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/MobaDev.Dashboard.Api/MobaDev.Dashboard.Api.csproj" />
     <Project Path="src/MobaDev.SwarmBus.Core/MobaDev.SwarmBus.Core.csproj" />
+    <Project Path="src/MobaDev.SwarmBus.Mcp/MobaDev.SwarmBus.Mcp.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/MobaDev.Dashboard.Api.Tests/MobaDev.Dashboard.Api.Tests.csproj" />

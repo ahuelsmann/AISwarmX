@@ -17,6 +17,10 @@ public static class SwarmBusConstants
     public const int MaxReviewClaimTtlMinutes = 1440;
     public const int DefaultQueueLeaseHours = 4;
     public const int CodeWipClaimLimit = 2;
+    public const int DefaultWaitTimeoutMs = 30_000;
+    public const int MinWaitTimeoutMs = 1;
+    public const int MaxWaitTimeoutMs = 120_000;
+    public const int WaitFallbackPollMs = 250;
 
     public static readonly IReadOnlySet<string> HeadlessRecipients = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {

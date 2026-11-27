@@ -41,6 +41,16 @@ public sealed record WorkQueueNextResult(
     string? Reason = null);
 
 /// <summary>
+/// Request payload to mark a work queue item <c>done</c> with optional atomic compare-and-set guards.
+/// </summary>
+public sealed record WorkQueueDoneRequest(
+    int IssueNumber,
+    string? WorkspaceId = null,
+    string? ExpectedStatus = null,
+    string? ExpectedOwner = null,
+    DateTimeOffset? ClaimedBeforeUtc = null);
+
+/// <summary>
 /// Result returned by <c>QueueUpsert</c>, <c>QueueRelease</c>, or <c>QueueDone</c>.
 /// </summary>
 public sealed record WorkQueueMutationResult(
@@ -49,7 +59,31 @@ public sealed record WorkQueueMutationResult(
     string WorkspaceId,
     int IssueNumber,
     bool Changed,
-    WorkQueueItem? Item);
+    WorkQueueItem? Item,
+    string? Reason = null);
+
+/// <summary>
+/// Request payload for single-roundtrip <c>StartWork</c> (claim locks, check unread inbox, inspect foreign locks).
+/// </summary>
+public sealed record SwarmStartWorkRequest(
+    string Agent,
+    IReadOnlyList<string> Paths,
+    int? PrNumber = null,
+    int TtlMinutes = SwarmBusConstants.DefaultLockTtlMinutes,
+    int MessageLimit = 20,
+    string? WorkspaceId = null);
+
+/// <summary>
+/// Result returned by <c>StartWork</c> / <c>StartWorkAsync</c>.
+/// </summary>
+public sealed record SwarmStartWorkResult(
+    bool Ok,
+    string WorkspaceId,
+    IReadOnlyList<string> ClaimedPaths,
+    IReadOnlyList<LockConflict> Conflicts,
+    IReadOnlyList<PathLockLease> Locks,
+    IReadOnlyList<SwarmMessageEnvelope> UnreadMessages,
+    IReadOnlyList<PathLockLease> ForeignLocks);
 
 /// <summary>
 /// Result returned by <c>QueueList</c>.
