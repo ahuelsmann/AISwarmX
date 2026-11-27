@@ -31,9 +31,11 @@ public sealed partial class DashboardSnapshotService
     private HygieneResponse? _cachedHygiene;
     private SwarmBusResponse? _cachedSwarmBus;
     private string? _cachedChangelogVersion;
+    private string? _cachedLocalKey;
     private DateTimeOffset _localCacheExpiresAt = DateTimeOffset.MinValue;
 
     private PipelineResponse? _cachedPipeline;
+    private string? _cachedPipelineKey;
     private DateTimeOffset _pipelineCacheExpiresAt = DateTimeOffset.MinValue;
 
     public DashboardSnapshotService(
@@ -153,10 +155,12 @@ public sealed partial class DashboardSnapshotService
         SwarmBusResponse swarmBus;
         string? changelogVersion;
 
+        var localCacheKey = BuildLocalCacheKey(paths, options);
         await _localLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (!forceRefresh &&
+                string.Equals(_cachedLocalKey, localCacheKey, StringComparison.OrdinalIgnoreCase) &&
                 _cachedMonitors is not null &&
                 _cachedGovernance is not null &&
                 _cachedHygiene is not null &&
@@ -216,6 +220,7 @@ public sealed partial class DashboardSnapshotService
                 _cachedHygiene = hygiene;
                 _cachedSwarmBus = swarmBus;
                 _cachedChangelogVersion = changelogVersion;
+                _cachedLocalKey = localCacheKey;
 
                 var ttl = Math.Max(1, options.LocalCacheTtlSeconds);
                 _localCacheExpiresAt = now.AddSeconds(ttl);
@@ -248,17 +253,22 @@ public sealed partial class DashboardSnapshotService
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
+        var pipelineKey = BuildPipelineCacheKey(options);
 
         await _pipelineLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!forceRefresh && _cachedPipeline is not null && now < _pipelineCacheExpiresAt)
+            if (!forceRefresh &&
+                _cachedPipeline is not null &&
+                string.Equals(_cachedPipelineKey, pipelineKey, StringComparison.OrdinalIgnoreCase) &&
+                now < _pipelineCacheExpiresAt)
             {
                 return _cachedPipeline;
             }
 
             var result = await _pipelineProvider.GetPipelineAsync(options, cancellationToken).ConfigureAwait(false);
             _cachedPipeline = result;
+            _cachedPipelineKey = pipelineKey;
 
             var ttl = Math.Max(5, options.GitHubCacheTtlSeconds);
             _pipelineCacheExpiresAt = now.AddSeconds(ttl);
@@ -269,6 +279,12 @@ public sealed partial class DashboardSnapshotService
             _pipelineLock.Release();
         }
     }
+
+    private static string BuildPipelineCacheKey(DashboardOptions options) =>
+        $"{options.GitHubRepository?.Trim()}|{options.GitHubProjectOwner?.Trim()}|{options.GitHubProjectNumber}";
+
+    private static string BuildLocalCacheKey(ResolvedDashboardPaths paths, DashboardOptions options) =>
+        $"{paths.MobaDevRepoPath}|{paths.MobaFlowRepoPath}|{paths.SwarmBusDbPath}|{options.BusyIdleAfterMinutes}";
 
     private static ActiveAgentsSummary ComputeActiveAgentsSummary(IReadOnlyList<MonitorInfo> monitors)
     {

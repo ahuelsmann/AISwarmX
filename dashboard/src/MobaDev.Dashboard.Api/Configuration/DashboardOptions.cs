@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Configuration;
+
 namespace MobaDev.Dashboard.Api.Configuration;
 
 /// <summary>
@@ -32,7 +34,9 @@ public sealed class DashboardOptions
     /// in the MOBAdev root, or <c>presets/mobaflow.swarm.json</c> when core workspace settings remain at defaults,
     /// while preserving any explicit overrides configured by callers or appsettings.
     /// </summary>
-    public DashboardOptions ResolveWithSwarmConfig(IReadOnlyDictionary<string, string?>? environmentVariables = null)
+    public DashboardOptions ResolveWithSwarmConfig(
+        IReadOnlyDictionary<string, string?>? environmentVariables = null,
+        IReadOnlySet<string>? explicitOverrideKeys = null)
     {
         var effectiveConfigPath = ResolveOptionOrEnvironment(SwarmConfigPath, "MOBADEV_SWARM_CONFIG", environmentVariables);
         var effectiveWorkspaceId = ResolveOptionOrEnvironment(WorkspaceId, "MOBADEV_SWARM_WORKSPACE", environmentVariables);
@@ -45,7 +49,7 @@ public sealed class DashboardOptions
             return CloneWithResolvedMetadata(effectiveConfigPath, effectiveWorkspaceId);
         }
 
-        if (isFallbackPreset && !ShouldApplyFallbackPreset())
+        if (isFallbackPreset && !ShouldApplyFallbackPreset(explicitOverrideKeys))
         {
             return CloneWithResolvedMetadata(effectiveConfigPath, effectiveWorkspaceId);
         }
@@ -54,15 +58,46 @@ public sealed class DashboardOptions
         var fromSwarm = swarmConfig.ToDashboardOptions(
             string.IsNullOrWhiteSpace(effectiveWorkspaceId) ? null : effectiveWorkspaceId);
 
-        return MergeWithSwarmOptions(fromSwarm, effectiveConfigPath, effectiveWorkspaceId);
+        return MergeWithSwarmOptions(fromSwarm, effectiveConfigPath, effectiveWorkspaceId, explicitOverrideKeys);
     }
 
     /// <summary>
     /// Resolves swarm configuration settings and applies the resulting effective values onto this instance.
     /// </summary>
-    public void ApplySwarmConfigInPlace(IReadOnlyDictionary<string, string?>? environmentVariables = null)
+    public void ApplySwarmConfigInPlace(
+        IReadOnlyDictionary<string, string?>? environmentVariables = null,
+        IReadOnlySet<string>? explicitOverrideKeys = null)
     {
-        CopyFrom(ResolveWithSwarmConfig(environmentVariables));
+        CopyFrom(ResolveWithSwarmConfig(environmentVariables, explicitOverrideKeys));
+    }
+
+    /// <summary>
+    /// Captures <c>Dashboard:*</c> keys supplied by any configuration provider other than the shipped
+    /// baseline <c>appsettings.json</c>, so explicit caller overrides equal to CLR/appsettings defaults
+    /// (for example <c>GitHubProjectNumber = 1</c>) are never overwritten by <see cref="SwarmConfig"/>.
+    /// </summary>
+    public static IReadOnlySet<string> CaptureExplicitOverrideKeys(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        var explicitKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (configuration is not IConfigurationRoot root)
+        {
+            CollectSectionKeys(configuration.GetSection(SectionName), explicitKeys);
+            return explicitKeys;
+        }
+
+        foreach (var provider in root.Providers)
+        {
+            if (IsBaselineAppSettingsProvider(provider))
+            {
+                continue;
+            }
+
+            CollectProviderKeys(provider, explicitKeys);
+        }
+
+        return explicitKeys;
     }
 
     /// <summary>
@@ -100,8 +135,14 @@ public sealed class DashboardOptions
         return copy;
     }
 
-    private bool ShouldApplyFallbackPreset()
+    private bool ShouldApplyFallbackPreset(IReadOnlySet<string>? explicitOverrideKeys)
     {
+        if (HasExplicitOverride(explicitOverrideKeys, nameof(MobaFlowRepoPath)) ||
+            HasExplicitOverride(explicitOverrideKeys, nameof(GitHubRepository)))
+        {
+            return false;
+        }
+
         var defaults = new DashboardOptions();
         return string.IsNullOrWhiteSpace(MobaFlowRepoPath) &&
                string.Equals(GitHubRepository, defaults.GitHubRepository, StringComparison.Ordinal);
@@ -110,30 +151,64 @@ public sealed class DashboardOptions
     private DashboardOptions MergeWithSwarmOptions(
         DashboardOptions fromSwarm,
         string effectiveConfigPath,
-        string effectiveWorkspaceId)
+        string effectiveWorkspaceId,
+        IReadOnlySet<string>? explicitOverrideKeys)
     {
         var defaults = new DashboardOptions();
 
         return new DashboardOptions
         {
-            BindUrl = ChooseStringOverride(BindUrl, fromSwarm.BindUrl, defaults.BindUrl),
+            BindUrl = ChooseStringOverride(BindUrl, fromSwarm.BindUrl, defaults.BindUrl, HasExplicitOverride(explicitOverrideKeys, nameof(BindUrl))),
             MobaDevRepoPath = ChoosePathOverride(MobaDevRepoPath, fromSwarm.MobaDevRepoPath),
             MobaFlowRepoPath = ChoosePathOverride(MobaFlowRepoPath, fromSwarm.MobaFlowRepoPath),
             ClaudeHomePath = ClaudeHomePath,
             CodexHomePath = CodexHomePath,
             AntigravityHomePath = AntigravityHomePath,
             GeminiConfigPath = GeminiConfigPath,
-            GitHubRepository = ChooseStringOverride(GitHubRepository, fromSwarm.GitHubRepository, defaults.GitHubRepository),
-            GitHubProjectNumber = ChooseIntOverride(GitHubProjectNumber, fromSwarm.GitHubProjectNumber, defaults.GitHubProjectNumber),
-            GitHubProjectOwner = ChooseStringOverride(GitHubProjectOwner, fromSwarm.GitHubProjectOwner, defaults.GitHubProjectOwner),
-            LocalCacheTtlSeconds = ChooseIntOverride(LocalCacheTtlSeconds, fromSwarm.LocalCacheTtlSeconds, defaults.LocalCacheTtlSeconds),
-            GitHubCacheTtlSeconds = ChooseIntOverride(GitHubCacheTtlSeconds, fromSwarm.GitHubCacheTtlSeconds, defaults.GitHubCacheTtlSeconds),
+            GitHubRepository = ChooseStringOverride(GitHubRepository, fromSwarm.GitHubRepository, defaults.GitHubRepository, HasExplicitOverride(explicitOverrideKeys, nameof(GitHubRepository))),
+            GitHubProjectNumber = ChooseIntOverride(GitHubProjectNumber, fromSwarm.GitHubProjectNumber, defaults.GitHubProjectNumber, HasExplicitOverride(explicitOverrideKeys, nameof(GitHubProjectNumber))),
+            GitHubProjectOwner = ChooseStringOverride(GitHubProjectOwner, fromSwarm.GitHubProjectOwner, defaults.GitHubProjectOwner, HasExplicitOverride(explicitOverrideKeys, nameof(GitHubProjectOwner))),
+            LocalCacheTtlSeconds = ChooseIntOverride(LocalCacheTtlSeconds, fromSwarm.LocalCacheTtlSeconds, defaults.LocalCacheTtlSeconds, HasExplicitOverride(explicitOverrideKeys, nameof(LocalCacheTtlSeconds))),
+            GitHubCacheTtlSeconds = ChooseIntOverride(GitHubCacheTtlSeconds, fromSwarm.GitHubCacheTtlSeconds, defaults.GitHubCacheTtlSeconds, HasExplicitOverride(explicitOverrideKeys, nameof(GitHubCacheTtlSeconds))),
             BusyIdleAfterMinutes = BusyIdleAfterMinutes,
             StaticWebRootPath = ChoosePathOverride(StaticWebRootPath, fromSwarm.StaticWebRootPath),
             SwarmBusDbPath = ChoosePathOverride(SwarmBusDbPath, fromSwarm.SwarmBusDbPath),
             SwarmConfigPath = effectiveConfigPath,
             WorkspaceId = effectiveWorkspaceId
         };
+    }
+
+    private static bool IsBaselineAppSettingsProvider(IConfigurationProvider provider)
+    {
+        return provider is FileConfigurationProvider fileProvider &&
+               string.Equals(Path.GetFileName(fileProvider.Source.Path), "appsettings.json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void CollectProviderKeys(IConfigurationProvider provider, HashSet<string> target)
+    {
+        foreach (var childKey in provider.GetChildKeys([], SectionName).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (provider.TryGet($"{SectionName}:{childKey}", out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                target.Add(childKey);
+            }
+        }
+    }
+
+    private static void CollectSectionKeys(IConfigurationSection section, HashSet<string> target)
+    {
+        foreach (var child in section.GetChildren())
+        {
+            if (!string.IsNullOrWhiteSpace(child.Value))
+            {
+                target.Add(child.Key);
+            }
+        }
+    }
+
+    private static bool HasExplicitOverride(IReadOnlySet<string>? explicitOverrideKeys, string propertyName)
+    {
+        return explicitOverrideKeys is not null && explicitOverrideKeys.Contains(propertyName);
     }
 
     private static string ResolveOptionOrEnvironment(
@@ -194,8 +269,13 @@ public sealed class DashboardOptions
         return !string.IsNullOrWhiteSpace(configured) ? configured : fromSwarm;
     }
 
-    private static string ChooseStringOverride(string configured, string fromSwarm, string defaultValue)
+    private static string ChooseStringOverride(string configured, string fromSwarm, string defaultValue, bool isExplicit)
     {
+        if (isExplicit && !string.IsNullOrWhiteSpace(configured))
+        {
+            return configured;
+        }
+
         if (!string.IsNullOrWhiteSpace(configured) &&
             !string.Equals(configured, defaultValue, StringComparison.Ordinal))
         {
@@ -205,8 +285,13 @@ public sealed class DashboardOptions
         return !string.IsNullOrWhiteSpace(fromSwarm) ? fromSwarm : defaultValue;
     }
 
-    private static int ChooseIntOverride(int configured, int fromSwarm, int defaultValue)
+    private static int ChooseIntOverride(int configured, int fromSwarm, int defaultValue, bool isExplicit)
     {
+        if (isExplicit && configured > 0)
+        {
+            return configured;
+        }
+
         if (configured != defaultValue && configured > 0)
         {
             return configured;

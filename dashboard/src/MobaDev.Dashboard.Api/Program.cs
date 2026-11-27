@@ -9,14 +9,19 @@ var builder = WebApplication.CreateBuilder(args);
 var dashboardSection = builder.Configuration.GetSection(DashboardOptions.SectionName);
 if (!string.Equals(builder.Environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase))
 {
+    var startupExplicitKeys = DashboardOptions.CaptureExplicitOverrideKeys(builder.Configuration);
     var startupOptions = (dashboardSection.Get<DashboardOptions>() ?? new DashboardOptions())
-        .ResolveWithSwarmConfig();
+        .ResolveWithSwarmConfig(explicitOverrideKeys: startupExplicitKeys);
     var safeBindUrl = LoopbackBindingGuard.EnsureLoopbackUrl(startupOptions.BindUrl);
     builder.WebHost.UseUrls(safeBindUrl);
 }
 
 builder.Services.Configure<DashboardOptions>(dashboardSection);
-builder.Services.Configure<DashboardOptions>(options => options.ApplySwarmConfigInPlace());
+builder.Services.Configure<DashboardOptions>(options =>
+{
+    var explicitKeys = DashboardOptions.CaptureExplicitOverrideKeys(builder.Configuration);
+    options.ApplySwarmConfigInPlace(explicitOverrideKeys: explicitKeys);
+});
 builder.Services.ConfigureHttpJsonOptions(json =>
 {
     json.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
