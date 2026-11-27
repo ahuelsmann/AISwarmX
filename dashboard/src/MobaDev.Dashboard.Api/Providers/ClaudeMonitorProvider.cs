@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -80,7 +81,8 @@ public sealed partial class ClaudeMonitorProvider
             .ThenByDescending(s => s.UpdatedAtMs)
             .First();
 
-        var (model, rateLimitResetLabel) = InspectTranscriptTail(paths.ClaudeHomePath, selected);
+        var transcriptInspection = InspectTranscriptTail(paths.ClaudeHomePath, selected);
+        var model = transcriptInspection.Model;
         var fallbackClaudeModel = model ?? "claude-opus-5-5";
 
         var busyExtraSessionRecords = sessions
@@ -93,8 +95,8 @@ public sealed partial class ClaudeMonitorProvider
         allSubModels.AddRange(activeSubagentModels);
         foreach (var extraSession in busyExtraSessionRecords)
         {
-            var (extraModel, _) = InspectTranscriptTail(paths.ClaudeHomePath, extraSession);
-            allSubModels.Add(extraModel ?? fallbackClaudeModel);
+            var extraInspection = InspectTranscriptTail(paths.ClaudeHomePath, extraSession);
+            allSubModels.Add(extraInspection.Model ?? fallbackClaudeModel);
         }
 
         var activeSubAgentCount = allSubModels.Count;
@@ -105,9 +107,17 @@ public sealed partial class ClaudeMonitorProvider
             : (DateTimeOffset?)null;
 
         var isBusy = string.Equals(selected.Status, "busy", StringComparison.OrdinalIgnoreCase);
+        var isStaleBusy = isBusy &&
+            (!lastActivityUtc.HasValue || (now - lastActivityUtc.Value) > effectiveThreshold);
+        var anchorTimestampUtc = transcriptInspection.RateLimitEventTimestampUtc ?? lastActivityUtc;
+        var activeRateLimitResetLabel = FilterActiveRateLimitResetLabel(
+            transcriptInspection.RateLimitResetLabel,
+            anchorTimestampUtc,
+            now,
+            requireVerifiableFutureDeadline: isStaleBusy);
         var (state, effectiveRateLimitResetLabel) = MonitorStateRules.ResolveState(
             isBusy,
-            rateLimitResetLabel,
+            activeRateLimitResetLabel,
             lastActivityUtc,
             now,
             effectiveThreshold);
@@ -194,8 +204,8 @@ public sealed partial class ClaudeMonitorProvider
                     {
                         if (File.GetLastWriteTimeUtc(jsonlFile) >= cutoffUtc)
                         {
-                            var (subModel, _) = InspectTranscriptTailFromFile(jsonlFile);
-                            models.Add(subModel);
+                            var subInspection = InspectTranscriptTailFromFile(jsonlFile);
+                            models.Add(subInspection.Model);
                         }
                     }
                     catch
@@ -265,19 +275,25 @@ public sealed partial class ClaudeMonitorProvider
         var latestTranscript = ResolveLatestProjectTranscript(claudeHomePath);
         if (latestTranscript is not null)
         {
-            var (model, rateLimitResetLabel) = InspectTranscriptTailFromFile(latestTranscript);
-            if (!string.IsNullOrEmpty(rateLimitResetLabel))
+            var inspection = InspectTranscriptTailFromFile(latestTranscript);
+            DateTimeOffset? lastActivityUtc = null;
+            try
             {
-                DateTimeOffset? lastActivityUtc = null;
-                try
-                {
-                    lastActivityUtc = new DateTimeOffset(File.GetLastWriteTimeUtc(latestTranscript), TimeSpan.Zero);
-                }
-                catch
-                {
-                    // Ignore timestamp lookup failure on transient transcript files.
-                }
+                lastActivityUtc = new DateTimeOffset(File.GetLastWriteTimeUtc(latestTranscript), TimeSpan.Zero);
+            }
+            catch
+            {
+                // Ignore timestamp lookup failure on transient transcript files.
+            }
 
+            var anchorTimestampUtc = inspection.RateLimitEventTimestampUtc ?? lastActivityUtc;
+            var activeRateLimitResetLabel = FilterActiveRateLimitResetLabel(
+                inspection.RateLimitResetLabel,
+                anchorTimestampUtc,
+                now,
+                requireVerifiableFutureDeadline: false);
+            if (!string.IsNullOrEmpty(activeRateLimitResetLabel))
+            {
                 monitor = new MonitorInfo(
                     Id: MonitorId,
                     DisplayName: DisplayName,
@@ -285,9 +301,9 @@ public sealed partial class ClaudeMonitorProvider
                     Profile: Profile,
                     Tool: Tool,
                     State: "rate_limited",
-                    Model: model,
+                    Model: inspection.Model,
                     LastActivityUtc: lastActivityUtc,
-                    RateLimitResetLabel: rateLimitResetLabel,
+                    RateLimitResetLabel: activeRateLimitResetLabel,
                     ActiveSessionCount: 0,
                     AutomationStatus: null,
                     Source: new SourceHealth("ok", now, "Claude session closed during active quota pause."),
@@ -347,18 +363,18 @@ public sealed partial class ClaudeMonitorProvider
         return latestFile;
     }
 
-    private static (string? Model, string? RateLimitResetLabel) InspectTranscriptTail(
+    private static TranscriptTailInspection InspectTranscriptTail(
         string claudeHomePath,
         ClaudeSessionRecord session)
     {
         return InspectTranscriptTailFromFile(ResolveTranscriptPath(claudeHomePath, session));
     }
 
-    private static (string? Model, string? RateLimitResetLabel) InspectTranscriptTailFromFile(string? transcriptPath)
+    private static TranscriptTailInspection InspectTranscriptTailFromFile(string? transcriptPath)
     {
         if (transcriptPath is null || !File.Exists(transcriptPath) || !PathWhitelistGuard.IsAllowedFilePath(transcriptPath))
         {
-            return (null, null);
+            return default;
         }
 
         try
@@ -375,62 +391,416 @@ public sealed partial class ClaudeMonitorProvider
 
             string? latestModel = null;
             string? latestRateLimitReset = null;
+            DateTimeOffset? latestRateLimitEventTimestampUtc = null;
 
             foreach (var line in lines)
             {
-                var trimmed = line.Trim();
-                if (!trimmed.StartsWith('{'))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    using var doc = JsonDocument.Parse(trimmed);
-                    var root = doc.RootElement;
-
-                    if (TryGetAssistantMessage(root, out var message))
-                    {
-                        var model = GetString(message, "model");
-                        if (!string.IsNullOrWhiteSpace(model))
-                        {
-                            latestModel = model;
-                        }
-
-                        var limitMatch = ExtractRateLimitReset(message);
-                        if (limitMatch is not null)
-                        {
-                            latestRateLimitReset = limitMatch;
-                        }
-                        else if (HasAssistantText(message))
-                        {
-                            // A subsequent normal assistant response clears any earlier rate-limit notice.
-                            latestRateLimitReset = null;
-                        }
-                    }
-                    else if (root.TryGetProperty("params", out var paramsEl) &&
-                             paramsEl.ValueKind == JsonValueKind.Object)
-                    {
-                        var model = GetString(paramsEl, "model");
-                        if (!string.IsNullOrWhiteSpace(model))
-                        {
-                            latestModel = model;
-                        }
-                    }
-                }
-                catch
-                {
-                    // Skip truncated first line from byte-seek tail or malformed line.
-                }
+                ProcessTranscriptLine(
+                    line,
+                    ref latestModel,
+                    ref latestRateLimitReset,
+                    ref latestRateLimitEventTimestampUtc);
             }
 
-            return (latestModel, latestRateLimitReset);
+            return new TranscriptTailInspection(latestModel, latestRateLimitReset, latestRateLimitEventTimestampUtc);
         }
         catch
         {
-            return (null, null);
+            return default;
         }
     }
+
+    private static void ProcessTranscriptLine(
+        string line,
+        ref string? latestModel,
+        ref string? latestRateLimitReset,
+        ref DateTimeOffset? latestRateLimitEventTimestampUtc)
+    {
+        var trimmed = line.Trim();
+        if (!trimmed.StartsWith('{'))
+        {
+            return;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(trimmed);
+            var root = doc.RootElement;
+
+            if (TryGetAssistantMessage(root, out var message))
+            {
+                var model = GetString(message, "model");
+                if (!string.IsNullOrWhiteSpace(model))
+                {
+                    latestModel = model;
+                }
+
+                var limitMatch = ExtractRateLimitReset(message);
+                if (limitMatch is not null)
+                {
+                    latestRateLimitReset = limitMatch;
+                    latestRateLimitEventTimestampUtc = TryGetTimestamp(root);
+                }
+                else if (HasAssistantText(message))
+                {
+                    // A subsequent normal assistant response clears any earlier rate-limit notice.
+                    latestRateLimitReset = null;
+                    latestRateLimitEventTimestampUtc = null;
+                }
+            }
+            else if (root.TryGetProperty("params", out var paramsEl) &&
+                     paramsEl.ValueKind == JsonValueKind.Object)
+            {
+                var model = GetString(paramsEl, "model");
+                if (!string.IsNullOrWhiteSpace(model))
+                {
+                    latestModel = model;
+                }
+            }
+        }
+        catch
+        {
+            // Skip truncated first line from byte-seek tail or malformed line.
+        }
+    }
+
+    private static DateTimeOffset? TryGetTimestamp(JsonElement root)
+    {
+        var raw = GetString(root, "timestamp");
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        return DateTimeOffset.TryParse(
+            raw,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static string? FilterActiveRateLimitResetLabel(
+        string? rateLimitResetLabel,
+        DateTimeOffset? anchorTimestampUtc,
+        DateTimeOffset now,
+        bool requireVerifiableFutureDeadline)
+    {
+        if (string.IsNullOrWhiteSpace(rateLimitResetLabel))
+        {
+            return null;
+        }
+
+        if (TryResolveRateLimitResetUtc(rateLimitResetLabel, anchorTimestampUtc, out var resetUtc))
+        {
+            return resetUtc > now ? rateLimitResetLabel : null;
+        }
+
+        return requireVerifiableFutureDeadline ? null : rateLimitResetLabel;
+    }
+
+    internal static bool TryResolveRateLimitResetUtc(
+        string resetLabel,
+        DateTimeOffset? eventTimestampUtc,
+        out DateTimeOffset resetUtc)
+    {
+        resetUtc = default;
+        if (string.IsNullOrWhiteSpace(resetLabel))
+        {
+            return false;
+        }
+
+        var trimmed = resetLabel.Trim();
+        if (TryParseIsoTimestamp(trimmed, out resetUtc))
+        {
+            return true;
+        }
+
+        if (!TryExtractTimeZone(trimmed, out var coreLabel, out var zone))
+        {
+            return false;
+        }
+
+        var normalized = NormalizeDateTimeLabel(coreLabel);
+        if (TryParseExplicitDateAndTime(normalized, eventTimestampUtc, zone, out resetUtc))
+        {
+            return true;
+        }
+
+        return TryParseTimeOnly(normalized, eventTimestampUtc, zone, out resetUtc);
+    }
+
+    private static bool TryParseIsoTimestamp(string text, out DateTimeOffset resetUtc)
+    {
+        resetUtc = default;
+        if (!IsoTimestampPrefixRegex().IsMatch(text))
+        {
+            return false;
+        }
+
+        if (!DateTimeOffset.TryParse(
+            text,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal,
+            out var parsed))
+        {
+            return false;
+        }
+
+        resetUtc = parsed.ToUniversalTime();
+        return true;
+    }
+
+    private static bool TryExtractTimeZone(string label, out string coreLabel, out TimeZoneInfo zone)
+    {
+        var match = TrailingTimeZoneRegex().Match(label);
+        if (!match.Success)
+        {
+            coreLabel = label;
+            zone = TimeZoneInfo.Local;
+            return true;
+        }
+
+        coreLabel = match.Groups["core"].Value.Trim();
+        var tzName = match.Groups["tz"].Value.Trim();
+        if (string.Equals(tzName, "UTC", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(tzName, "GMT", StringComparison.OrdinalIgnoreCase))
+        {
+            zone = TimeZoneInfo.Utc;
+            return true;
+        }
+
+        if (TimeZoneInfo.TryFindSystemTimeZoneById(tzName, out var resolved))
+        {
+            zone = resolved;
+            return true;
+        }
+
+        zone = TimeZoneInfo.Utc;
+        return false;
+    }
+
+    private static string NormalizeDateTimeLabel(string coreLabel)
+    {
+        var stripped = TrailingUhrRegex().Replace(coreLabel, string.Empty).Trim();
+        stripped = LeadingWeekdayPrefixRegex().Replace(stripped, string.Empty).Trim();
+        return AtSeparatorRegex().Replace(stripped, ", ");
+    }
+
+    private static bool TryParseExplicitDateAndTime(
+        string normalized,
+        DateTimeOffset? eventTimestampUtc,
+        TimeZoneInfo zone,
+        out DateTimeOffset resetUtc)
+    {
+        if (TryParseNumericDateAndTime(normalized, zone, out resetUtc))
+        {
+            return true;
+        }
+
+        return TryParseMonthNameDateAndTime(normalized, eventTimestampUtc, zone, out resetUtc);
+    }
+
+    private static bool TryParseNumericDateAndTime(string text, TimeZoneInfo zone, out DateTimeOffset resetUtc)
+    {
+        resetUtc = default;
+        var isoMatch = NumericIsoDateTimeRegex().Match(text);
+        if (isoMatch.Success)
+        {
+            return TryBuildDatedResetUtc(isoMatch, zone, out resetUtc);
+        }
+
+        var euMatch = NumericEuDateTimeRegex().Match(text);
+        return euMatch.Success && TryBuildDatedResetUtc(euMatch, zone, out resetUtc);
+    }
+
+    private static bool TryBuildDatedResetUtc(Match match, TimeZoneInfo zone, out DateTimeOffset resetUtc)
+    {
+        resetUtc = default;
+        if (!int.TryParse(match.Groups["y"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var year) ||
+            !int.TryParse(match.Groups["mo"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var month) ||
+            !int.TryParse(match.Groups["d"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var day) ||
+            !TryParseTimeOfDay(match.Groups["t"].Value, out var tod))
+        {
+            return false;
+        }
+
+        return TryCreateZoneUtc(year, month, day, tod, zone, out resetUtc);
+    }
+
+    private static bool TryParseMonthNameDateAndTime(
+        string text,
+        DateTimeOffset? eventTimestampUtc,
+        TimeZoneInfo zone,
+        out DateTimeOffset resetUtc)
+    {
+        resetUtc = default;
+        var match = EnglishMonthDateTimeRegex().Match(text);
+        if (!match.Success)
+        {
+            match = GermanMonthDateTimeRegex().Match(text);
+        }
+
+        if (!match.Success ||
+            !TryResolveMonthNumber(match.Groups["mon"].Value, out var month) ||
+            !int.TryParse(match.Groups["d"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var day) ||
+            !TryParseTimeOfDay(match.Groups["t"].Value, out var tod))
+        {
+            return false;
+        }
+
+        int year;
+        if (match.Groups["y"].Success)
+        {
+            if (!int.TryParse(match.Groups["y"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out year))
+            {
+                return false;
+            }
+        }
+        else if (eventTimestampUtc.HasValue)
+        {
+            year = ResolveAnchoredYear(eventTimestampUtc.Value, zone, month);
+        }
+        else
+        {
+            return false;
+        }
+
+        return TryCreateZoneUtc(year, month, day, tod, zone, out resetUtc);
+    }
+
+    private static int ResolveAnchoredYear(DateTimeOffset eventTimestampUtc, TimeZoneInfo zone, int targetMonth)
+    {
+        var eventLocal = TimeZoneInfo.ConvertTime(eventTimestampUtc, zone);
+        var year = eventLocal.Year;
+        if (targetMonth < eventLocal.Month - 6)
+        {
+            year++;
+        }
+        else if (targetMonth > eventLocal.Month + 6)
+        {
+            year--;
+        }
+
+        return year;
+    }
+
+    private static bool TryParseTimeOnly(
+        string normalized,
+        DateTimeOffset? eventTimestampUtc,
+        TimeZoneInfo zone,
+        out DateTimeOffset resetUtc)
+    {
+        resetUtc = default;
+        if (!eventTimestampUtc.HasValue || !TryParseTimeOfDay(normalized, out var tod))
+        {
+            return false;
+        }
+
+        var eventLocal = TimeZoneInfo.ConvertTime(eventTimestampUtc.Value, zone);
+        var candidateDate = tod <= eventLocal.TimeOfDay
+            ? eventLocal.Date.AddDays(1)
+            : eventLocal.Date;
+        resetUtc = ConvertZoneLocalToUtc(candidateDate.Add(tod), zone);
+        return true;
+    }
+
+    private static bool TryParseTimeOfDay(string text, out TimeSpan timeOfDay)
+    {
+        timeOfDay = default;
+        var match = TimeOfDayRegex().Match(text.Trim());
+        if (!match.Success ||
+            !int.TryParse(match.Groups["h"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var hour))
+        {
+            return false;
+        }
+
+        var minute = 0;
+        if (match.Groups["m"].Success &&
+            !int.TryParse(match.Groups["m"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out minute))
+        {
+            return false;
+        }
+
+        if (minute is < 0 or > 59)
+        {
+            return false;
+        }
+
+        if (match.Groups["ampm"].Success)
+        {
+            if (hour is < 1 or > 12)
+            {
+                return false;
+            }
+
+            var isPm = string.Equals(match.Groups["ampm"].Value, "pm", StringComparison.OrdinalIgnoreCase);
+            hour = (hour % 12) + (isPm ? 12 : 0);
+            timeOfDay = new TimeSpan(hour, minute, 0);
+            return true;
+        }
+
+        if (!match.Groups["m"].Success || hour is < 0 or > 23)
+        {
+            return false;
+        }
+
+        timeOfDay = new TimeSpan(hour, minute, 0);
+        return true;
+    }
+
+    private static bool TryCreateZoneUtc(
+        int year,
+        int month,
+        int day,
+        TimeSpan tod,
+        TimeZoneInfo zone,
+        out DateTimeOffset resetUtc)
+    {
+        resetUtc = default;
+        if (year is < 1 or > 9999 || month is < 1 or > 12 || day < 1 || day > DateTime.DaysInMonth(year, month))
+        {
+            return false;
+        }
+
+        var localDateTime = new DateTime(year, month, day, 0, 0, 0, DateTimeKind.Unspecified).Add(tod);
+        resetUtc = ConvertZoneLocalToUtc(localDateTime, zone);
+        return true;
+    }
+
+    private static DateTimeOffset ConvertZoneLocalToUtc(DateTime localDateTime, TimeZoneInfo zone)
+    {
+        var unspecified = DateTime.SpecifyKind(localDateTime, DateTimeKind.Unspecified);
+        if (zone.IsInvalidTime(unspecified))
+        {
+            unspecified = unspecified.AddHours(1);
+        }
+
+        var offset = zone.GetUtcOffset(unspecified);
+        return new DateTimeOffset(unspecified, offset).ToUniversalTime();
+    }
+
+    private static bool TryResolveMonthNumber(string rawMonth, out int month)
+    {
+        return MonthLookup.TryGetValue(rawMonth.Trim().TrimEnd('.'), out month);
+    }
+
+    private static readonly Dictionary<string, int> MonthLookup = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["jan"] = 1, ["january"] = 1, ["januar"] = 1,
+        ["feb"] = 2, ["february"] = 2, ["februar"] = 2,
+        ["mar"] = 3, ["march"] = 3, ["mär"] = 3, ["märz"] = 3, ["mrz"] = 3,
+        ["apr"] = 4, ["april"] = 4,
+        ["may"] = 5, ["mai"] = 5,
+        ["jun"] = 6, ["june"] = 6, ["juni"] = 6,
+        ["jul"] = 7, ["july"] = 7, ["juli"] = 7,
+        ["aug"] = 8, ["august"] = 8,
+        ["sep"] = 9, ["sept"] = 9, ["september"] = 9,
+        ["oct"] = 10, ["october"] = 10, ["okt"] = 10, ["oktober"] = 10,
+        ["nov"] = 11, ["november"] = 11,
+        ["dec"] = 12, ["december"] = 12, ["dez"] = 12, ["dezember"] = 12
+    };
 
     private static string? ResolveTranscriptPath(string claudeHomePath, ClaudeSessionRecord session)
     {
@@ -646,6 +1016,41 @@ public sealed partial class ClaudeMonitorProvider
         @"(?:(?:5-hour limit|weekly limit|monthly limit|usage limit|spend limit).*?resets\s+(?<resetEn>[^\r\n]+)|(?:Ausgabenlimit|Nutzungslimit).*?wird\s+am\s+(?<resetDe>[^\r\n]+?)(?=\s+zurückgesetzt|\r|\n|$))",
         RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex RateLimitResetRegex();
+
+    [GeneratedRegex(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", RegexOptions.CultureInvariant)]
+    private static partial Regex IsoTimestampPrefixRegex();
+
+    [GeneratedRegex(@"^(?<core>.+?)\s*\((?<tz>[^()]+)\)\s*$", RegexOptions.CultureInvariant)]
+    private static partial Regex TrailingTimeZoneRegex();
+
+    [GeneratedRegex(@"\s*Uhr\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TrailingUhrRegex();
+
+    [GeneratedRegex(@"^(?:[A-Za-zÄÖÜäöü]{2,9}\.?,\s*)", RegexOptions.CultureInvariant)]
+    private static partial Regex LeadingWeekdayPrefixRegex();
+
+    [GeneratedRegex(@"\s+at\s+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex AtSeparatorRegex();
+
+    [GeneratedRegex(@"^(?<y>\d{4})-(?<mo>\d{1,2})-(?<d>\d{1,2})[\s,]+(?<t>.+)$", RegexOptions.CultureInvariant)]
+    private static partial Regex NumericIsoDateTimeRegex();
+
+    [GeneratedRegex(@"^(?<d>\d{1,2})\.(?<mo>\d{1,2})\.(?<y>\d{4})[\s,]+(?<t>.+)$", RegexOptions.CultureInvariant)]
+    private static partial Regex NumericEuDateTimeRegex();
+
+    [GeneratedRegex(@"^(?<mon>[A-Za-z]+)\.?\s+(?<d>\d{1,2})(?:,?\s*(?<y>\d{4}))?[\s,]+(?<t>.+)$", RegexOptions.CultureInvariant)]
+    private static partial Regex EnglishMonthDateTimeRegex();
+
+    [GeneratedRegex(@"^(?<d>\d{1,2})\.\s*(?<mon>[A-Za-zÄÖÜäöü]+)\.?(?:,?\s*(?<y>\d{4}))?[\s,]+(?<t>.+)$", RegexOptions.CultureInvariant)]
+    private static partial Regex GermanMonthDateTimeRegex();
+
+    [GeneratedRegex(@"^(?<h>\d{1,2})(?::(?<m>\d{2}))?(?:\s*(?<ampm>am|pm))?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TimeOfDayRegex();
+
+    private readonly record struct TranscriptTailInspection(
+        string? Model,
+        string? RateLimitResetLabel,
+        DateTimeOffset? RateLimitEventTimestampUtc);
 
     private sealed record ClaudeSessionRecord(
         string SessionId,

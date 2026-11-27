@@ -33,10 +33,11 @@ public sealed class MonitorProvidersTests
 
         const string secretPrompt = "PRIVATE_USER_PROMPT_SHOULD_NEVER_LEAK";
         var line1 = $$$"""{"type":"user","message":{"role":"user","content":[{"type":"text","text":"{{{secretPrompt}}}"}]}}""";
-        const string line2 = """{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your 5-hour limit resets 12am (Europe/Berlin)"}]}}""";
+        const string line2 = """{"timestamp":"2026-11-18T21:15:00Z","type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your 5-hour limit resets 12am (Europe/Berlin)"}]}}""";
         await File.WriteAllLinesAsync(Path.Combine(projectDir, $"{sessionId}.jsonl"), [line1, line2]);
 
-        var provider = new ClaudeMonitorProvider();
+        var fixedClock = new FixedTimeProvider(new DateTimeOffset(2026, 11, 18, 21, 30, 0, TimeSpan.Zero));
+        var provider = new ClaudeMonitorProvider(fixedClock);
         var paths = new ResolvedDashboardPaths(
             fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
             fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
@@ -50,7 +51,7 @@ public sealed class MonitorProvidersTests
         Assert.DoesNotContain(secretPrompt, monitor.Source.Notice ?? string.Empty);
 
         // Also verifies German monthly spend-limit wording is detected accurately
-        const string germanLimitLine = """{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"Monatliches Ausgabenlimit erreicht\nErhöhe dein Limit, um weiterzuarbeiten · Die Plannutzung wird am Mo., 23. Nov., 20:00 zurückgesetzt"}]}}""";
+        const string germanLimitLine = """{"timestamp":"2026-11-18T21:15:00Z","type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"Monatliches Ausgabenlimit erreicht\nErhöhe dein Limit, um weiterzuarbeiten · Die Plannutzung wird am Mo., 23. Nov., 20:00 zurückgesetzt"}]}}""";
         await File.WriteAllLinesAsync(Path.Combine(projectDir, $"{sessionId}.jsonl"), [germanLimitLine]);
         var germanMonitor = await provider.GetMonitorAsync(paths, CancellationToken.None);
         Assert.Equal("rate_limited", germanMonitor.State);
@@ -58,7 +59,7 @@ public sealed class MonitorProvidersTests
 
         // Also verifies rate_limited quota pause remains visible even after local session file is closed
         Directory.Delete(sessionsDir, recursive: true);
-        const string closedWeeklyLimitLine = """{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your weekly limit resets Nov 23, 8pm (Europe/Berlin)"}]}}""";
+        const string closedWeeklyLimitLine = """{"timestamp":"2026-11-18T21:20:00Z","type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your weekly limit resets Nov 23, 8pm (Europe/Berlin)"}]}}""";
         await File.WriteAllLinesAsync(Path.Combine(projectDir, $"{sessionId}.jsonl"), [closedWeeklyLimitLine]);
         var closedMonitor = await provider.GetMonitorAsync(paths, CancellationToken.None);
         Assert.Equal("rate_limited", closedMonitor.State);
@@ -674,7 +675,11 @@ public sealed class MonitorProvidersTests
         Assert.Equal("busy", agHeads[1].State);
         Assert.Null(agHeads[1].RateLimitResetLabel);
 
-        // 2. Claude: stale busy (30 min ago) + active quota pause in transcript -> "rate_limited" with ResetLabel
+        // 2. Claude: fixed-clock regression tests covering future reset, expired reset, undated label, and live busy
+        var fixedNow = new DateTimeOffset(2026, 11, 27, 15, 0, 0, TimeSpan.Zero);
+        var claudeStale30MinAgo = fixedNow.AddMinutes(-30);
+        var claudeActive2MinAgo = fixedNow.AddMinutes(-2);
+
         var claudeSessionsDir = Path.Combine(fx.ClaudeHomePath, "sessions");
         Directory.CreateDirectory(claudeSessionsDir);
         var claudeSessionId = "99999999-9999-9999-9999-999999999999";
@@ -684,36 +689,110 @@ public sealed class MonitorProvidersTests
         Directory.CreateDirectory(projectDir);
 
         var sessionFile = Path.Combine(claudeSessionsDir, "9002.json");
+        var transcriptFile = Path.Combine(projectDir, $"{claudeSessionId}.jsonl");
+
         await File.WriteAllTextAsync(sessionFile, $$"""
             {
               "sessionId": "{{claudeSessionId}}",
               "cwd": "{{cwd.Replace("\\", "\\\\")}}",
               "name": "MOBAi Claude Opus",
               "status": "busy",
-              "updatedAt": {{stale30MinAgo.ToUnixTimeMilliseconds()}}
+              "updatedAt": {{claudeStale30MinAgo.ToUnixTimeMilliseconds()}}
+            }
+            """);
+
+        // (a) Stale busy + dated future reset deadline (now=15:00Z < reset=16:00Z) -> "rate_limited"
+        await File.WriteAllLinesAsync(
+            transcriptFile,
+            ["""{"timestamp":"2026-11-27T14:25:00Z","type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your 5-hour limit resets 4pm (UTC)"}]}}"""]);
+
+        var claudeProvider = new ClaudeMonitorProvider(new FixedTimeProvider(fixedNow));
+        var claudeLimited = await claudeProvider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("rate_limited", claudeLimited.State);
+        Assert.Equal("4pm (UTC)", claudeLimited.RateLimitResetLabel);
+
+        // (b) Stale busy + expired reset deadline (event at 13:00Z, reset 2pm UTC = 14:00Z <= now=15:00Z) -> "idle"
+        await File.WriteAllLinesAsync(
+            transcriptFile,
+            ["""{"timestamp":"2026-11-27T13:00:00Z","type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your 5-hour limit resets 2pm (UTC)"}]}}"""]);
+
+        var claudeExpired = await claudeProvider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("idle", claudeExpired.State);
+        Assert.Null(claudeExpired.RateLimitResetLabel);
+
+        // (c) Stale busy with no session/event timestamp + undated time-only label -> "idle" (never promoted without verifiable future deadline)
+        await File.WriteAllTextAsync(sessionFile, $$"""
+            {
+              "sessionId": "{{claudeSessionId}}",
+              "cwd": "{{cwd.Replace("\\", "\\\\")}}",
+              "name": "MOBAi Claude Opus",
+              "status": "busy",
+              "updatedAt": 0
             }
             """);
         await File.WriteAllLinesAsync(
-            Path.Combine(projectDir, $"{claudeSessionId}.jsonl"),
-            ["""{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your 5-hour limit resets 12am (Europe/Berlin)"}]}}"""]);
+            transcriptFile,
+            ["""{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your 5-hour limit resets 4pm (UTC)"}]}}"""]);
 
-        var claudeProvider = new ClaudeMonitorProvider();
-        var claudeLimited = await claudeProvider.GetMonitorAsync(paths, CancellationToken.None);
-        Assert.Equal("rate_limited", claudeLimited.State);
-        Assert.Equal("12am (Europe/Berlin)", claudeLimited.RateLimitResetLabel);
+        var claudeUndated = await claudeProvider.GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("idle", claudeUndated.State);
+        Assert.Null(claudeUndated.RateLimitResetLabel);
 
-        // Active within threshold (2 min ago) remains "busy"
+        // (d) Live non-stale busy (2 min ago) remains "busy" with null RateLimitResetLabel
         await File.WriteAllTextAsync(sessionFile, $$"""
             {
               "sessionId": "{{claudeSessionId}}",
               "cwd": "{{cwd.Replace("\\", "\\\\")}}",
               "name": "MOBAi Claude Opus",
               "status": "busy",
-              "updatedAt": {{active2MinAgo.ToUnixTimeMilliseconds()}}
+              "updatedAt": {{claudeActive2MinAgo.ToUnixTimeMilliseconds()}}
             }
             """);
+        await File.WriteAllLinesAsync(
+            transcriptFile,
+            ["""{"timestamp":"2026-11-27T14:55:00Z","type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your monthly spend limit · your 5-hour limit resets 4pm (UTC)"}]}}"""]);
+
         var claudeActive = await claudeProvider.GetMonitorAsync(paths, CancellationToken.None);
         Assert.Equal("busy", claudeActive.State);
         Assert.Null(claudeActive.RateLimitResetLabel);
+    }
+
+    [Fact]
+    public void ClaudeMonitorProvider_TryResolveRateLimitResetUtc_ParsesSupportedFormatsDeterministically()
+    {
+        var anchor = new DateTimeOffset(2026, 11, 27, 14, 0, 0, TimeSpan.Zero);
+
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("2026-11-26T20:00:00Z", null, out var isoUtc));
+        Assert.Equal(new DateTimeOffset(2026, 11, 26, 20, 0, 0, TimeSpan.Zero), isoUtc);
+
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("Nov 27, 4pm (UTC)", anchor, out var enShort));
+        Assert.Equal(new DateTimeOffset(2026, 11, 27, 16, 0, 0, TimeSpan.Zero), enShort);
+
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("Nov 27 at 4:30pm (GMT)", anchor, out var enAt));
+        Assert.Equal(new DateTimeOffset(2026, 11, 27, 16, 30, 0, TimeSpan.Zero), enAt);
+
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("2026-11-27 16:00 (UTC)", null, out var isoDateSpace));
+        Assert.Equal(new DateTimeOffset(2026, 11, 27, 16, 0, 0, TimeSpan.Zero), isoDateSpace);
+
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("27.11.2026, 16:00 (Europe/Berlin)", null, out var deComma));
+        Assert.Equal(new DateTimeOffset(2026, 11, 27, 15, 0, 0, TimeSpan.Zero), deComma);
+
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("27.11.2026 16:00 (UTC)", null, out var deSpace));
+        Assert.Equal(new DateTimeOffset(2026, 11, 27, 16, 0, 0, TimeSpan.Zero), deSpace);
+
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("16:00 Uhr (Europe/Berlin)", anchor, out var uhrUtc));
+        Assert.Equal(new DateTimeOffset(2026, 11, 27, 15, 0, 0, TimeSpan.Zero), uhrUtc);
+
+        // Time-only <= event local time advances by +1 day (14:00Z == 15:00 Berlin -> 14:30 Berlin rolls to Nov 28 13:30Z)
+        Assert.True(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("14:30 (Europe/Berlin)", anchor, out var rolloverUtc));
+        Assert.Equal(new DateTimeOffset(2026, 11, 28, 13, 30, 0, TimeSpan.Zero), rolloverUtc);
+
+        // Time-only without any anchor fails deterministically
+        Assert.False(ClaudeMonitorProvider.TryResolveRateLimitResetUtc("4pm (UTC)", null, out _));
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 }
