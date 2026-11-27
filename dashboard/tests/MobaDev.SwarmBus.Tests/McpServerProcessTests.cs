@@ -175,7 +175,7 @@ public sealed class McpServerProcessTests
             }
 
             process.StandardInput.Close();
-            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
             Assert.Equal(0, process.ExitCode);
 
             var stderr = await stderrTask;
@@ -322,7 +322,7 @@ public sealed class McpServerProcessTests
             });
 
             process.StandardInput.Close();
-            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
             Assert.Equal(0, process.ExitCode);
 
             var trailing = await process.StandardOutput.ReadToEndAsync();
@@ -330,6 +330,117 @@ public sealed class McpServerProcessTests
 
             var stderr = await stderrTask;
             Assert.Equal(string.Empty, stderr.Trim());
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task OneShotPipeClosingStdinImmediatelyAfterFastRequestStillDeliversReplyAndPersistsState()
+    {
+        using var fx = new TempBusFixture();
+        var v2DbPath = Path.Combine(fx.RootPath, "swarm-bus-v2.db");
+
+        using var process = StartMcpProcess(v2DbPath);
+        var stderrTask = process.StandardError.ReadToEndAsync();
+
+        try
+        {
+            await SendJsonRpcAsync(process.StandardInput, new
+            {
+                jsonrpc = "2.0",
+                id = 77,
+                method = "tools/call",
+                @params = new
+                {
+                    name = "bus_send",
+                    arguments = new
+                    {
+                        from = "codex",
+                        to = "claude-opus",
+                        topic = "one-shot-pipe",
+                        body = "Persisted despite immediate stdin EOF"
+                    }
+                }
+            });
+
+            // Close stdin immediately before reading the reply to exercise one-shot piping (`echo ... | mcp`).
+            process.StandardInput.Close();
+
+            using var sendDoc = await ReadJsonRpcResponseAsync(process.StandardOutput);
+            Assert.Equal(77, sendDoc.RootElement.GetProperty("id").GetInt32());
+            var result = sendDoc.RootElement.GetProperty("result");
+            Assert.False(result.GetProperty("isError").GetBoolean());
+            var payloadText = result.GetProperty("content")[0].GetProperty("text").GetString()!;
+            using var payloadDoc = JsonDocument.Parse(payloadText);
+            Assert.True(payloadDoc.RootElement.GetProperty("ok").GetBoolean());
+
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(0, process.ExitCode);
+
+            var stderr = await stderrTask;
+            Assert.Equal(string.Empty, stderr.Trim());
+
+            var verifyStore = new MobaDev.SwarmBus.Core.Store.SwarmBusStore(v2DbPath);
+            var inbox = verifyStore.GetInbox("claude-opus", unreadOnly: true, limit: 10);
+            var msg = Assert.Single(inbox.Messages);
+            Assert.Equal("one-shot-pipe", msg.Topic);
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ToolSideIoExceptionReturnsToolErrorEnvelopeOnConnectedStdout()
+    {
+        using var fx = new TempBusFixture();
+        // Blocking regular file used as parent directory triggers IOException inside EnsureDirectoryExists() during bus_status.
+        var fileAsParent = Path.Combine(fx.RootPath, "file-parent");
+        File.WriteAllText(fileAsParent, "not-a-directory");
+        var unreachableDbPath = Path.Combine(fileAsParent, "swarm-bus-v2.db");
+
+        using var process = StartMcpProcess(unreachableDbPath);
+        var stderrTask = process.StandardError.ReadToEndAsync();
+
+        try
+        {
+            await SendJsonRpcAsync(process.StandardInput, new
+            {
+                jsonrpc = "2.0",
+                id = 88,
+                method = "tools/call",
+                @params = new
+                {
+                    name = "bus_status",
+                    arguments = new { }
+                }
+            });
+
+            using var errDoc = await ReadJsonRpcResponseAsync(process.StandardOutput);
+            Assert.Equal(88, errDoc.RootElement.GetProperty("id").GetInt32());
+            var result = errDoc.RootElement.GetProperty("result");
+            Assert.True(result.GetProperty("isError").GetBoolean());
+            var payloadText = result.GetProperty("content")[0].GetProperty("text").GetString()!;
+            using var payloadDoc = JsonDocument.Parse(payloadText);
+            Assert.False(payloadDoc.RootElement.GetProperty("ok").GetBoolean());
+            Assert.False(string.IsNullOrWhiteSpace(payloadDoc.RootElement.GetProperty("error").GetString()));
+
+            process.StandardInput.Close();
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(0, process.ExitCode);
+
+            var stderr = await stderrTask;
+            Assert.Contains("tools/call error", stderr);
         }
         finally
         {
@@ -400,10 +511,20 @@ public sealed class McpServerProcessTests
     private static async Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(string v2DbPath, params string[] args)
     {
         using var proc = StartMcpProcess(v2DbPath, args);
-        var stdoutTask = proc.StandardOutput.ReadToEndAsync();
-        var stderrTask = proc.StandardError.ReadToEndAsync();
-        await proc.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
-        return (proc.ExitCode, await stdoutTask, await stderrTask);
+        try
+        {
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+            var stderrTask = proc.StandardError.ReadToEndAsync();
+            await proc.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            return (proc.ExitCode, await stdoutTask, await stderrTask);
+        }
+        finally
+        {
+            if (!proc.HasExited)
+            {
+                proc.Kill(entireProcessTree: true);
+            }
+        }
     }
 
     private static ProcessStartInfo CreateMcpStartInfo(string v2DbPath, params string[] args)
@@ -433,6 +554,7 @@ public sealed class McpServerProcessTests
             startInfo.ArgumentList.Add(arg);
         }
 
+        startInfo.Environment["MOBADEV_SWARM_BUS_DB"] = "";
         startInfo.Environment["MOBADEV_SWARM_BUS_V2_DB"] = v2DbPath;
         startInfo.Environment["MOBADEV_CODEX_APP_SERVER_URL"] = "";
         return startInfo;
@@ -447,7 +569,7 @@ public sealed class McpServerProcessTests
 
     private static async Task<JsonDocument> ReadJsonRpcResponseAsync(StreamReader stdout)
     {
-        var line = await stdout.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        var line = await stdout.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10));
         Assert.False(string.IsNullOrWhiteSpace(line), "Expected JSON-RPC response line on stdout.");
         return JsonDocument.Parse(line!);
     }

@@ -89,7 +89,7 @@ public sealed class StartWorkAndWaitTests
             TimeoutMs: 10_000,
             Limit: 10));
 
-        _ = Task.Run(async () =>
+        var writerTask = Task.Run(async () =>
         {
             await Task.Delay(75);
             var writer = new SwarmBusStore(fx.DbPath);
@@ -101,6 +101,7 @@ public sealed class StartWorkAndWaitTests
         });
 
         var result = await waitTask.WaitAsync(TimeSpan.FromSeconds(10));
+        await writerTask.WaitAsync(TimeSpan.FromSeconds(5));
         sw.Stop();
 
         Assert.True(result.Ok);

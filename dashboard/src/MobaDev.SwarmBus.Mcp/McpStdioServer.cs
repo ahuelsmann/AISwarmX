@@ -35,9 +35,10 @@ internal static class McpStdioServer
         using var errorLock = new SemaphoreSlim(1, 1);
         using var fastConcurrency = new SemaphoreSlim(MaxConcurrentFastRequests, MaxConcurrentFastRequests);
         using var waitConcurrency = new SemaphoreSlim(MaxConcurrentWaitRequests, MaxConcurrentWaitRequests);
-        using var shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var waitShutdownCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var inFlightRequests = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.Ordinal);
-        var activeTasks = new List<Task>();
+        var fastTasks = new List<Task>();
+        var waitTasks = new List<Task>();
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -172,37 +173,54 @@ internal static class McpStdioServer
                 }
 
                 var requestKey = TryGetCanonicalRequestIdKey(idElem, out var key) ? key : null;
-                var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(shutdownCts.Token);
+                var requestResponseToken = isWaitToolCall ? waitShutdownCts.Token : cancellationToken;
+                var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(requestResponseToken);
                 if (requestKey is not null)
                 {
                     inFlightRequests[requestKey] = linkedCts;
                 }
 
-                activeTasks.RemoveAll(static t => t.IsCompleted);
-                var task = DispatchRequestAsync(
-                    store,
-                    output,
-                    outputLock,
-                    errorOutput,
-                    errorLock,
-                    pool,
-                    inFlightRequests,
-                    requestKey,
-                    validIdNode,
-                    method,
-                    paramsClone,
-                    toolsNode,
-                    linkedCts,
-                    shutdownCts.Token);
-                activeTasks.Add(task);
+                fastTasks.RemoveAll(static t => t.IsCompleted);
+                waitTasks.RemoveAll(static t => t.IsCompleted);
+                var taskList = isWaitToolCall ? waitTasks : fastTasks;
+                var capturedMethod = method;
+                var capturedRequestKey = requestKey;
+                var capturedIdNode = validIdNode;
+                var capturedPool = pool;
+                var capturedLinkedCts = linkedCts;
+                var capturedResponseToken = requestResponseToken;
+                var task = Task.Run(
+                    () => DispatchRequestAsync(
+                        store,
+                        output,
+                        outputLock,
+                        errorOutput,
+                        errorLock,
+                        capturedPool,
+                        inFlightRequests,
+                        capturedRequestKey,
+                        capturedIdNode,
+                        capturedMethod,
+                        paramsClone,
+                        toolsNode,
+                        capturedLinkedCts,
+                        capturedResponseToken),
+                    CancellationToken.None);
+                taskList.Add(task);
             }
         }
 
-        // Cancel remaining long-poll waits when stdin reaches EOF so the server shuts down promptly.
-        shutdownCts.Cancel();
-        if (activeTasks.Count > 0)
+        // Let already-queued fast RPCs (one-shot pipes closing stdin right after send) finish writing their replies
+        // before cancelling remaining long-poll waits so server shutdown stays prompt without truncating one-shot calls.
+        if (fastTasks.Count > 0)
         {
-            await Task.WhenAll(activeTasks).ConfigureAwait(false);
+            await Task.WhenAll(fastTasks).ConfigureAwait(false);
+        }
+
+        waitShutdownCts.Cancel();
+        if (waitTasks.Count > 0)
+        {
+            await Task.WhenAll(waitTasks).ConfigureAwait(false);
         }
 
         return 0;
@@ -228,7 +246,15 @@ internal static class McpStdioServer
         {
             var response = await HandleRequestAsync(store, idNode, method, @params, toolsNode, linkedCts.Token)
                 .ConfigureAwait(false);
-            await WriteResponseAsync(output, outputLock, response, serverCancellationToken).ConfigureAwait(false);
+            try
+            {
+                await WriteResponseAsync(output, outputLock, response, serverCancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception writeEx) when (writeEx is IOException or ObjectDisposedException)
+            {
+                // Broken stdout pipe when client closes early; log best-effort and exit cleanly without faulting shutdown.
+                await SafeWriteErrorLogAsync(errorOutput, errorLock, $"[mobadev-swarm-bus-mcp] {method} stdout closed: {writeEx.Message}").ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException) when (linkedCts.IsCancellationRequested || serverCancellationToken.IsCancellationRequested)
         {
@@ -236,7 +262,7 @@ internal static class McpStdioServer
         }
         catch (Exception ex)
         {
-            await WriteErrorLogAsync(errorOutput, errorLock, $"[mobadev-swarm-bus-mcp] {method} error: {ex}").ConfigureAwait(false);
+            await SafeWriteErrorLogAsync(errorOutput, errorLock, $"[mobadev-swarm-bus-mcp] {method} error: {ex}").ConfigureAwait(false);
             JsonObject errorEnvelope;
             if (string.Equals(method, "tools/call", StringComparison.Ordinal))
             {
@@ -270,9 +296,9 @@ internal static class McpStdioServer
             {
                 await WriteResponseAsync(output, outputLock, errorEnvelope, serverCancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (serverCancellationToken.IsCancellationRequested)
+            catch (Exception writeEx) when (writeEx is OperationCanceledException or IOException or ObjectDisposedException)
             {
-                // Server shutting down.
+                // Server shutting down or stdout already closed by peer.
             }
         }
         finally
@@ -471,17 +497,24 @@ internal static class McpStdioServer
         }
     }
 
-    private static async Task WriteErrorLogAsync(TextWriter errorOutput, SemaphoreSlim errorLock, string message)
+    private static async Task SafeWriteErrorLogAsync(TextWriter errorOutput, SemaphoreSlim errorLock, string message)
     {
-        await errorLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
-            await errorOutput.WriteLineAsync(message).ConfigureAwait(false);
-            await errorOutput.FlushAsync().ConfigureAwait(false);
+            await errorLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                await errorOutput.WriteLineAsync(message).ConfigureAwait(false);
+                await errorOutput.FlushAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                errorLock.Release();
+            }
         }
-        finally
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
-            errorLock.Release();
+            // Ignore broken stderr pipe on shutdown.
         }
     }
 }

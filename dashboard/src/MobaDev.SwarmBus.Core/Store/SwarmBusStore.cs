@@ -297,9 +297,15 @@ public sealed partial class SwarmBusStore
     }
 
     internal static string ResolveCanonicalPhysicalPath(string rawPath) =>
-        ResolveCanonicalPhysicalPathCore(rawPath, MaxCanonicalLinkHops);
+        ResolveCanonicalPhysicalPathCore(rawPath, MaxCanonicalLinkHops, resolveLinkTarget: null);
 
-    private static string ResolveCanonicalPhysicalPathCore(string rawPath, int remainingHops)
+    internal static string ResolveCanonicalPhysicalPath(string rawPath, Func<FileSystemInfo, string?> resolveLinkTarget) =>
+        ResolveCanonicalPhysicalPathCore(rawPath, MaxCanonicalLinkHops, resolveLinkTarget);
+
+    private static string ResolveCanonicalPhysicalPathCore(
+        string rawPath,
+        int remainingHops,
+        Func<FileSystemInfo, string?>? resolveLinkTarget)
     {
         var full = NormalizePathForComparison(rawPath);
         if (remainingHops <= 0)
@@ -326,26 +332,34 @@ public sealed partial class SwarmBusStore
                 continue;
             }
 
-            resolved = ResolveSegment(resolved, segment, remainingHops, out var existsOnDisk);
+            resolved = ResolveSegment(resolved, segment, remainingHops, resolveLinkTarget, out var existsOnDisk);
             hitMissingSegment = !existsOnDisk;
         }
 
         return TrimTrailingSeparatorsUnlessRoot(resolved);
     }
 
-    private static string ResolveSegment(string parentDir, string segment, int remainingHops, out bool existsOnDisk)
+    private static string ResolveSegment(
+        string parentDir,
+        string segment,
+        int remainingHops,
+        Func<FileSystemInfo, string?>? resolveLinkTarget,
+        out bool existsOnDisk)
     {
         var candidate = Path.Combine(parentDir, segment);
-        var linkTarget = TryResolveLinkTarget(candidate, out existsOnDisk);
+        var linkTarget = TryResolveLinkTarget(candidate, resolveLinkTarget, out existsOnDisk);
         if (linkTarget is null)
         {
             return candidate;
         }
 
-        return ResolveCanonicalPhysicalPathCore(linkTarget, remainingHops - 1);
+        return ResolveCanonicalPhysicalPathCore(linkTarget, remainingHops - 1, resolveLinkTarget);
     }
 
-    private static string? TryResolveLinkTarget(string candidate, out bool existsOnDisk)
+    private static string? TryResolveLinkTarget(
+        string candidate,
+        Func<FileSystemInfo, string?>? resolveLinkTarget,
+        out bool existsOnDisk)
     {
         FileSystemInfo? info = File.Exists(candidate)
             ? new FileInfo(candidate)
@@ -359,14 +373,24 @@ public sealed partial class SwarmBusStore
             return null;
         }
 
-        existsOnDisk = true;
-        var resolvedTarget = info.ResolveLinkTarget(returnFinalTarget: true);
-        if (resolvedTarget is null)
+        try
         {
+            existsOnDisk = true;
+            if (resolveLinkTarget is not null)
+            {
+                var overriddenTarget = resolveLinkTarget(info);
+                return overriddenTarget is null ? null : StripExtendedDrivePrefix(overriddenTarget);
+            }
+
+            var resolvedTarget = info.ResolveLinkTarget(returnFinalTarget: true);
+            return resolvedTarget is null ? null : StripExtendedDrivePrefix(resolvedTarget.FullName);
+        }
+        catch (Exception ex) when (ex is DirectoryNotFoundException or FileNotFoundException)
+        {
+            // Confirmed TOCTOU disappearance between Exists() and link-target read.
+            existsOnDisk = false;
             return null;
         }
-
-        return StripExtendedDrivePrefix(resolvedTarget.FullName);
     }
 
     private static string StripExtendedDrivePrefix(string path)
@@ -380,22 +404,33 @@ public sealed partial class SwarmBusStore
         return path;
     }
 
-    private static bool PathsEqual(string leftPath, string rightPath)
+    private static bool PathsEqual(
+        string leftPath,
+        string rightPath,
+        Func<FileSystemInfo, string?>? resolveLinkTarget = null)
     {
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         return string.Equals(
-            ResolveCanonicalPhysicalPath(leftPath),
-            ResolveCanonicalPhysicalPath(rightPath),
+            ResolveCanonicalPhysicalPathCore(leftPath, MaxCanonicalLinkHops, resolveLinkTarget),
+            ResolveCanonicalPhysicalPathCore(rightPath, MaxCanonicalLinkHops, resolveLinkTarget),
             comparison);
     }
 
-    private static void ThrowIfProtectedLegacyPath(string targetDbPath)
+    internal static void ValidateTargetNotProtectedLegacyPath(
+        string targetDbPath,
+        string legacyPath,
+        Func<FileSystemInfo, string?>? resolveLinkTarget = null)
     {
-        if (PathsEqual(targetDbPath, ResolveLegacyDefaultDbPath()))
+        if (PathsEqual(targetDbPath, legacyPath, resolveLinkTarget))
         {
             throw new InvalidOperationException(
                 $"SwarmBusStore cannot open the live legacy database '{targetDbPath}' in writable mode. Use '{SwarmBusConstants.DefaultDbFileName}' or '{V2DbEnvVar}', and import via ImportFromLegacyDb.");
         }
+    }
+
+    private static void ThrowIfProtectedLegacyPath(string targetDbPath)
+    {
+        ValidateTargetNotProtectedLegacyPath(targetDbPath, ResolveLegacyDefaultDbPath());
 
         var legacyEnvPath = Environment.GetEnvironmentVariable(LegacyDbEnvVar);
         if (!string.IsNullOrWhiteSpace(legacyEnvPath) && PathsEqual(targetDbPath, legacyEnvPath))

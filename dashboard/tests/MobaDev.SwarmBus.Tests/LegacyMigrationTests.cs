@@ -306,6 +306,37 @@ public sealed class LegacyMigrationTests
         }
     }
 
+    [Fact]
+    public void LinkResolutionFailureOnExistingSegmentFailsClosedWithoutOpeningDatabase()
+    {
+        using var fx = new TempBusFixture();
+        var existingSegmentDir = Path.Combine(fx.RootPath, "protected-dir");
+        Directory.CreateDirectory(existingSegmentDir);
+
+        var sentinelDbPath = Path.Combine(existingSegmentDir, "sentinel.db");
+        File.WriteAllBytes(sentinelDbPath, [1, 2, 3, 4]);
+        var originalHash = ComputeFileSha256(sentinelDbPath);
+
+        var legacyPath = Path.Combine(fx.RootPath, "other-legacy", "swarm-bus.db");
+
+        // Permission or general I/O failure on an existing path segment must fail closed (propagate), never fall back to lexical equality.
+        Assert.Throws<UnauthorizedAccessException>(() => SwarmBusStore.ValidateTargetNotProtectedLegacyPath(
+            sentinelDbPath,
+            legacyPath,
+            info => string.Equals(info.FullName, existingSegmentDir, StringComparison.OrdinalIgnoreCase)
+                ? throw new UnauthorizedAccessException("Access denied reading reparse point.")
+                : null));
+
+        Assert.Throws<IOException>(() => SwarmBusStore.ValidateTargetNotProtectedLegacyPath(
+            sentinelDbPath,
+            legacyPath,
+            info => string.Equals(info.FullName, existingSegmentDir, StringComparison.OrdinalIgnoreCase)
+                ? throw new IOException("Unreadable reparse buffer.")
+                : null));
+
+        Assert.Equal(originalHash, ComputeFileSha256(sentinelDbPath));
+    }
+
     private static void CreateDirectoryJunctionOrSymlink(string linkPath, string targetPath)
     {
         if (OperatingSystem.IsWindows())
