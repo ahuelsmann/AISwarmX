@@ -202,8 +202,9 @@ foreach ($pr in $openPrs) {
     foreach ($m in [regex]::Matches("$titleText`n$bodyText", '(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?|issue)\s+#(\d+)\b')) {
         $null = $linkedIssues.Add([int]$m.Groups[1].Value)
     }
-    foreach ($m in [regex]::Matches($headRef, '(?:^|[/-])(\d{1,6})(?:[/-]|$)')) {
-        $null = $linkedIssues.Add([int]$m.Groups[1].Value)
+    $branchMatch = [regex]::Match($headRef, '^[^/]+/(?:issue-)?(\d{1,6})(?:[-_/]|$)')
+    if ($branchMatch.Success) {
+        $null = $linkedIssues.Add([int]$branchMatch.Groups[1].Value)
     }
     $openPrDetails.Add([pscustomobject]@{
         Number       = [int]$pr.number
@@ -519,9 +520,13 @@ if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
                         }
 
                         if ($boardMatch) {
-                            if ($boardMatch.GitHubState -eq "CLOSED") {
+                            if ($boardMatch.GitHubState -eq "CLOSED" -or $boardMatch.KanbanStatus -eq "Done") {
                                 & $nodeCmd.Source --no-warnings $busScript --cli queue --action done --issue-number "$qNum" 2>$null | Out-Null
                                 if ($LASTEXITCODE -eq 0) { $queueSyncResult.DoneCount++ }
+                            }
+                            elseif ($boardMatch.KanbanStatus -in @("Planned", "Inbox")) {
+                                & $nodeCmd.Source --no-warnings $busScript --cli queue --action upsert --issue-number "$qNum" --status "removed" 2>$null | Out-Null
+                                if ($LASTEXITCODE -eq 0) { $queueSyncResult.RemovedCount++ }
                             }
                             # Otherwise the issue is open (e.g. In progress / In review) with no linked PR yet: preserve lease & WIP reservation.
                             continue
@@ -574,7 +579,7 @@ if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
 
                     $isClosed = $false
                     if ($boardMatch) {
-                        $isClosed = ($boardMatch.GitHubState -eq "CLOSED")
+                        $isClosed = ($boardMatch.GitHubState -eq "CLOSED" -or $boardMatch.KanbanStatus -eq "Done")
                     }
                     else {
                         $ghIssueState = (& gh issue view $qNum --repo ahuelsmann/MOBAflow --json state -q .state 2>$null)

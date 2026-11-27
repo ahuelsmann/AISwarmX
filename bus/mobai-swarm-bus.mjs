@@ -48,13 +48,42 @@ function ensureTableColumns(db, tableName, columnDefs) {
   }
 }
 
+function isSqliteBusyError(err) {
+  const code = err && typeof err === 'object' ? err.errcode : undefined;
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  return code === 5 || /SQLITE_BUSY|database is locked/i.test(msg);
+}
+
+function ensureWalJournalMode(db) {
+  const current = db.prepare('PRAGMA journal_mode;').get();
+  if (String(current?.journal_mode ?? '').toLowerCase() === 'wal') {
+    return;
+  }
+
+  const sleepBuf = new Int32Array(new SharedArrayBuffer(4));
+  const maxAttempts = 10;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const check = db.prepare('PRAGMA journal_mode;').get();
+      if (String(check?.journal_mode ?? '').toLowerCase() === 'wal') {
+        return;
+      }
+      db.exec('PRAGMA journal_mode = WAL;');
+      return;
+    } catch (err) {
+      if (!isSqliteBusyError(err) || attempt === maxAttempts) {
+        throw err;
+      }
+      Atomics.wait(sleepBuf, 0, 0, 25 * attempt);
+    }
+  }
+}
+
 function openBusDb(dbPath = resolveDbPath()) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
-  db.exec(`
-    PRAGMA busy_timeout = 5000;
-    PRAGMA journal_mode = WAL;
-  `);
+  db.exec('PRAGMA busy_timeout = 5000;');
+  ensureWalJournalMode(db);
 
   runInImmediateTransaction(db, () => {
     db.exec(`

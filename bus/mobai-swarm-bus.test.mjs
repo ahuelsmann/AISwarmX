@@ -1197,3 +1197,115 @@ console.log('[]');
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('Invoke-SwarmWatchdog releases board-present open Done cards and avoids false links from multi-number branches', async () => {
+  const pwshCheck = spawnSync('pwsh', ['--version'], { encoding: 'utf8' });
+  if (pwshCheck.status !== 0) {
+    return;
+  }
+
+  const { dir, dbPath } = createTempDbPath();
+  const localAppDir = path.join(dir, 'localapp');
+  const binDir = path.join(dir, 'bin');
+  fs.mkdirSync(localAppDir, { recursive: true });
+  fs.mkdirSync(binDir, { recursive: true });
+
+  const mockGhScript = path.join(dir, 'mock-gh-round3.mjs');
+  fs.writeFileSync(mockGhScript, `
+const args = process.argv.slice(2);
+if (args[0] === 'pr' && args[1] === 'list') {
+  console.log(JSON.stringify([{
+    number: 950,
+    title: 'feat: slice 14 for 430',
+    url: 'https://github.com/ahuelsmann/MOBAflow/pull/950',
+    headRefName: 'codex/430-slice-14',
+    headRefOid: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    isDraft: true,
+    mergeStateStatus: 'CLEAN',
+    statusCheckRollup: [],
+    body: 'Refs #430',
+    files: [{ path: 'Backend/Slice14.cs' }],
+    closingIssuesReferences: [{ number: 430 }]
+  }]));
+  process.exit(0);
+}
+if (args[0] === 'issue' && args[1] === 'view') {
+  console.log(JSON.stringify({ state: 'OPEN', projectItems: [{ status: 'In progress' }] }));
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1] === 'graphql') {
+  console.log(JSON.stringify({
+    data: {
+      user: {
+        projectV2: {
+          fields: { nodes: [{ name: 'Status' }, { name: 'Priority' }, { name: 'Risk class' }] },
+          items: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              {
+                id: 'OPEN_DONE_860',
+                fieldValues: { nodes: [
+                  { name: 'Done', field: { name: 'Status' } },
+                  { name: 'P1', field: { name: 'Priority' } },
+                  { name: 'M', field: { name: 'Risk class' } }
+                ] },
+                content: { __typename: 'Issue', number: 860, title: 'Open Done Card', state: 'OPEN' }
+              },
+              {
+                id: 'IP_14',
+                fieldValues: { nodes: [
+                  { name: 'In progress', field: { name: 'Status' } },
+                  { name: 'P1', field: { name: 'Priority' } },
+                  { name: 'M', field: { name: 'Risk class' } }
+                ] },
+                content: { __typename: 'Issue', number: 14, title: 'Unrelated Issue 14', state: 'OPEN' }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }));
+  process.exit(0);
+}
+console.log('[]');
+`, 'utf8');
+  fs.writeFileSync(path.join(binDir, 'gh.cmd'), `@echo off\r\n"${process.execPath}" "${mockGhScript}" %*\r\n`, 'utf8');
+
+  try {
+    const busEnv = { ...process.env, MOBADEV_SWARM_BUS_DB: dbPath };
+    const wdEnv = {
+      ...process.env,
+      LOCALAPPDATA: localAppDir,
+      MOBADEV_SWARM_BUS_DB: dbPath,
+      PATH: `${binDir}${path.delimiter}${process.env.PATH}`
+    };
+
+    // Seed claimed #860 (board-present Done while GitHub state OPEN), #14 (In progress, must NOT match codex/430-slice-14), and #430 (linked to PR #950)
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'upsert', '--issue-number', '860', '--title', 'Open Done Card', '--priority', '1', '--risk-class', 'M'], busEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'next', '--agent', 'codex'], busEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'upsert', '--issue-number', '14', '--title', 'Unrelated Issue 14', '--priority', '1', '--risk-class', 'M'], busEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'next', '--agent', 'claude-opus'], busEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'upsert', '--issue-number', '430', '--title', 'Issue 430', '--priority', '1', '--risk-class', 'M'], busEnv);
+    const seedDb = new DatabaseSync(dbPath);
+    const futureLease = new Date(Date.now() + 3600_000).toISOString();
+    seedDb.prepare("UPDATE work_queue SET status = 'claimed', claimed_by = 'antigravity-opus', claimed_at_utc = ?, lease_expires_utc = ? WHERE issue_number = 430").run(new Date().toISOString(), futureLease);
+    seedDb.close();
+
+    const res = await runProcessAsync('pwsh', [
+      '-NoProfile', '-File', WATCHDOG_SCRIPT,
+      '-SkipHygiene', '-SyncQueue', '-Json', '-DashboardApiUrl', 'http://127.0.0.1:9'
+    ], wdEnv);
+    assert.equal(res.status, 0, res.stderr);
+    const report = JSON.parse(res.stdout);
+    assert.equal(report.QueueSync.BoardReadSucceeded, true);
+    assert.equal(report.QueueSync.DoneCount, 2);
+
+    const list = JSON.parse((await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'list'], busEnv)).stdout);
+    assert.equal(list.items.find((i) => i.issue_number === 860).status, 'done');
+    assert.equal(list.items.find((i) => i.issue_number === 430).status, 'done');
+    assert.equal(list.items.find((i) => i.issue_number === 14).status, 'claimed');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
