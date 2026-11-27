@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ahuelsmann/MOBAdev/schemas/swarm.config.schema.json",
-  "title": "MOBAdev Swarm Workspace Configuration",
+  "$id": "https://github.com/ahuelsmann/AISwarmX/schemas/swarm.config.schema.json",
+  "title": "AISwarmX Swarm Workspace Configuration",
   "description": "Multi-project workspace, capability profile, standing agent, Swarm Bus, and dashboard configuration contract.",
   "type": "object",
   "additionalProperties": false,

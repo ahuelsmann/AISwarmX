@@ -1,18 +1,18 @@
-# MOBAdev Agent Swarm Gen#3 Dashboard — Architektur- & UI/UX-Konzept
+# AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard — Architektur- & UI/UX-Konzept
 
-**Status:** Umgesetzt (v3.9.6 / Gen#3 — **`Claude Fable 5.2`-Verbot (8 erlaubte Modelle inkl. `GPT-6.2 Astra` & Read-Only `Haiku 4.5`)**, **Antigravity Multi-Model Quota-Failover + Quota-Pause-Erkennung** (`Gemini` + `Opus 5.5` + `Sonnet 5.5` + `GPT-OSS 120B`), **Variant A Card-Body Sub-Agent Counters**, **Dirty-Preserved Worktree-Schutz + Zero-Token Hygiene/Watchdog**, interaktiver **`Architecture`**-Tab mit 3 Live-SVG-Diagrammen, Live-KPI-Leiste, orthogonales 2-Achsen-WCAG-AA-Farbsystem, `Round Table v2`, `Open Issues` → `Open PRs` & `Ready` → `In progress` → `In review`, Branch-Hygiene-Monitor, einheitliche Tool-Reihenfolge `ChatGPT/GPT → Claude/Opus → Antigravity/Gemini` & plain-English Glossar)  
+**Status:** Umgesetzt (v3.9.6 / Gen#3 — historische PR-Gate-Referenzen in diesem Abschnitt stammen vom Stand v3.9.6 vor dem PR-free Master-Merge-Cutover; **`Claude Fable 5.2`-Verbot (8 erlaubte Modelle inkl. `GPT-6.2 Astra` & Read-Only `Haiku 4.5`)**, **Antigravity Multi-Model Quota-Failover + Quota-Pause-Erkennung** (`Gemini` + `Opus 5.5` + `Sonnet 5.5` + `GPT-OSS 120B`), **Variant A Card-Body Sub-Agent Counters**, **Dirty-Preserved Worktree-Schutz + Zero-Token Hygiene/Watchdog**, interaktiver **`Architecture`**-Tab mit 3 Live-SVG-Diagrammen, Live-KPI-Leiste, orthogonales 2-Achsen-WCAG-AA-Farbsystem, `Round Table v2`, `Open Issues` → `Open PRs` & `Ready` → `In progress` → `In review`, Branch-Hygiene-Monitor, einheitliche Tool-Reihenfolge `ChatGPT/GPT → Claude/Opus → Antigravity/Gemini` & plain-English Glossar)  
 **Verantwortlich:** `Antigravity Monitor` (`Head of AI Strategy`, `P3`) gemeinsam mit `Head of UI/UX` (`P3`)  
-**Ziel-Repository:** `ahuelsmann/MOBAdev` (`PRIVATE`, unter `dashboard/`)  
+**Ziel-Repository:** `ahuelsmann/AISwarmX` (`PUBLIC`, unter `dashboard/`)\
 **Stack:** ASP.NET Core Minimal API (`.NET 10`) + React (`TypeScript` + `Vite`)
 
 ---
 
 ## 1. Ziel, Leitprinzipien & Abgrenzung
 
-Das **MOBAdev Agent Network Dashboard** macht das Multi-Model-Agentennetzwerk über **Claude Code**, **ChatGPT Codex** und **Antigravity** auf einen Blick transparent: welche Monitore laufen, welche Modelle/Profile (`P1`–`P4`) aktiv sind, welche Regeln/Agenten synchron sind und welche Aufgaben/PRs in `MOBAflow` gerade in Arbeit sind.
+Das **AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard** macht das Multi-Model-Agentennetzwerk über **Claude Code**, **ChatGPT Codex** und **Antigravity** auf einen Blick transparent: welche Monitore laufen, welche Modelle/Profile (`P1`–`P4`) aktiv sind, welche Regeln/Agenten synchron sind und welche Aufgaben/PRs in `MOBAflow` gerade in Arbeit sind.
 
 ### Vier verbindliche Leitprinzipien
-1. **Zero-Duplication (keine zweite Wahrheitsquelle):** Das Dashboard pflegt keine eigene Datenbank für Regeln, Aufgaben oder Status. Es aggregiert ausschließlich **live** aus den Originalquellen (`MOBAdev`, `MOBAflow`, lokale Tool-Metadaten, GitHub). Dadurch entstehen keine Konflikte zwischen `MOBAdev` und `MOBAflow`.
+1. **Zero-Duplication (keine zweite Wahrheitsquelle):** Das Dashboard pflegt keine eigene Datenbank für Regeln, Aufgaben oder Status. Es aggregiert ausschließlich **live** aus den Originalquellen (`AISwarmX`, `MOBAflow`, lokale Tool-Metadaten, GitHub). Dadurch entstehen keine Konflikte zwischen `AISwarmX` und `MOBAflow`.
 2. **Strikt Read-Only („Mission Control“, keine Fernsteuerung):** Keine Schreib-, Merge-, Start- oder Prompt-Aktionen im Dashboard. Operative Steuerung, Locks und Auto-Merge verbleiben vollständig beim `Claude Monitor` (`COO`, `P1`) und im **Decision & Steering Triad**.
 3. **Lokal-Only (`127.0.0.1`):** Kestrel bindet ausschließlich an Loopback (`http://127.0.0.1:5179`). Kein LAN-Binding, kein Cloud-Hosting, kein offener Netzwerk-Port.
 4. **Harte Datenquellen-Whitelist (Privacy & Secrets-Schutz):** Credential-Dateien, Tokens und rohe Chat-Inhalte werden niemals eingelesen oder an das Frontend ausgeliefert.
@@ -22,7 +22,7 @@ Das **MOBAdev Agent Network Dashboard** macht das Multi-Model-Agentennetzwerk ü
 ## 2. Architektur & Verzeichnisstruktur
 
 ```text
-MOBAdev/
+AISwarmX/
 └── dashboard/
     ├── DESIGN.md                           # Dieses Konzept (Slice 1)
     ├── Start-Dashboard.ps1                 # Lokales Startskript (inkl. -Background & -RegisterAutoStart)
@@ -59,8 +59,8 @@ MOBAdev/
 | **Claude Monitor** | `~/.claude/sessions/*.json` + nur die letzten ~20 Zeilen der aktiven `.jsonl` | Name, Status (`busy`/`idle`), Modell-ID, Zeitstempel; für Kontingent-Pause ausschließlich Regex-Match auf Limit-Reset-Zeit (keine Chat-Texte!) |
 | **Codex Monitor** | `~/.codex/state_5.sqlite` (`threads WHERE archived = 0`), `~/.codex/automations/*/automation.toml` | Aktive Thread-Anzahl, Monitor-Name, Modell (`gpt-6.1-sol`), letztes Update, Automation-Status (`ACTIVE`) |
 | **Antigravity Monitor** | `~/.gemini/antigravity/conversation_summaries.db` | Aktive Sessions, Titel, Status (`RUNNING`/`IDLE`), letzter Zeitstempel |
-| **Governance & Regeln** | `MOBAdev` (`manifest.md`, `agents/`, `skills/`), `MOBAflow` (`AGENTS.md`, `master-coordination.instructions.md`, `docs/AI-DEVELOPMENT.md`) | Rollen, Profile (`P1`–`P4`), Modell-Zuordnung, Risikoklassen (`H`/`M`/`L`), Skills |
-| **Sync / Drift-Check** | SHA-256-Vergleich (normalisierte Zeilenenden) zwischen `~/.gemini/config/{agents,rules}/`, `~/.claude/agents/` und `MOBAdev/agents/` | `Synchron`, `Abweichung / Drift` (Dateiname + kurze Diff-Kategorie) oder `Quelle fehlt` |
+| **Governance & Regeln** | `AISwarmX` (`manifest.md`, `agents/`, `skills/`), `MOBAflow` (`AGENTS.md`, `master-coordination.instructions.md`, `docs/AI-DEVELOPMENT.md`) | Rollen, Profile (`P1`–`P4`), Modell-Zuordnung, Risikoklassen (`H`/`M`/`L`), Skills |
+| **Sync / Drift-Check** | SHA-256-Vergleich (normalisierte Zeilenenden) zwischen `~/.gemini/config/{agents,rules}/`, `~/.claude/agents/` und `AISwarmX/agents/` | `Synchron`, `Abweichung / Drift` (Dateiname + kurze Diff-Kategorie) oder `Quelle fehlt` |
 | **Aufgaben-Pipeline** | `gh pr list --repo ahuelsmann/MOBAflow --state open --json ...` (optional `gh project item-list 1`, sofern `read:project` vorhanden) | PR-Nummer, Titel, Branch, `Draft`/`Ready`, `Auto-Merge`, `CLEAN`/`BEHIND`, CI-/Sonar-Status, erkannte Risikoklasse |
 | **Worktrees** | `git -C <MOBAflow> worktree list --porcelain` | Branch, Ordnername (gekürzt), Zuordnung zu offenem PR (`Aktiv` vs. `Veraltet / Gemergt`) |
 
@@ -117,10 +117,10 @@ Drei identisch aufgebaute Karten für `Claude Monitor` (`P1`), `Codex Monitor` (
 #### B. Agenten-, Rollen-, Modell- & Regel-Matrix
 Strikte Spaltentrennung der orthogonalen Dimensionen (nie vermischt als Freitext):
 - **Rolle** (fachliche Aufgabe, fett) · **Profil** (`P1`–`P4` als einheitliche Pill-Badges) · **Modell** (Monospace-Chip, trennt Profil sauber von der Modellzuordnung) · **Risikoklasse** (`H` Rot-, `M` Amber-, `L` Grün-Outline) · **Regel-/Gate-Scope** (kompakte Zuordnung, z. B. Review-/Design-Gate).
-- **Drift-/Sync-Status (Lokal vs. `MOBAdev`-Backup):** Eigene Spalte plus Kopfbanner (`Synchron` ✓ Grün, `Abweichung / Drift` ⚠ Amber mit Zähler und aufklappbarer Datei-/Hash-Übersicht, `Quelle fehlt` ⊘ Grau) sowie 1-Klick-Filter `Nur Abweichungen`.
+- **Drift-/Sync-Status (Lokal vs. `AISwarmX`-Backup):** Eigene Spalte plus Kopfbanner (`Synchron` ✓ Grün, `Abweichung / Drift` ⚠ Amber mit Zähler und aufklappbarer Datei-/Hash-Übersicht, `Quelle fehlt` ⊘ Grau) sowie 1-Klick-Filter `Nur Abweichungen`.
 
 #### C. Aufgaben- & PR-Pipeline (`MOBAflow`)
-- **Klare Repo-Abgrenzung:** Prominenter Header-Tag `Repository: MOBAflow` mit eigenem Rahmenakzent, visuell klar getrennt vom `MOBAdev`-Kontext (Konfigurations-/Backup-Sync), damit Produkt-PRs nie mit Repo-Konfiguration verwechselt werden.
+- **Klare Repo-Abgrenzung:** Prominenter Header-Tag `Repository: MOBAflow` mit eigenem Rahmenakzent, visuell klar getrennt vom `AISwarmX`-Kontext (Konfigurations-/Backup-Sync), damit Produkt-PRs nie mit Repo-Konfiguration verwechselt werden.
 - **Scannbare PR-Einträge:** PR-Nummer (`#123`, Monospace, externer Link) + Titel/Branch; Status-Pill (`Draft` Grau gestrichelt, `Ready` Blau, `Auto-Merge` Violett/Grün); Merge-Status (`CLEAN` ✓ Grün, `BEHIND` ↑ Amber, `BLOCKED/DIRTY` ! Rot); kompakte `CI`- & `Sonar`-Badges (✓ / ⏳ / ✕); **Risikoklasse** (`H`/`M`/`L`), **Gesperrte Bereiche** (Schloss-Icon + Tags, bei `H` hervorgehoben) sowie optionaler Projekt-Status (sofern `read:project` verfügbar).
 
 #### D. Hygiene & Worktrees
@@ -135,7 +135,7 @@ Strikte Spaltentrennung der orthogonalen Dimensionen (nie vermischt als Freitext
 ### 5.4 Lade-, Leer-, Teilfehler- & Offline-Zustände
 Grundprinzip ist **kartenisolierte Fehlertoleranz (Graceful Degradation)**: Ein Fehler einer einzelnen Quelle blockiert niemals das gesamte Dashboard.
 - **Laden:** Geometrie-stabile Skeletons beim Erstaufruf; bei Hintergrund-Updates bleiben vorhandene Werte stehen (nur dezenter Lade-Indikator in der Kopfzeile).
-- **Leerzustände:** Ruhig und eindeutig statt leerer Boxen (z. B. `Keine offenen PRs in MOBAflow`, `Alle lokalen Regeln synchron mit MOBAdev`).
+- **Leerzustände:** Ruhig und eindeutig statt leerer Boxen (z. B. `Keine offenen PRs in MOBAflow`, `Alle lokalen Regeln synchron mit AISwarmX`).
 - **Teilfehler & Offline:**
   - **`gh` ohne `read:project`-Scope:** PR-Liste bleibt vollständig nutzbar; nur der Projekt-/Aufgaben-Anteil zeigt einen kompakten Info-Hinweis (`Projekt-Daten ausgeblendet: Scope read:project fehlt`).
   - **GitHub offline / Rate-Limit:** PR-Karte wechselt in gedämpften Zustand `GitHub nicht erreichbar` (bei vorhandenem Cache: letzter Stand mit Zeitstempel-Banner); alle lokalen Ansichten laufen uneingeschränkt weiter.
@@ -143,7 +143,7 @@ Grundprinzip ist **kartenisolierte Fehlertoleranz (Graceful Degradation)**: Ein 
 
 ---
 
-## 6. Umsetzungsplan in kleinen Slices (in `ahuelsmann/MOBAdev`)
+## 6. Umsetzungsplan in kleinen Slices (in `ahuelsmann/AISwarmX`)
 
 Die Umsetzung läuft parallel zum `MOBAflow`-Refactoring in 3 kleinen, unabhängig mergebaren Slices — ohne `MOBAflow`-Build-Locks zu belegen:
 
@@ -172,15 +172,15 @@ Die Umsetzung läuft parallel zum `MOBAflow`-Refactoring in 3 kleinen, unabhäng
 ---
 
 ## 9. Gen#3 Evolution (v3.4.0 – v3.5.6) — Polish, Merge Gates, Rules Diff, Kanban & Configuration Tab (Slice 6+)
-- **Titel-Update (`MOBAdev Agent Swarm Gen#3`) & Header-Warning-Breakdown:** Interaktives Fluent-`Popover` auf dem `Warnings`-Badge schlüsselt Regel-Drift, veraltete Worktrees, Extra-Sessions und Kontingent-Pausen nach Quelle auf und bietet 1-Klick-Sprunglinks.
+- **Titel-Update (`AISwarmX — Autonomous Dev Engine Gen3.5`) & Header-Warning-Breakdown:** Interaktives Fluent-`Popover` auf dem `Warnings`-Badge schlüsselt Regel-Drift, veraltete Worktrees, Extra-Sessions und Kontingent-Pausen nach Quelle auf und bietet 1-Klick-Sprunglinks.
 - **Kompaktere Monitor-Karten & strikt einzeilige Triad-Leiste:** Einheitliche Baseline über alle 3 Monitor-Karten (`Active · Hourly` aus RRULEs im Inline-Chip); `Escalation: Human` in der Triad-Kopfzeile und präzises `Code WIP: N / 3 (+Docs)` passend zur MOBAflow-WIP-Regel (`Class L` ausgeschlossen).
 - **Korrigierte Writer-Erkennung (`PrParticipantExtractor`):** Explizite `- Writer:`-Slice-Header überschreiben Template-Texte (`P1-P4`), sodass z. B. `P4 slice builder (Claude)` korrekt als `P4` / `Claude Fable 5.2` erscheint.
 - **PR Merge-Gate-Fortschritt & Plain-English `UNSTABLE`:** Jede PR zeigt `Gates X/Y` (`Writer`, optional `Companion`, `CI & Sonar`, `P1 Final`, `Cross-Family`, `Auto-Merge`) sowie verständliche `Checks Pending` / `Checks Failing`-Badges.
 - **Einklappbare Stale-Worktrees & Read-Only Rules-Diff (`GET /api/governance/diff`):** Stale-Worktrees > 3 werden standardmäßig gekürzt; in `Matrix & Rules` zeigt `Show Diff` einen pfadgeschützten Unified Diff (`Target` vs. `Actual`) direkt im Cockpit.
-- **Read-Only `Configuration`-Tab (`MOBAdev`) & `Git & Delivery Strategy`:** Strikte Allow-List-Endpunkte (`GET /api/docs`, `GET /api/docs/content`) liefern versionierte `MOBAdev`-Markdown-Konfigurationen sicher an eine Master-Detail-Ansicht (`Formatted` / `Raw`) aus; `Matrix & Rules` fasst zusätzlich die 5 MOBAflow-Git-Invarianten mit Direktlinks zu `manifest.md` und `docs/delivery-workflow.md` zusammen (`Git & Delivery Strategy` als erste Zeile oben; `v3.5.5` ergänzt Live-Versionslabel aus `CHANGELOG.md` im Header sowie Workflow-Toggles `Kanban Board` → `Open PRs` → `Recently Merged`).
+- **Read-Only `Configuration`-Tab (`AISwarmX`) & `Git & Delivery Strategy`:** Strikte Allow-List-Endpunkte (`GET /api/docs`, `GET /api/docs/content`) liefern versionierte `AISwarmX`-Markdown-Konfigurationen sicher an eine Master-Detail-Ansicht (`Formatted` / `Raw`) aus; `Matrix & Rules` fasst zusätzlich die 5 MOBAflow-Git-Invarianten mit Direktlinks zu `manifest.md` und `docs/delivery-workflow.md` zusammen (`Git & Delivery Strategy` als erste Zeile oben; `v3.5.5` ergänzt Live-Versionslabel aus `CHANGELOG.md` im Header sowie Workflow-Toggles `Kanban Board` → `Open PRs` → `Recently Merged`).
 - **`Kanban Board`-Sicht (1:1-Spiegel) & explizite PR `BLOCKED`-Gründe (`PipelineProvider`, `PipelineCard`):** Gefilterte GitHub-ProjectV2-GraphQL-Abfrage lädt alle aktiven Kanban-Elemente (`In review`, `In progress`, `Ready` — PRs & Issues gemeinsam ohne ausgeblendete Elemente) mit Spaltenzählern und Direktlink zum GitHub-Kanban; offene PRs zeigen konkrete Merge-Blocker (`Draft PR`, Konflikt, Review-Status, fehlgeschlagene/laufende Checks) direkt unter der PR-Zeile an.
 - **Einheitliche Tool-Reihenfolge & Profil-Farbharmonie (`v3.5.6`):** Monitore, Decision & Steering Triad, Session-Hygiene, Rules-Sync und Configuration-Gruppen folgen durchgängig der festen Reihenfolge **`ChatGPT/GPT (Codex) → Claude/Opus (Claude) → Antigravity/Gemini (Antigravity)`**; die drei Monitor-Familien entsprechen farblich direkt ihren Profilen (**`P2` Smaragd-Türkis `#2DD4A8`/`#0D7D63` · `P1` Orange · `P3` Hellblau `#4DA3FF`/`#0067B8`** inkl. `Orchestrator (Neon)` & `Head of AI Strategy`).
-- **Interaktiver Runder Tisch mit Visitenkarten & Branch-Hygiene (`v3.6.0`–`v3.6.1`, `AgentRoundTable`, `WorktreeProvider`, `HygieneAndSyncPanel`):** Die Pipeline-Schalter folgen dem Liefer-Workflow **`Open Issues` → `Open PRs` → `Closed PRs`** (`Open Issues` als Standard mit Spaltenfolge **`Ready` → `In progress` → `In review`**). Alle drei Ansichten zeigen beteiligte Agenten standardmäßig grafisch als interaktiven **Runden Tisch** im SVG (`P1`–`P4`-Kreissitze um die zentrale Issue-/PR-Kachel, Workflow-Pfeile im Uhrzeigersinn, gestrichelte Steering-Verbindungen, inkl. `0`-Agenten-Platzhalter & Kanban-`Writer`-Ableitung). Agenten-Beschriftungen sitzen als gerahmte **Visitenkarten** strikt außerhalb des Orbits (kollisionsfrei oben/unten/links/rechts), ergänzt um **`Round Table` / `Pills`**- & **`Arrows`**-Schalter. Parallel prüft **Branch Hygiene** lokal `MOBAflow` (inkl. Remote-Tracking `origin/*`) und `MOBAdev` strikt lesend auf veraltete Branches (`Local Stale`, `Remote Stale`, `Active`) inkl. Header-Warnung.
+- **Interaktiver Runder Tisch mit Visitenkarten & Branch-Hygiene (`v3.6.0`–`v3.6.1`, `AgentRoundTable`, `WorktreeProvider`, `HygieneAndSyncPanel`):** Die Pipeline-Schalter folgen dem Liefer-Workflow **`Open Issues` → `Open PRs` → `Closed PRs`** (`Open Issues` als Standard mit Spaltenfolge **`Ready` → `In progress` → `In review`**). Alle drei Ansichten zeigen beteiligte Agenten standardmäßig grafisch als interaktiven **Runden Tisch** im SVG (`P1`–`P4`-Kreissitze um die zentrale Issue-/PR-Kachel, Workflow-Pfeile im Uhrzeigersinn, gestrichelte Steering-Verbindungen, inkl. `0`-Agenten-Platzhalter & Kanban-`Writer`-Ableitung). Agenten-Beschriftungen sitzen als gerahmte **Visitenkarten** strikt außerhalb des Orbits (kollisionsfrei oben/unten/links/rechts), ergänzt um **`Round Table` / `Pills`**- & **`Arrows`**-Schalter. Parallel prüft **Branch Hygiene** lokal `MOBAflow` (inkl. Remote-Tracking `origin/*`) und `AISwarmX` strikt lesend auf veraltete Branches (`Local Stale`, `Remote Stale`, `Active`) inkl. Header-Warnung.
 
 ---
 

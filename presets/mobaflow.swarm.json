@@ -109,7 +109,7 @@
   "standingAgents": [
     {
       "id": "claude-opus",
-      "displayName": "MOBAi Claude Opus",
+      "displayName": "AiSwarmX Claude Opus",
       "family": "claude",
       "profile": "P1",
       "role": "COO & Primary Intake Owner",
@@ -120,7 +120,7 @@
     },
     {
       "id": "codex",
-      "displayName": "MOBAi ChatGPT Codex",
+      "displayName": "AiSwarmX ChatGPT Codex",
       "family": "openai",
       "profile": "P2",
       "role": "Technical Director & CPM",
@@ -132,7 +132,7 @@
     },
     {
       "id": "antigravity-gemini",
-      "displayName": "MOBAi Antigravity Gemini",
+      "displayName": "AiSwarmX Antigravity Gemini",
       "family": "gemini",
       "profile": "P3",
       "role": "Head of AI Strategy & UI/UX",
@@ -143,7 +143,7 @@
     },
     {
       "id": "antigravity-opus",
-      "displayName": "MOBAi Antigravity Opus",
+      "displayName": "AiSwarmX Antigravity Opus",
       "family": "claude",
       "profile": "P1",
       "role": "Acting COO & Fresh Independent P1 Reviewer",

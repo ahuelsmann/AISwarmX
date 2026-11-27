@@ -1,4 +1,4 @@
-# MOBAdev setup inventory
+# AISwarmX setup inventory
 
 Versioned setup for the MOBAflow development department. This initial inventory records intended ownership and placement as of 2026-11-05. Live activation is verified separately for each agent.
 

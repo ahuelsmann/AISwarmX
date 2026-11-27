@@ -1,6 +1,6 @@
-# MOBAdev
+# AISwarmX
 
-MOBAdev is the versioned setup for the [MOBAflow](https://github.com/ahuelsmann/MOBAflow) development team. It documents how AI agents are configured and how they collaborate across Codex, Claude Code, and Antigravity.
+AISwarmX is the versioned setup for the [MOBAflow](https://github.com/ahuelsmann/MOBAflow) development team. It documents how AI agents are configured and how they collaborate across Codex, Claude Code, and Antigravity.
 
 ## What belongs here
 
@@ -19,8 +19,8 @@ Read the [MOBAflow agent workflow manifesto](manifest.md) for the active team pr
 - [Allowed AI models](docs/allowed-models.md) — binding allowlist of permitted models across Codex, Claude Code, and Antigravity
 - [Hygiene & zero-token automation](docs/hygiene-and-automation.md) — lossless worktree/branch pruning (`Invoke-RepoHygiene.ps1`) and zero-token Kanban/PR watchdog (`Invoke-SwarmWatchdog.ps1`)
 - [AI strategy and orchestration pilots](docs/ai-strategy-and-pilots.md) (`Orchestrator (Neon)` & `Sol 6.2` monitor strategy, `Gemini 4 Carbon` decision record)
-- [MOBAdev Agent Swarm Gen#3 Dashboard design concept](dashboard/DESIGN.md) (read-only local ASP.NET Core + React cockpit — launch detached via `.\dashboard\Start-Dashboard.ps1 -Background` or enable Windows logon autostart via `.\dashboard\Start-Dashboard.ps1 -RegisterAutoStart`)
-- [Changelog](CHANGELOG.md) — versioned history of `MOBAdev` and the Agent Swarm dashboard
+- [AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard design concept](dashboard/DESIGN.md) (read-only local ASP.NET Core + React cockpit — launch detached via `.\dashboard\Start-Dashboard.ps1 -Background` or enable Windows logon autostart via `.\dashboard\Start-Dashboard.ps1 -RegisterAutoStart`)
+- [Changelog](CHANGELOG.md) — versioned history of `AISwarmX` and the Agent Swarm dashboard
 
 ## Status
 

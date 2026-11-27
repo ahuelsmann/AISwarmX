@@ -1,13 +1,13 @@
 # Rebuild MOBAflow development on a new notebook
 
-Use this runbook to recreate the development environment, agent roles, and working handoffs from MOBAdev. The notebook owner handles account recovery and restoration of live work separately. This runbook is ready to follow as a checklist. A clean-profile rebuild has yet to be exercised, and the [setup inventory](setup-inventory.md) lists configuration gaps.
+Use this runbook to recreate the development environment, agent roles, and working handoffs from AISwarmX. The notebook owner handles account recovery and restoration of live work separately. This runbook is ready to follow as a checklist. A clean-profile rebuild has yet to be exercised, and the [setup inventory](setup-inventory.md) lists configuration gaps.
 
 ## 1. Establish access and the workspace
 
-- Sign in to GitHub and verify access to MOBAdev, MOBAflow, and any other repository named by an assigned role. Recover provider and connector access using the notebook owner's chosen process.
+- Sign in to GitHub and verify access to AISwarmX, MOBAflow, and any other repository named by an assigned role. Recover provider and connector access using the notebook owner's chosen process.
 - Install Git, the approved secrets scanner, and the current approved versions of Codex, Claude Code, and Antigravity from their official sources. Use the MOBAflow product instructions for .NET, SDKs, workloads, builds, and test prerequisites.
-- Clone MOBAdev and MOBAflow as separate working copies. Record the MOBAdev commit used for the rebuild. Run the required standalone secrets scan before reading workspace files.
-- Consult the notebook owner for restored work in progress. Before starting a new delivery, have the COO or designated coordinator reconcile the recovered queue with actual PRs, branches, owners, protected worktrees, and manual acceptance states. Treat missing evidence as an open recovery item.
+- Clone AISwarmX and MOBAflow as separate working copies. Record the AISwarmX commit used for the rebuild. Run the required standalone secrets scan before reading workspace files.
+- Consult the notebook owner for restored work in progress. Before starting a new delivery, have the COO or designated coordinator reconcile the recovered queue with active task branches, `mobai-swarm-bus` queue/lock claims, owners, protected worktrees, and manual acceptance states. Treat missing evidence as an open recovery item.
 
 ## 2. Recreate roles and their effective configuration
 
@@ -31,6 +31,6 @@ Use the next suitable assigned work item and the [Delivery Handoff skill](../ski
 
 ## 4. Hand the rebuilt environment to the COO
 
-Return one recovery handoff with the MOBAdev commit, restored roles and their effective configurations, verified skill versions, workflow and trigger checks, and the observed handoff results. List each open item with its owner and next step.
+Return one recovery handoff with the AISwarmX commit, restored roles and their effective configurations, verified skill versions, workflow and trigger checks, and the observed handoff results. List each open item with its owner and next step.
 
 Mark the rebuild complete for the intended scope once the essential roles are usable, a regular assignment has travelled to the needed tools and back with an accepted result, and the COO or designated coordinator has reconciled the recovered operational state. Keep unavailable or untested roles and channels visible in the handoff.

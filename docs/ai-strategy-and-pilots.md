@@ -1,15 +1,15 @@
 # AI Strategy and Orchestration Pilots
 
-The **Head of AI Strategy** (`P3` / `Orchestrator (Neon)` in Antigravity) continuously evaluates and refines MOBAflow's multi-model agent network across **Antigravity**, **Claude Code**, and **ChatGPT Codex** under the maxim **"Quality, Quality, Quality"**, guards [manifest.md](../manifest.md), and keeps sanitized setup backups versioned in `ahuelsmann/MOBAdev`.
+The **Head of AI Strategy** (`P3` / `Orchestrator (Neon)` in Antigravity) continuously evaluates and refines MOBAflow's multi-model agent network across **Antigravity**, **Claude Code**, and **ChatGPT Codex** under the maxim **"Quality, Quality, Quality"**, guards [manifest.md](../manifest.md), and keeps sanitized setup backups versioned in `ahuelsmann/AISwarmX`.
 
 ## Standing Monitoring Agents vs. Runtime Ephemeral Agents
 
 To eliminate stale chat clutter and preserve fresh review context:
 
 - **Exactly 1 standing Monitoring & Steering Agent per tool (3 total):**
-  1. **Claude Code (`Claude Monitor` — `Chief Operating Officer (COO)`, `P1` Claude Opus 5.5):** Central task workflow entry point — initiates workflows, cuts slices, assigns risk classes (`H`/`M`/`L`), spawns/dispatches runtime agents, and arms auto-merge.
+  1. **Claude Code (`Claude Monitor` — `Chief Operating Officer (COO)`, `P1` Claude Opus 5.5):** Central task workflow entry point — initiates workflows, cuts slices, assigns risk classes (`H`/`M`/`L`), spawns/dispatches runtime agents, and lands verified branches directly onto `main` (PR-free Master-merge).
   2. **ChatGPT Codex (`Codex Monitor` — `Technical Director & CPM`, `P2` Sol 6.2 / `gpt-6.2-sol`):** Backlog/Spec-Kit/build-graph precision (`Moba.slnx`) and 30-minute board/lock check.
-  3. **Antigravity (`Antigravity Monitor` — `Head of AI Strategy`, `P3` Orchestrator (Neon) / `gemini-pro-orchestrator-neon`):** Monitors multi-model orchestration, evaluates pilots, and guards `manifest.md` and `MOBAdev` backups.
+  3. **Antigravity (`Antigravity Monitor` — `Head of AI Strategy`, `P3` Orchestrator (Neon) / `gemini-pro-orchestrator-neon`):** Monitors multi-model orchestration, evaluates pilots, and guards `manifest.md` and `AISwarmX` backups.
 - **Runtime Spawning & Auto-Archival:** All task-scoped execution, review, and domain specialist agents (`Writer`, `Companion Reviewer`, `Final Reviewer`, `Head of UI/UX`, `Head of MOBAnews`, `Security`, `DevOps`) are spawned automatically at task runtime with their assigned model (`P1`–`P4`) and archived or deleted (along with their worktree) immediately on completion (`claude rm` / `--no-session-persistence`, `codex archive`, ephemeral `agy --agent` runs).
 
 ## Active Monitor & Orchestration Mode: `Orchestrator (Neon)` (`gemini-pro-orchestrator-neon`)
@@ -39,7 +39,7 @@ Document `Orchestrator (Neon)` as an explicit `P3`/`P4` option in `MOBAflow/docs
 
 ## Kanban `Ready` Pull-Trigger & Local Automation Strategy
 
-- **Single Intake Owner (`Claude Monitor` / `COO`):** Only `Claude Monitor` picks up issues moved to **`Ready`** on the MOBAflow Kanban board. Keeping a single intake owner eliminates race conditions across Claude Code, ChatGPT Codex, and Antigravity, while the local MOBAdev dashboard stays strictly read-only.
+- **Single Intake Owner (`Claude Monitor` / `COO`):** Only `Claude Monitor` picks up issues moved to **`Ready`** on the MOBAflow Kanban board. Keeping a single intake owner eliminates race conditions across Claude Code, ChatGPT Codex, and Antigravity, while the local AISwarmX dashboard stays strictly read-only.
 - **Active Mode — Maintainer `Planned` -> `Ready` + Manual Ping in `Claude Monitor` (`COO`):** The maintainer controls the explicit start gate by moving an issue to **`Ready`** on GitHub Project #1 and sending a brief kickoff ping to the standing local **`Claude Monitor`** session (0 idle tokens, 0 background scripts, guaranteed local toolchain). Once started, `Claude Monitor` and the swarm autonomously transition Kanban status through **`In progress`** -> **`In review`** -> **`Done`** — see the kickoff playbook in [claude-ready-intake-task.md](claude-ready-intake-task.md).
 - **Local Pull-Polling Instead of Inbound Webhooks:** Because local workstations stay loopback-only (`127.0.0.1`, no open inbound ports or tunnels) and cloud-hosted autonomous agent teams (`MOBAflow #337`) remain deferred, GitHub state checks stay strictly pull-based via lightweight filtered GraphQL (`status:Ready`, `< 1s`).
 - **Deferred Background Automation Findings:**
@@ -59,7 +59,7 @@ Document `Orchestrator (Neon)` as an explicit `P3`/`P4` option in `MOBAflow/docs
 
 - **Updated:** 2026-11-22
 - **Claude Ceiling (`Max Opus 5.5`, zero `Fable 5.2`):** `Claude Fable 5.2` is explicitly **prohibited** across all tools and profiles due to disproportional token/budget burn. Maximum permitted Claude tier is **`Claude Opus 5.5`** (`P1`), while **`Claude Sonnet 5.5`** serves `P4` routine tasks.
-- **`P1` Quota Shield & Default Dual-Plan Splitting:** Keep **`MOBAi Claude Opus`** (Anthropic plan) focused on lean COO intake, Kanban steering, and Class `H` safety architecture. Route bulk slice writing primarily to **ChatGPT Codex (`P2`, `GPT-6.2 Sol`)** and **Antigravity (`P3`/`P4`, `Gemini 4 Carbon` / `Hydrogen` / `Sonnet 5.5`)**, and route **`Fresh Independent P1 Final Reviews`** by default to Antigravity's **`Opus 5.5`** quota pool (Google AI plan) even during normal operation — preserving `MOBAi Claude Opus` budget and eliminating COO bottlenecks.
+- **`P1` Quota Shield & Default Dual-Plan Splitting:** Keep **`AiSwarmX Claude Opus`** (Anthropic plan) focused on lean COO intake, Kanban steering, and Class `H` safety architecture. Route bulk slice writing primarily to **ChatGPT Codex (`P2`, `GPT-6.2 Sol`)** and **Antigravity (`P3`/`P4`, `Gemini 4 Carbon` / `Hydrogen` / `Sonnet 5.5`)**, and route **`Fresh Independent P1 Final Reviews`** by default to Antigravity's **`Opus 5.5`** quota pool (Google AI plan) even during normal operation — preserving `AiSwarmX Claude Opus` budget and eliminating COO bottlenecks.
 - **Disjoint `main`-Sync Fast-Path:** Avoid burning review tokens after pure `origin/main` merges when `LockedAreas` and slice diffs are untouched (`0` conflict edits in slice files); rely on CI, SonarCloud, and Stryker mutation gates for the synced merge commit.
 - **Antigravity Multi-Model Pool during `Claude Code` Quota Pauses (`2/3 Quorum Failover`):**
   Because Antigravity exposes multiple vendor families natively from [allowed-models.md](allowed-models.md) (`Opus 5.5`, `Sonnet 5.5`, `GPT-OSS 120B`, `Gemini 4 Carbon`, `Gemini 4 Hydrogen`), the swarm never stalls when standalone `Claude Code` hits a 5-hour or monthly spend limit:
@@ -67,4 +67,4 @@ Document `Orchestrator (Neon)` as an explicit `P3`/`P4` option in `MOBAflow/docs
   - **`P1` Architecture & Fresh Final Review:** Routed to **`Claude Opus 5.5`** inside Antigravity (`fresh subagent`), preserving the mandatory `P1` gate and cross-family check with `P2` (`Sol 6.2` / `GPT-6 Astra` or `GPT-OSS 120B`) and `P3` (`Gemini 4 Argon / Neon`).
   - **`P4` Fast Delivery:** Routed to **`Gemini 4 Hydrogen`** or **`Claude Sonnet 5.5`** (never `Fable 5.2`).
 - **Cloud Fleet Direction (Shared GitHub Coordination Bus across All Tools):**
-  Aligns with `MOBAflow #337` so local outages or exhausted desktop quotas do not block cloud-eligible work (~85% of issues: `MOBAdemo`, `Common`, `Backend`, `TrackPlan`, `MOBApi`, `RF-*`, `docs/wiki/`). GitHub (`Project v2`, structured PR slice headers, PR review comments, and `ExecutionHost: local | codex-cloud | claude-cloud | github-actions` lease tracking) serves as the single message bus across **ChatGPT Codex Cloud**, **Claude Web / GitHub Actions**, and **Gemini / Antigravity Cloud Runners**, while physical Z21/ESP32/WinUI-device acceptance remains strictly local under maintainer authorization.
+  Aligns with `MOBAflow #337` so local outages or exhausted desktop quotas do not block cloud-eligible work (~85% of issues: `MOBAdemo`, `Common`, `Backend`, `TrackPlan`, `MOBApi`, `RF-*`, `docs/wiki/`). GitHub (`Project v2`, durable issue checkpoints, and `ExecutionHost: local | codex-cloud | claude-cloud | github-actions` lease tracking alongside local `mobai-swarm-bus`) serves as the cloud coordination layer across **ChatGPT Codex Cloud**, **Claude Web / GitHub Actions**, and **Gemini / Antigravity Cloud Runners**, while physical Z21/ESP32/WinUI-device acceptance remains strictly local under maintainer authorization.
