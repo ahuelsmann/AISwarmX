@@ -820,17 +820,31 @@ if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
                                 continue
                             }
 
-                            $anyEligibleClose = $true
-                            $doneOut = & $nodeCmd.Source --no-warnings $busScript --cli queue --action done --issue-number "$cNum" 2>$null
+                            $doneArgs = @("--no-warnings", $busScript, "--cli", "queue", "--action", "done", "--issue-number", "$cNum")
+                            if ($null -ne $cQueueItem -and $cQueueItem.status) {
+                                $doneArgs += @("--expected-status", "$($cQueueItem.status)")
+                                if ($cQueueItem.status -eq "claimed" -and $cQueueItem.claimed_by) {
+                                    $doneArgs += @("--expected-owner", "$($cQueueItem.claimed_by)")
+                                }
+                            }
+                            if ($hasCommitTs) {
+                                $doneArgs += @("--claimed-before", $cTs.ToUniversalTime().ToString("O"))
+                            }
+
+                            $doneOut = & $nodeCmd.Source @doneArgs 2>$null
                             if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($doneOut)) {
                                 try {
                                     $doneObj = ($doneOut -join "`n") | ConvertFrom-Json
-                                    if ($doneObj.updated -and $doneObj.item) {
+                                    if ($doneObj.ok -and $doneObj.updated -and $doneObj.item) {
+                                        $anyEligibleClose = $true
                                         if (-not $matchedClaimer -and $doneObj.item.claimed_by) { $matchedClaimer = "$($doneObj.item.claimed_by)" }
                                         if (-not ($landedIssuesFromSync | Where-Object { $_.IssueNumber -eq $cNum })) {
                                             $queueSyncResult.DoneCount++
                                             $landedIssuesFromSync.Add([pscustomobject]@{ IssueNumber = $cNum; ClaimedBy = $doneObj.item.claimed_by })
                                         }
+                                    }
+                                    elseif (-not $doneObj.ok -and $doneObj.PSObject.Properties["reason"] -and "$($doneObj.reason)" -eq "guard_mismatch") {
+                                        $anyBlockedClose = $true
                                     }
                                 }
                                 catch {
@@ -1019,7 +1033,7 @@ if ($monitorsOnline -and $null -ne $codexMonitor -and $codexMonitor.State -notin
                     State        = "idle-resume-$($codexOwnedClaim.issue_number)"
                     WakeViaBus   = $true
                     Url          = "https://github.com/ahuelsmann/MOBAflow/issues/$($codexOwnedClaim.issue_number)"
-                    Message      = "[Watchdog HeadIdleWake] Codex inactive $([Math]::Floor($inactiveMin))m (state=$($codexMonitor.State), code_wip=$effectiveCodeWip/2) while holding active claimed lease #$($codexOwnedClaim.issue_number) ($($codexOwnedClaim.title)). Resume/renew your owned lease via bus_queue next."
+                    Message      = "[Watchdog HeadIdleWake] Codex inactive $([Math]::Floor($inactiveMin))m (state=$($codexMonitor.State), code_wip=$effectiveCodeWip/2) while holding active claimed lease #$($codexOwnedClaim.issue_number) ($($codexOwnedClaim.title)). Resume/renew your owned lease ONLY via bus_queue(action: 'resume', issue_number: $($codexOwnedClaim.issue_number), owner: 'codex') (do NOT call bus_queue next)."
                 })
             }
             elseif ($effectiveCodeWip -lt 3 -and $null -ne $topEligibleQueueItem) {

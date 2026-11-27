@@ -1662,3 +1662,96 @@ console.log('[]');
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('bus_queue resume is strictly resume-only (never falls through on expired/released leases) and queue done enforces atomic epoch/status/owner guards', async () => {
+  const { openBusDb, handleBusQueue } = await import('./mobai-swarm-bus.mjs');
+  const { dir, dbPath } = createTempDbPath();
+  const busEnv = { ...process.env, MOBADEV_SWARM_BUS_DB: dbPath };
+  const { db } = openBusDb(dbPath);
+
+  try {
+    // Seed #980 claimed by codex and #981 queued Ready
+    handleBusQueue(db, { action: 'upsert', issue_number: 980, title: 'Owned Lease 980', priority: 1, risk_class: 'M' });
+    handleBusQueue(db, { action: 'upsert', issue_number: 981, title: 'Other Ready 981', priority: 1, risk_class: 'M' });
+    const claimed = handleBusQueue(db, { action: 'next', agent: 'codex' });
+    assert.equal(claimed.item.issue_number, 980);
+
+    // 1. Active non-expired resume succeeds and updates lease_expires_utc without touching #981
+    db.prepare("UPDATE work_queue SET lease_expires_utc = ? WHERE issue_number = 980")
+      .run(new Date(Date.now() + 60_000).toISOString());
+    const beforeExpires = db.prepare('SELECT lease_expires_utc FROM work_queue WHERE issue_number = 980').get().lease_expires_utc;
+    const activeResume = JSON.parse((await runProcessAsync(process.execPath, [
+      '--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'resume', '--issue', '980', '--owner', 'codex'
+    ], busEnv)).stdout);
+    assert.equal(activeResume.ok, true);
+    assert.equal(activeResume.resumed, true);
+    assert.equal(activeResume.item.issue_number, 980);
+    assert.ok(activeResume.item.lease_expires_utc > beforeExpires);
+    assert.equal(db.prepare('SELECT status FROM work_queue WHERE issue_number = 981').get().status, 'queued');
+
+    // 2. Expired lease -> queue --action resume returns ok: false, reason: 'lease_lost' and ZERO new items are claimed
+    db.prepare('UPDATE work_queue SET lease_expires_utc = ? WHERE issue_number = 980')
+      .run(new Date(Date.now() - 60_000).toISOString());
+    const expiredResume = JSON.parse((await runProcessAsync(process.execPath, [
+      '--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'resume', '--issue', '980', '--owner', 'codex'
+    ], busEnv)).stdout);
+    assert.equal(expiredResume.ok, false);
+    assert.equal(expiredResume.reason, 'lease_lost');
+    assert.equal(expiredResume.resumed, false);
+    assert.equal(db.prepare('SELECT status FROM work_queue WHERE issue_number = 981').get().status, 'queued');
+
+    // 3. Released lease -> queue --action resume returns ok: false, reason: 'lease_lost' and ZERO new items are claimed
+    handleBusQueue(db, { action: 'release', issue_number: 980, agent: 'codex' });
+    const releasedResume = JSON.parse((await runProcessAsync(process.execPath, [
+      '--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'resume', '--issue', '980', '--owner', 'codex'
+    ], busEnv)).stdout);
+    assert.equal(releasedResume.ok, false);
+    assert.equal(releasedResume.reason, 'lease_lost');
+    assert.equal(db.prepare('SELECT status FROM work_queue WHERE issue_number = 981').get().status, 'queued');
+
+    // 4. Atomic queue done guards: simulate snapshot read at T0, then antigravity-opus reclaims #980 at T1 >= commitTs
+    const commitTs = new Date(Date.now() - 5_000).toISOString();
+    const reclaimAt = new Date().toISOString();
+    db.prepare(`
+      UPDATE work_queue
+      SET status = 'claimed', claimed_by = 'antigravity-opus', claimed_at_utc = ?, lease_expires_utc = ?, updated_at_utc = ?
+      WHERE issue_number = 980
+    `).run(reclaimAt, new Date(Date.now() + 3600_000).toISOString(), reclaimAt);
+
+    // Watchdog runs done with stale snapshot expectations (expected_status='queued' or codex owner / claimed_before=commitTs)
+    const guardedMismatchOwner = JSON.parse((await runProcessAsync(process.execPath, [
+      '--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'done',
+      '--issue-number', '980', '--expected-status', 'claimed', '--expected-owner', 'codex', '--claimed-before', commitTs
+    ], busEnv)).stdout);
+    assert.equal(guardedMismatchOwner.ok, false);
+    assert.equal(guardedMismatchOwner.updated, false);
+    assert.equal(guardedMismatchOwner.reason, 'guard_mismatch');
+
+    const guardedMismatchEpoch = JSON.parse((await runProcessAsync(process.execPath, [
+      '--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'done',
+      '--issue-number', '980', '--expected-status', 'claimed', '--expected-owner', 'antigravity-opus', '--claimed-before', commitTs
+    ], busEnv)).stdout);
+    assert.equal(guardedMismatchEpoch.ok, false);
+    assert.equal(guardedMismatchEpoch.updated, false);
+    assert.equal(guardedMismatchEpoch.reason, 'guard_mismatch');
+
+    // Newer claimed lease stays untouched
+    const current980 = db.prepare('SELECT status, claimed_by, claimed_at_utc FROM work_queue WHERE issue_number = 980').get();
+    assert.equal(current980.status, 'claimed');
+    assert.equal(current980.claimed_by, 'antigravity-opus');
+    assert.equal(current980.claimed_at_utc, reclaimAt);
+
+    // Guarded done succeeds when status, owner, and claimed_at_utc < claimed_before all match
+    const laterCommitTs = new Date(Date.now() + 5_000).toISOString();
+    const guardedMatch = JSON.parse((await runProcessAsync(process.execPath, [
+      '--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'done',
+      '--issue-number', '980', '--expected-status', 'claimed', '--expected-owner', 'antigravity-opus', '--claimed-before', laterCommitTs
+    ], busEnv)).stdout);
+    assert.equal(guardedMatch.ok, true);
+    assert.equal(guardedMatch.updated, true);
+    assert.equal(guardedMatch.item.status, 'done');
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

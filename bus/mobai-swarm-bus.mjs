@@ -1124,6 +1124,62 @@ function handleQueueNext(db, args, nowIso, leaseExpiresIso) {
   });
 }
 
+function handleQueueResume(db, issueNumber, args, nowIso, leaseExpiresIso) {
+  const owner = String(args.owner ?? args.agent ?? '').trim();
+  if (!owner) {
+    throw new Error('bus_queue resume requires non-empty "owner" (or "agent").');
+  }
+
+  return runInImmediateTransaction(db, () => {
+    const existing = db.prepare('SELECT * FROM work_queue WHERE issue_number = ?').get(issueNumber) ?? null;
+    if (
+      !existing
+      || existing.status !== 'claimed'
+      || String(existing.claimed_by ?? '').toLowerCase() !== owner.toLowerCase()
+      || typeof existing.lease_expires_utc !== 'string'
+      || existing.lease_expires_utc <= nowIso
+    ) {
+      return {
+        ok: false,
+        action: 'resume',
+        resumed: false,
+        issue_number: issueNumber,
+        reason: 'lease_lost',
+        item: existing
+      };
+    }
+
+    const res = db.prepare(`
+      UPDATE work_queue
+      SET lease_expires_utc = ?, updated_at_utc = ?
+      WHERE id = ?
+        AND status = 'claimed'
+        AND lower(claimed_by) = lower(?)
+        AND lease_expires_utc > ?
+    `).run(leaseExpiresIso, nowIso, existing.id, owner, nowIso);
+
+    if (res.changes === 0) {
+      const latest = db.prepare('SELECT * FROM work_queue WHERE issue_number = ?').get(issueNumber) ?? null;
+      return {
+        ok: false,
+        action: 'resume',
+        resumed: false,
+        issue_number: issueNumber,
+        reason: 'lease_lost',
+        item: latest
+      };
+    }
+
+    const refreshed = db.prepare('SELECT * FROM work_queue WHERE id = ?').get(existing.id);
+    return {
+      ok: true,
+      action: 'resume',
+      resumed: true,
+      item: refreshed
+    };
+  });
+}
+
 function handleQueueRelease(db, issueNumber, args, nowIso) {
   const agent = args.agent !== undefined && args.agent !== null ? String(args.agent).trim() : '';
   const res = agent
@@ -1148,20 +1204,89 @@ function handleQueueRelease(db, issueNumber, args, nowIso) {
   };
 }
 
-function handleQueueDone(db, issueNumber, nowIso) {
-  const res = db.prepare(`
-    UPDATE work_queue
-    SET status = 'done', lease_expires_utc = NULL, updated_at_utc = ?
-    WHERE issue_number = ?
-  `).run(nowIso, issueNumber);
-  const item = db.prepare('SELECT * FROM work_queue WHERE issue_number = ?').get(issueNumber) ?? null;
-  return {
-    ok: true,
-    action: 'done',
-    issue_number: issueNumber,
-    updated: res.changes > 0,
-    item
-  };
+function normalizeOptionalIsoTimestamp(rawValue, fieldName) {
+  if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') {
+    return null;
+  }
+  const parsedMs = Date.parse(String(rawValue).trim());
+  if (!Number.isFinite(parsedMs)) {
+    throw new Error(`bus_queue "${fieldName}" must be a valid ISO-8601 timestamp.`);
+  }
+  return new Date(parsedMs).toISOString();
+}
+
+function handleQueueDone(db, issueNumber, args, nowIso) {
+  const rawExpectedStatus = args.expected_status !== undefined && args.expected_status !== null
+    ? String(args.expected_status).trim().toLowerCase()
+    : '';
+  const expectedStatus = rawExpectedStatus || null;
+  if (expectedStatus && !QUEUE_STATUSES.has(expectedStatus)) {
+    throw new Error(`Invalid expected_status '${expectedStatus}'. Expected: queued, claimed, done, removed.`);
+  }
+
+  const rawExpectedOwner = args.expected_owner !== undefined && args.expected_owner !== null
+    ? String(args.expected_owner).trim()
+    : '';
+  const expectedOwner = rawExpectedOwner || null;
+  const claimedBefore = normalizeOptionalIsoTimestamp(args.claimed_before, 'claimed_before');
+  const hasGuards = Boolean(expectedStatus || expectedOwner || claimedBefore);
+
+  return runInImmediateTransaction(db, () => {
+    const existing = db.prepare('SELECT * FROM work_queue WHERE issue_number = ?').get(issueNumber) ?? null;
+    if (!existing) {
+      return {
+        ok: true,
+        action: 'done',
+        issue_number: issueNumber,
+        updated: false,
+        item: null
+      };
+    }
+
+    const res = hasGuards
+      ? db.prepare(`
+          UPDATE work_queue
+          SET status = 'done', lease_expires_utc = NULL, updated_at_utc = ?
+          WHERE issue_number = ?
+            AND (? IS NULL OR lower(status) = lower(?))
+            AND (? IS NULL OR lower(COALESCE(claimed_by, '')) = lower(?))
+            AND (? IS NULL OR (claimed_at_utc IS NULL AND status != 'claimed') OR claimed_at_utc < ?)
+        `).run(
+          nowIso,
+          issueNumber,
+          expectedStatus,
+          expectedStatus,
+          expectedOwner,
+          expectedOwner,
+          claimedBefore,
+          claimedBefore
+        )
+      : db.prepare(`
+          UPDATE work_queue
+          SET status = 'done', lease_expires_utc = NULL, updated_at_utc = ?
+          WHERE issue_number = ?
+        `).run(nowIso, issueNumber);
+
+    if (hasGuards && res.changes === 0) {
+      return {
+        ok: false,
+        action: 'done',
+        issue_number: issueNumber,
+        updated: false,
+        reason: 'guard_mismatch',
+        item: existing
+      };
+    }
+
+    const item = db.prepare('SELECT * FROM work_queue WHERE issue_number = ?').get(issueNumber) ?? null;
+    return {
+      ok: true,
+      action: 'done',
+      issue_number: issueNumber,
+      updated: res.changes > 0,
+      item
+    };
+  });
 }
 
 function handleQueueUpsert(db, issueNumber, args, nowIso) {
@@ -1234,11 +1359,12 @@ export function handleBusQueue(db, args = {}) {
     throw new Error(`bus_queue ${action} requires positive integer "issue_number".`);
   }
 
+  if (action === 'resume') return handleQueueResume(db, issueNumber, args, nowIso, leaseExpiresIso);
   if (action === 'release') return handleQueueRelease(db, issueNumber, args, nowIso);
-  if (action === 'done') return handleQueueDone(db, issueNumber, nowIso);
+  if (action === 'done') return handleQueueDone(db, issueNumber, args, nowIso);
   if (action === 'upsert') return handleQueueUpsert(db, issueNumber, args, nowIso);
 
-  throw new Error(`Unsupported bus_queue action '${action}'. Use: list, next, release, done, upsert, sync-meta.`);
+  throw new Error(`Unsupported bus_queue action '${action}'. Use: list, next, resume, release, done, upsert, sync-meta.`);
 }
 
 const TOOL_DEFINITIONS = [
@@ -1335,17 +1461,21 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'bus_queue',
-    description: 'Coordinate Ready work queue claims, lease renewals/resumes, releases, completions, Watchdog sync, and metadata.',
+    description: 'Coordinate Ready work queue claims, resume-only lease renewals, releases, guarded completions, Watchdog sync, and metadata.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'next', 'release', 'done', 'upsert', 'sync-meta'], default: 'list' },
-        agent: { type: 'string', description: 'Claiming or releasing agent identifier.' },
+        action: { type: 'string', enum: ['list', 'next', 'resume', 'release', 'done', 'upsert', 'sync-meta'], default: 'list' },
+        agent: { type: 'string', description: 'Claiming, resuming, or releasing agent identifier.' },
+        owner: { type: 'string', description: 'Owning agent identifier (for resume).' },
         issue_number: { type: 'integer', description: 'GitHub issue number.' },
         title: { type: 'string', description: 'Issue title (for upsert).' },
         priority: { type: 'integer', description: 'Numeric priority (0=P0 .. 3=P3).' },
         risk_class: { type: 'string', description: 'Risk class (H, M, or L).' },
         status: { type: 'string', enum: ['queued', 'claimed', 'done', 'removed'], description: 'Work queue status.' },
+        expected_status: { type: 'string', enum: ['queued', 'claimed', 'done', 'removed'], description: 'Optional atomic status guard for done.' },
+        expected_owner: { type: 'string', description: 'Optional atomic claimed_by owner guard for done.' },
+        claimed_before: { type: 'string', description: 'Optional ISO-8601 UTC cutoff requiring claimed_at_utc < claimed_before for done.' },
         meta_key: { type: 'string', description: 'Metadata key (for sync-meta), e.g. code_wip.' },
         meta_value: { type: 'string', description: 'Metadata value (for sync-meta).' }
       },
@@ -1525,11 +1655,15 @@ function runCli(args) {
       result = handleBusQueue(db, {
         action: flags.action ?? 'list',
         agent: flags.agent,
+        owner: flags.owner,
         issue_number: flags['issue-number'] ?? flags.issue,
         title: flags.title,
         priority: flags.priority,
         risk_class: flags['risk-class'],
         status: flags.status,
+        expected_status: flags['expected-status'],
+        expected_owner: flags['expected-owner'],
+        claimed_before: flags['claimed-before'],
         meta_key: flags['meta-key'],
         meta_value: flags['meta-value']
       });
