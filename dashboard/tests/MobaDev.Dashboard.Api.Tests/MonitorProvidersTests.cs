@@ -886,6 +886,122 @@ public sealed class MonitorProvidersTests
         Assert.Equal("standby", agHeads[1].State);
     }
 
+    [Fact]
+    public async Task ClaudeMonitorProvider_DetectsActiveHeadlessProjectTranscripts()
+    {
+        using var fx = new TempDashboardFixture();
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
+            fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
+
+        var parentDir = Path.GetDirectoryName(fx.MobaDevPath)!;
+        var sentixFolder = ClaudeMonitorProvider.EncodeProjectFolder(Path.Combine(parentDir, "SentiX", "wt-phase3"));
+        var unrelatedFolder = ClaudeMonitorProvider.EncodeProjectFolder(@"C:\Unrelated\RandomRepo");
+
+        var headlessProjectDir = Path.Combine(fx.ClaudeHomePath, "projects", sentixFolder);
+        var unrelatedDir = Path.Combine(fx.ClaudeHomePath, "projects", unrelatedFolder);
+        Directory.CreateDirectory(headlessProjectDir);
+        Directory.CreateDirectory(unrelatedDir);
+
+        // Unrelated repository must be ignored
+        var unrelatedPath = Path.Combine(unrelatedDir, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.jsonl");
+        await File.WriteAllTextAsync(unrelatedPath, """
+            {"type":"api-request","timestamp":"2026-11-27T22:01:00Z","message":{"role":"assistant","model":"claude-sonnet-5-5","content":[{"type":"text","text":"Working on T-10"}]}}
+            """);
+
+        // Completed/closed session (last-prompt / end_turn) must NOT look busy, even with trailing attachment metadata
+        var completedPath = Path.Combine(headlessProjectDir, "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.jsonl");
+        await File.WriteAllLinesAsync(completedPath, [
+            """{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5-20261101","stop_reason":"end_turn","content":[{"type":"text","text":"Done"}]}}""",
+            """{"type":"last-prompt"}""",
+            """{"type":"attachment","entrypoint":"sdk-cli"}"""
+        ]);
+
+        // Empty/metadata-only transcript without affirmative active evidence must NOT look busy
+        var metadataOnlyPath = Path.Combine(headlessProjectDir, "12121212-1212-4121-8121-121212121212.jsonl");
+        await File.WriteAllLinesAsync(metadataOnlyPath, [
+            """{"type":"session-owner"}""",
+            """{"type":"atis-latch"}"""
+        ]);
+
+        // Active in-progress headless transcript (api-request after end, contains private prompt text)
+        const string secretText = "Working on T-10 SECRET_TEXT";
+        var transcriptPath = Path.Combine(headlessProjectDir, "99999999-9999-4999-9999-999999999999.jsonl");
+        await File.WriteAllLinesAsync(transcriptPath, [
+            $$$"""{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5-20261101","stop_reason":"tool_use","content":[{"type":"text","text":"{{{secretText}}}"}]}}""",
+            """{"type":"api-request","timestamp":"2026-11-27T22:01:05Z"}"""
+        ]);
+
+        var now = new DateTimeOffset(File.GetLastWriteTimeUtc(transcriptPath), TimeSpan.Zero).AddSeconds(15);
+        var provider = new ClaudeMonitorProvider(new FixedTimeProvider(now));
+        var monitor = await provider.GetMonitorAsync(paths, CancellationToken.None);
+
+        Assert.Equal("busy", monitor.State);
+        Assert.Equal(1, monitor.ActiveSessionCount);
+        Assert.Equal(1, monitor.ActiveSubAgentCount);
+        Assert.Equal("Claude Opus 5.5", monitor.Model);
+        Assert.NotNull(monitor.ActiveSubAgentsByModel);
+        Assert.Equal(1, monitor.ActiveSubAgentsByModel!["Claude Opus 5.5"]);
+        Assert.DoesNotContain(secretText, monitor.Source.Notice ?? string.Empty);
+
+        // Transcript older than SubAgentActiveWindow (> 2 min) is ignored
+        var staleMonitor = await new ClaudeMonitorProvider(new FixedTimeProvider(now.AddMinutes(3))).GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("offline", staleMonitor.State);
+        Assert.Equal(0, staleMonitor.ActiveSessionCount);
+    }
+
+    [Fact]
+    public async Task ClaudeMonitorProvider_HeadlessExcludesInteractiveAndRateLimitedAndScopesInteractiveBusy()
+    {
+        using var fx = new TempDashboardFixture();
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath, fx.MobaFlowPath, fx.ClaudeHomePath, fx.CodexHomePath,
+            fx.AntigravityHomePath, fx.GeminiConfigPath, string.Empty);
+
+        var parentDir = Path.GetDirectoryName(fx.MobaDevPath)!;
+        var sentixFolder = ClaudeMonitorProvider.EncodeProjectFolder(Path.Combine(parentDir, "SentiX"));
+        var sentixDir = Path.Combine(fx.ClaudeHomePath, "projects", sentixFolder);
+        Directory.CreateDirectory(sentixDir);
+
+        // Closed transcript with unparseable rate-limit reset text and realistic clock -> must still report rate_limited (not busy!)
+        var rateLimitedPath = Path.Combine(sentixDir, "cccccccc-cccc-4ccc-cccc-cccccccccccc.jsonl");
+        await File.WriteAllTextAsync(rateLimitedPath, """
+            {"timestamp":"2026-11-27T22:00:00Z","type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"You've hit your weekly limit · resets unparseable-soon"}]}}
+            """);
+        var realisticNow = new DateTimeOffset(File.GetLastWriteTimeUtc(rateLimitedPath), TimeSpan.Zero).AddSeconds(10);
+        var pausedMonitor = await new ClaudeMonitorProvider(new FixedTimeProvider(realisticNow)).GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("rate_limited", pausedMonitor.State);
+        Assert.Equal(0, pausedMonitor.ActiveSessionCount);
+
+        // Overwrite with clean interactive + SentiX headless: standing idle AiSwarmX stays standby while ActiveSubAgentCount reflects SentiX worker,
+        // and interactive session's own JSONL is excluded from headless double-counting.
+        await File.WriteAllTextAsync(rateLimitedPath, """{"type":"last-prompt"}""");
+        var sentixActivePath = Path.Combine(sentixDir, "dddddddd-dddd-4ddd-dddd-dddddddddddd.jsonl");
+        await File.WriteAllTextAsync(sentixActivePath, """
+            {"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","stop_reason":"tool_use","content":[{"type":"text","text":"step"}]}}
+            """);
+
+        var mobaDevSessionId = "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee";
+        var mobaDevFolder = ClaudeMonitorProvider.EncodeProjectFolder(fx.MobaDevPath);
+        var mobaDevDir = Path.Combine(fx.ClaudeHomePath, "projects", mobaDevFolder);
+        Directory.CreateDirectory(mobaDevDir);
+        await File.WriteAllTextAsync(Path.Combine(mobaDevDir, $"{mobaDevSessionId}.jsonl"), """
+            {"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"interactive"}]}}
+            """);
+
+        var sessionsDir = Path.Combine(fx.ClaudeHomePath, "sessions");
+        Directory.CreateDirectory(sessionsDir);
+        var standbyMs = realisticNow.AddMinutes(-10).ToUnixTimeMilliseconds();
+        await File.WriteAllTextAsync(Path.Combine(sessionsDir, "7777.json"), $$"""
+            { "sessionId": "{{mobaDevSessionId}}", "name": "AiSwarmX Claude Opus", "status": "idle", "updatedAt": {{standbyMs}} }
+            """);
+
+        var mixedMonitor = await new ClaudeMonitorProvider(new FixedTimeProvider(realisticNow)).GetMonitorAsync(paths, CancellationToken.None);
+        Assert.Equal("standby", mixedMonitor.State);
+        Assert.Equal(1, mixedMonitor.ActiveSessionCount);
+        Assert.Equal(1, mixedMonitor.ActiveSubAgentCount);
+    }
+
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => utcNow;

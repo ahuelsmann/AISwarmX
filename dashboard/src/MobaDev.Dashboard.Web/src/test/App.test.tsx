@@ -703,7 +703,7 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     expect(resolveModelVisual('Gemini 4 Hydrogen').tone).toBe('pink');
     expect(resolveRoleVisual('Final Reviewer').tone).toBe('neutral');
 
-    // Row 3: Switch to Open PRs (#492 with Checks Pending, Merge Gates, linked issue, Arrows toggle & Round Table Visitenkarte)
+    // Row 3: Switch to Open PRs (#492 with Checks Pending, Merge Gates, linked issue & Round Table Visitenkarte)
     await user.click(screen.getByRole('button', { name: /Open PRs \(1\)/i }));
     expect(screen.getByText('Repository: ahuelsmann/MOBAflow')).toBeInTheDocument();
     expect(screen.getAllByText('#492').length).toBeGreaterThanOrEqual(1);
@@ -712,17 +712,12 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     expect(screen.getByText('Issue #366')).toBeInTheDocument();
     expect(screen.getByText('2 Agents')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Round table of 2 Agents for #492' })).toBeInTheDocument();
-    const arrowsBtn = screen.getByRole('button', { name: 'Arrows: On' });
-    await user.click(arrowsBtn);
-    expect(screen.getByRole('button', { name: 'Arrows: Off' })).toBeInTheDocument();
+    const pipelineSection = screen.getByLabelText('Task and PR Pipeline MOBAflow');
+    expect(within(pipelineSection).queryByRole('button', { name: 'Pills' })).not.toBeInTheDocument();
+    expect(within(pipelineSection).queryByRole('button', { name: 'Round Table' })).not.toBeInTheDocument();
+    expect(within(pipelineSection).queryByRole('button', { name: /Arrows:/i })).not.toBeInTheDocument();
     expect(screen.getByText('GPT-6 Astra')).toBeInTheDocument();
     expect(screen.getByText('Implemented')).toBeInTheDocument();
-    const pipelineSection = screen.getByLabelText('Task and PR Pipeline MOBAflow');
-    await user.click(within(pipelineSection).getByRole('button', { name: 'Pills' }));
-    expect(
-      screen.queryByRole('img', { name: 'Round table of 2 Agents for #492' })
-    ).not.toBeInTheDocument();
-    expect(screen.getByText('GPT-6 Astra')).toBeInTheDocument();
     expect(screen.getByText('Final Reviewer')).toBeInTheDocument();
     expect(screen.getByText('Claude Opus 5.5')).toBeInTheDocument();
     expect(screen.getByText(/missing read:project scope/i)).toBeInTheDocument();
@@ -1818,5 +1813,45 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     });
     expect(standbyWriterSeat).toHaveAttribute('data-live-working', 'false');
     expect(standbyWriterSeat.querySelector('.roundtable-pulse-halo')).toBeNull();
+  });
+
+  it('renders live CI workflow runs strip across monitored repositories', async () => {
+    const snapshot = createSnapshotFixture();
+    snapshot.pipeline.workflowRuns = [
+      {
+        databaseId: 7001,
+        repository: 'ahuelsmann/SentiX',
+        workflowName: 'SentiX Linux CI',
+        displayTitle: 'feat: decision swarm T-10',
+        headBranch: 'feat/phase3-decision-swarm',
+        status: 'in_progress',
+        conclusion: null,
+        url: 'https://github.com/ahuelsmann/SentiX/actions/runs/7001',
+        createdAtUtc: snapshot.generatedAtUtc,
+        updatedAtUtc: snapshot.generatedAtUtc
+      },
+      {
+        databaseId: 7002,
+        repository: 'ahuelsmann/MOBAflow',
+        workflowName: 'WinUI Build & Tests',
+        displayTitle: 'fix: TrackPlanPage automation',
+        headBranch: 'main',
+        status: 'completed',
+        conclusion: 'success',
+        url: 'https://github.com/ahuelsmann/MOBAflow/actions/runs/7002',
+        createdAtUtc: snapshot.generatedAtUtc,
+        updatedAtUtc: snapshot.generatedAtUtc
+      }
+    ];
+
+    stubDashboardFetch(snapshot);
+    render(<App />);
+
+    const strip = await screen.findByRole('region', { name: /Running and Recent CI Pipelines/i });
+    expect(strip).toHaveTextContent('1 running');
+    expect(strip).toHaveTextContent('SentiX');
+    expect(strip).toHaveTextContent('SentiX Linux CI');
+    expect(strip).toHaveTextContent('MOBAflow');
+    expect(strip).toHaveTextContent('WinUI Build & Tests');
   });
 });

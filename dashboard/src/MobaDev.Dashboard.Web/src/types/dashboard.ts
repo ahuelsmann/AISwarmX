@@ -217,12 +217,27 @@ export interface PullRequestInfo {
   mergeBlockReasons?: string[];
 }
 
+export interface WorkflowRunInfo {
+  databaseId: number;
+  repository: string;
+  workflowName: string;
+  displayTitle: string;
+  headBranch: string;
+  status: string;
+  conclusion?: string | null;
+  url: string;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
 export interface PipelineResponse {
   generatedAtUtc: string;
   repository: string;
   pullRequests: PullRequestInfo[];
   recentlyMerged: PullRequestInfo[];
   activeIssues?: ActiveIssueInfo[];
+  workflowRuns?: WorkflowRunInfo[] | null;
+  workflowRunsSource?: SourceHealth | null;
   projectBoardAvailable: boolean;
   projectBoardNotice?: string | null;
   projectBoardUrl?: string | null;

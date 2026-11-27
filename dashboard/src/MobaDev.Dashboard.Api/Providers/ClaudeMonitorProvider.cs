@@ -61,20 +61,58 @@ public sealed partial class ClaudeMonitorProvider
         var rawSessions = Directory.Exists(sessionsDir)
             ? LoadSessionRecords(sessionsDir)
             : [];
+        var interactiveSessionIds = rawSessions
+            .Select(static s => s.SessionId)
+            .Where(static id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var headless = CollectActiveHeadlessProjectTranscripts(paths, now, interactiveSessionIds);
+        var combinedExternalModels = new List<string?>(activeSubagentModels.Count + headless.AllSwarmModels.Count);
+        combinedExternalModels.AddRange(activeSubagentModels);
+        combinedExternalModels.AddRange(headless.AllSwarmModels);
         var sessions = FilterMobaSessions(rawSessions, paths);
 
         if (sessions.Count == 0)
         {
-            var offlineByModel = GroupModels(activeSubagentModels, "claude-opus-5-5");
-            if (TryCreateClosedQuotaPauseMonitor(paths.ClaudeHomePath, now, activeSubagentModels.Count, offlineByModel, out var pausedMonitor))
+            var offlineByModel = GroupModels(combinedExternalModels, "claude-opus-5-5");
+            if (TryCreateClosedQuotaPauseMonitor(paths.ClaudeHomePath, now, activeSubagentModels.Count, GroupModels(activeSubagentModels, "claude-opus-5-5"), out var pausedMonitor))
             {
                 return Task.FromResult(pausedMonitor);
+            }
+
+            if (headless.AllSwarmModels.Count > 0)
+            {
+                var fallbackModel = "claude-opus-5-5";
+                var (headlessState, _) = MonitorStateRules.ResolveState(
+                    true,
+                    null,
+                    headless.LatestWriteUtc,
+                    now,
+                    effectiveThreshold);
+                var headlessDisplayModel = SubAgentModelCatalog.Normalize(headless.LatestModel, fallbackModel).Model;
+                var headlessNotice = headless.AllSwarmModels.Count == 1
+                    ? "Headless Claude CLI session active across swarm."
+                    : $"{headless.AllSwarmModels.Count} headless Claude CLI sessions active across swarm.";
+                return Task.FromResult(new MonitorInfo(
+                    Id: MonitorId,
+                    DisplayName: DisplayName,
+                    Role: Role,
+                    Profile: Profile,
+                    Tool: Tool,
+                    State: headlessState,
+                    Model: headlessDisplayModel,
+                    LastActivityUtc: headless.LatestWriteUtc,
+                    RateLimitResetLabel: null,
+                    ActiveSessionCount: headless.AllSwarmModels.Count,
+                    AutomationStatus: null,
+                    Source: new SourceHealth("ok", now, headlessNotice),
+                    ActiveSubAgentCount: combinedExternalModels.Count,
+                    ActiveSubAgentsByModel: offlineByModel));
             }
 
             var noticeText = Directory.Exists(sessionsDir)
                 ? $"No active {DisplayName} session detected."
                 : "Claude sessions directory not found.";
-            return Task.FromResult(Offline(now, noticeText, activeSubagentModels.Count, offlineByModel));
+            return Task.FromResult(Offline(now, noticeText, combinedExternalModels.Count, offlineByModel));
         }
 
         var selected = sessions
@@ -92,8 +130,8 @@ public sealed partial class ClaudeMonitorProvider
                 string.Equals(s.Status, "busy", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        var allSubModels = new List<string?>(activeSubagentModels.Count + busyExtraSessionRecords.Count);
-        allSubModels.AddRange(activeSubagentModels);
+        var allSubModels = new List<string?>(combinedExternalModels.Count + busyExtraSessionRecords.Count);
+        allSubModels.AddRange(combinedExternalModels);
         foreach (var extraSession in busyExtraSessionRecords)
         {
             var extraInspection = InspectTranscriptTail(paths.ClaudeHomePath, extraSession);
@@ -108,6 +146,15 @@ public sealed partial class ClaudeMonitorProvider
             : (DateTimeOffset?)null;
 
         var isBusy = string.Equals(selected.Status, "busy", StringComparison.OrdinalIgnoreCase);
+        if (headless.MobaDevModels.Count > 0)
+        {
+            isBusy = true;
+            if (headless.LatestMobaDevWriteUtc is { } headlessUtc &&
+                (!lastActivityUtc.HasValue || headlessUtc > lastActivityUtc.Value))
+            {
+                lastActivityUtc = headlessUtc;
+            }
+        }
         var isStaleBusy = isBusy &&
             (!lastActivityUtc.HasValue || (now - lastActivityUtc.Value) > effectiveThreshold);
         var activeRateLimitResetLabel = FilterActiveRateLimitResetLabel(
@@ -221,6 +268,178 @@ public sealed partial class ClaudeMonitorProvider
         }
 
         return models;
+    }
+
+    private sealed record HeadlessTranscriptActivity(
+        List<string?> AllSwarmModels,
+        List<string?> MobaDevModels,
+        DateTimeOffset? LatestWriteUtc,
+        DateTimeOffset? LatestMobaDevWriteUtc,
+        string? LatestModel);
+
+    private static HeadlessTranscriptActivity CollectActiveHeadlessProjectTranscripts(
+        ResolvedDashboardPaths paths,
+        DateTimeOffset nowUtc,
+        HashSet<string> interactiveSessionIds)
+    {
+        var projectsDir = Path.Combine(paths.ClaudeHomePath, "projects");
+        if (!Directory.Exists(projectsDir))
+        {
+            return new HeadlessTranscriptActivity([], [], null, null, null);
+        }
+
+        var cutoffUtc = nowUtc.UtcDateTime - SubAgentActiveWindow;
+        var allModels = new List<string?>();
+        var mobaDevModels = new List<string?>();
+        DateTimeOffset? latestWriteUtc = null;
+        DateTimeOffset? latestMobaDevWriteUtc = null;
+        string? latestModel = null;
+
+        try
+        {
+            foreach (var projectDir in Directory.EnumerateDirectories(projectsDir, "*", SearchOption.TopDirectoryOnly))
+            {
+                var folderName = Path.GetFileName(projectDir);
+                if (!IsMonitoredProjectFolder(folderName, paths, out var isMobaDevFolder))
+                {
+                    continue;
+                }
+
+                foreach (var jsonlFile in Directory.EnumerateFiles(projectDir, "*.jsonl", SearchOption.TopDirectoryOnly))
+                {
+                    if (!PathWhitelistGuard.IsAllowedFilePath(jsonlFile))
+                    {
+                        continue;
+                    }
+
+                    var fileSessionId = Path.GetFileNameWithoutExtension(jsonlFile);
+                    if (!string.IsNullOrWhiteSpace(fileSessionId) && interactiveSessionIds.Contains(fileSessionId))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        var lastWriteUtc = File.GetLastWriteTimeUtc(jsonlFile);
+                        if (lastWriteUtc < cutoffUtc || lastWriteUtc > nowUtc.UtcDateTime.AddMinutes(5))
+                        {
+                            continue;
+                        }
+
+                        var inspection = InspectTranscriptTailFromFile(jsonlFile);
+                        if (!string.IsNullOrEmpty(inspection.RateLimitResetLabel) ||
+                            inspection.ActivityState != TranscriptActivityState.Active)
+                        {
+                            continue;
+                        }
+
+                        allModels.Add(inspection.Model);
+                        if (isMobaDevFolder)
+                        {
+                            mobaDevModels.Add(inspection.Model);
+                        }
+
+                        var writeOffset = new DateTimeOffset(DateTime.SpecifyKind(lastWriteUtc, DateTimeKind.Utc));
+                        if (!latestWriteUtc.HasValue || writeOffset > latestWriteUtc.Value)
+                        {
+                            latestWriteUtc = writeOffset;
+                            latestModel = inspection.Model;
+                        }
+
+                        if (isMobaDevFolder && (!latestMobaDevWriteUtc.HasValue || writeOffset > latestMobaDevWriteUtc.Value))
+                        {
+                            latestMobaDevWriteUtc = writeOffset;
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore transiently removed or locked transcript files.
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Ignore directory enumeration races.
+        }
+
+        return new HeadlessTranscriptActivity(
+            allModels,
+            mobaDevModels,
+            latestWriteUtc,
+            latestMobaDevWriteUtc,
+            latestModel);
+    }
+
+    internal static bool IsMonitoredProjectFolder(
+        string? folderName,
+        ResolvedDashboardPaths paths,
+        out bool isMobaDevFolder)
+    {
+        isMobaDevFolder = false;
+        if (string.IsNullOrWhiteSpace(folderName))
+        {
+            return false;
+        }
+
+        var mobaDevPrefix = TryEncodeRootPrefix(paths.MobaDevRepoPath);
+        if (MatchesEncodedPrefix(folderName, mobaDevPrefix))
+        {
+            isMobaDevFolder = true;
+            return true;
+        }
+
+        var mobaFlowPrefix = TryEncodeRootPrefix(paths.MobaFlowRepoPath);
+        if (MatchesEncodedPrefix(folderName, mobaFlowPrefix))
+        {
+            return true;
+        }
+
+        var sentixSibling = ResolveSiblingRepoPath(paths.MobaDevRepoPath, "SentiX")
+            ?? ResolveSiblingRepoPath(paths.MobaFlowRepoPath, "SentiX");
+        var sentixPrefix = TryEncodeRootPrefix(sentixSibling);
+        return MatchesEncodedPrefix(folderName, sentixPrefix);
+    }
+
+    private static string? TryEncodeRootPrefix(string? repoPath)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath))
+        {
+            return null;
+        }
+
+        var trimmed = repoPath.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return string.IsNullOrWhiteSpace(trimmed) ? null : EncodeProjectFolder(trimmed);
+    }
+
+    private static string? ResolveSiblingRepoPath(string? knownRepoPath, string siblingName)
+    {
+        if (string.IsNullOrWhiteSpace(knownRepoPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var trimmed = knownRepoPath.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var parent = Directory.GetParent(trimmed);
+            return parent is null ? null : Path.Combine(parent.FullName, siblingName);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool MatchesEncodedPrefix(string folderName, string? prefix)
+    {
+        if (string.IsNullOrWhiteSpace(prefix))
+        {
+            return false;
+        }
+
+        return string.Equals(folderName, prefix, StringComparison.OrdinalIgnoreCase) ||
+               folderName.StartsWith(prefix + "-", StringComparison.OrdinalIgnoreCase);
     }
 
     private static List<ClaudeSessionRecord> LoadSessionRecords(string sessionsDir)
@@ -391,6 +610,7 @@ public sealed partial class ClaudeMonitorProvider
             string? latestModel = null;
             string? latestRateLimitReset = null;
             DateTimeOffset? latestRateLimitEventTimestampUtc = null;
+            var activityState = TranscriptActivityState.Unknown;
 
             foreach (var line in lines)
             {
@@ -398,10 +618,11 @@ public sealed partial class ClaudeMonitorProvider
                     line,
                     ref latestModel,
                     ref latestRateLimitReset,
-                    ref latestRateLimitEventTimestampUtc);
+                    ref latestRateLimitEventTimestampUtc,
+                    ref activityState);
             }
 
-            return new TranscriptTailInspection(latestModel, latestRateLimitReset, latestRateLimitEventTimestampUtc);
+            return new TranscriptTailInspection(latestModel, latestRateLimitReset, latestRateLimitEventTimestampUtc, activityState);
         }
         catch
         {
@@ -413,7 +634,8 @@ public sealed partial class ClaudeMonitorProvider
         string line,
         ref string? latestModel,
         ref string? latestRateLimitReset,
-        ref DateTimeOffset? latestRateLimitEventTimestampUtc)
+        ref DateTimeOffset? latestRateLimitEventTimestampUtc,
+        ref TranscriptActivityState activityState)
     {
         var trimmed = line.Trim();
         if (!trimmed.StartsWith('{'))
@@ -425,6 +647,20 @@ public sealed partial class ClaudeMonitorProvider
         {
             using var doc = JsonDocument.Parse(trimmed);
             var root = doc.RootElement;
+            var entryType = GetString(root, "type");
+
+            if (string.Equals(entryType, "last-prompt", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(entryType, "cost-state", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(entryType, "result", StringComparison.OrdinalIgnoreCase))
+            {
+                activityState = TranscriptActivityState.Terminal;
+            }
+            else if (string.Equals(entryType, "user", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(entryType, "api-request", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(entryType, "progress", StringComparison.OrdinalIgnoreCase))
+            {
+                activityState = TranscriptActivityState.Active;
+            }
 
             if (TryGetAssistantMessage(root, out var message))
             {
@@ -432,6 +668,19 @@ public sealed partial class ClaudeMonitorProvider
                 if (!string.IsNullOrWhiteSpace(model))
                 {
                     latestModel = model;
+                }
+
+                var stopReason = GetString(message, "stop_reason");
+                if (string.Equals(stopReason, "end_turn", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(stopReason, "stop_sequence", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(stopReason, "max_tokens", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(stopReason, "refusal", StringComparison.OrdinalIgnoreCase))
+                {
+                    activityState = TranscriptActivityState.Terminal;
+                }
+                else
+                {
+                    activityState = TranscriptActivityState.Active;
                 }
 
                 var limitMatch = ExtractRateLimitReset(message);
@@ -1052,10 +1301,18 @@ public sealed partial class ClaudeMonitorProvider
     [GeneratedRegex(@"^(?<h>\d{1,2})(?::(?<m>\d{2}))?(?:\s*(?<ampm>am|pm))?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex TimeOfDayRegex();
 
+    private enum TranscriptActivityState
+    {
+        Unknown = 0,
+        Active = 1,
+        Terminal = 2
+    }
+
     private readonly record struct TranscriptTailInspection(
         string? Model,
         string? RateLimitResetLabel,
-        DateTimeOffset? RateLimitEventTimestampUtc);
+        DateTimeOffset? RateLimitEventTimestampUtc,
+        TranscriptActivityState ActivityState = TranscriptActivityState.Unknown);
 
     private sealed record ClaudeSessionRecord(
         string SessionId,

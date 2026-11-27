@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    Startet das lokale, strikt lesende MOBAdev Agent Network Dashboard (127.0.0.1).
+    Startet das lokale, strikt lesende AISwarmX Agent Network Dashboard (127.0.0.1).
 .DESCRIPTION
     Startet die ASP.NET Core Minimal API (.NET 10) und liefert das React-Frontend lokal unter
     http://127.0.0.1:<Port> aus. Im -DevMode wird zusätzlich der Vite Dev-Server auf Port 5173 gestartet.
@@ -56,7 +56,7 @@ function Ensure-DashboardBuilt {
     }
 
     if (-not (Test-Path $ApiExe)) {
-        Write-Host 'Baue MOBAdev Dashboard API (Release)...' -ForegroundColor Cyan
+        Write-Host 'Baue AISwarmX Dashboard API (Release)...' -ForegroundColor Cyan
         dotnet build $ApiProject --configuration Release --nologo
         if ($LASTEXITCODE -ne 0) { throw 'dotnet build fehlgeschlagen.' }
     }
@@ -78,7 +78,7 @@ if ($RegisterAutoStart) {
         -Action $action `
         -Trigger $trigger `
         -Settings $settings `
-        -Description 'Starts the read-only local MOBAdev Agent Swarm Gen#3 Dashboard (127.0.0.1:5179) detached at logon.' `
+        -Description 'Starts the read-only local AISwarmX Agent Network Dashboard (127.0.0.1:5179) detached at logon.' `
         -Force | Out-Null
     Write-Host "Registered Windows Scheduled Task '$AutoStartTaskName' (AtLogOn -> $BindUrl)." -ForegroundColor Green
     exit 0
@@ -122,7 +122,7 @@ $env:Dashboard__BindUrl = $BindUrl
 if ($Background) {
     $healthUrl = "$BindUrl/api/health"
     if (Test-DashboardHealth -ProbeUrl $healthUrl) {
-        Write-Host "MOBAdev Dashboard already running at $BindUrl" -ForegroundColor Green
+        Write-Host "AISwarmX Dashboard already running at $BindUrl" -ForegroundColor Green
         if ($OpenBrowser) {
             Start-Process $BindUrl
         }
@@ -171,10 +171,10 @@ if ($Background) {
     }
 
     if (-not $healthy) {
-        throw "MOBAdev Dashboard did not become healthy at $healthUrl within 15s (via $launchedVia)."
+        throw "AISwarmX Dashboard did not become healthy at $healthUrl within 15s (via $launchedVia)."
     }
 
-    Write-Host "MOBAdev Dashboard started detached ($launchedVia) at $BindUrl" -ForegroundColor Green
+    Write-Host "AISwarmX Dashboard started detached ($launchedVia) at $BindUrl" -ForegroundColor Green
     if ($OpenBrowser) {
         Start-Process $BindUrl
     }
@@ -183,7 +183,7 @@ if ($Background) {
 
 if ($DevMode) {
     Write-Host ''
-    Write-Host '=== MOBAdev Agent Network Dashboard (Dev-Modus · Nur Lesen) ===' -ForegroundColor Cyan
+    Write-Host '=== AISwarmX Agent Network Dashboard (Dev-Modus · Nur Lesen) ===' -ForegroundColor Cyan
     Write-Host "API:      $BindUrl"
     Write-Host 'Frontend: http://127.0.0.1:5173 (Proxy -> API)'
     Write-Host ''
@@ -229,7 +229,7 @@ if ($RebuildFrontend -or -not (Test-Path $WebDistIndex)) {
 }
 
 Write-Host ''
-Write-Host '=== MOBAdev Agent Network Dashboard (Nur Lesen · Loopback) ===' -ForegroundColor Green
+Write-Host '=== AISwarmX Agent Network Dashboard (Nur Lesen · Loopback) ===' -ForegroundColor Green
 Write-Host "URL: $BindUrl"
 Write-Host 'Warte auf Kestrel-Start; Browser öffnet automatisch sobald bereit.' -ForegroundColor DarkGray
 Write-Host 'Zum Beenden Strg+C drücken.'

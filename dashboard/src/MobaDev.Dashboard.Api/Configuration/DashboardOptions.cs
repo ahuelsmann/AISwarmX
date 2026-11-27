@@ -18,6 +18,7 @@ public sealed class DashboardOptions
     public string AntigravityHomePath { get; set; } = string.Empty;
     public string GeminiConfigPath { get; set; } = string.Empty;
     public string GitHubRepository { get; set; } = "ahuelsmann/MOBAflow";
+    public string[] MonitoredRepositories { get; set; } = [];
     public int GitHubProjectNumber { get; set; } = 1;
     public string GitHubProjectOwner { get; set; } = "ahuelsmann";
     public int LocalCacheTtlSeconds { get; set; } = 8;
@@ -115,6 +116,7 @@ public sealed class DashboardOptions
         AntigravityHomePath = source.AntigravityHomePath;
         GeminiConfigPath = source.GeminiConfigPath;
         GitHubRepository = source.GitHubRepository;
+        MonitoredRepositories = [.. source.MonitoredRepositories];
         GitHubProjectNumber = source.GitHubProjectNumber;
         GitHubProjectOwner = source.GitHubProjectOwner;
         LocalCacheTtlSeconds = source.LocalCacheTtlSeconds;
@@ -166,6 +168,7 @@ public sealed class DashboardOptions
             AntigravityHomePath = AntigravityHomePath,
             GeminiConfigPath = GeminiConfigPath,
             GitHubRepository = ChooseStringOverride(GitHubRepository, fromSwarm.GitHubRepository, defaults.GitHubRepository, HasExplicitOverride(explicitOverrideKeys, nameof(GitHubRepository))),
+            MonitoredRepositories = MonitoredRepositories.Length > 0 ? [.. MonitoredRepositories] : [.. fromSwarm.MonitoredRepositories],
             GitHubProjectNumber = ChooseIntOverride(GitHubProjectNumber, fromSwarm.GitHubProjectNumber, defaults.GitHubProjectNumber, HasExplicitOverride(explicitOverrideKeys, nameof(GitHubProjectNumber))),
             GitHubProjectOwner = ChooseStringOverride(GitHubProjectOwner, fromSwarm.GitHubProjectOwner, defaults.GitHubProjectOwner, HasExplicitOverride(explicitOverrideKeys, nameof(GitHubProjectOwner))),
             LocalCacheTtlSeconds = ChooseIntOverride(LocalCacheTtlSeconds, fromSwarm.LocalCacheTtlSeconds, defaults.LocalCacheTtlSeconds, HasExplicitOverride(explicitOverrideKeys, nameof(LocalCacheTtlSeconds))),
@@ -406,6 +409,32 @@ public sealed class DashboardOptions
 
         var sibling = Path.Combine(parent.FullName, "MOBAflow");
         return Directory.Exists(sibling) ? sibling : sibling;
+    }
+
+    public IReadOnlyList<string> ResolveMonitoredRepositories()
+    {
+        IEnumerable<string> seeds = MonitoredRepositories.Length > 0
+            ? MonitoredRepositories
+            : [GitHubRepository, "ahuelsmann/SentiX", "ahuelsmann/AISwarmX"];
+
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var raw in seeds)
+        {
+            var trimmed = raw?.Trim();
+            if (!string.IsNullOrWhiteSpace(trimmed) && seen.Add(trimmed))
+            {
+                result.Add(trimmed);
+            }
+        }
+
+        if (result.Count == 0 && !string.IsNullOrWhiteSpace(GitHubRepository))
+        {
+            result.Add(GitHubRepository.Trim());
+        }
+
+        return result;
     }
 }
 

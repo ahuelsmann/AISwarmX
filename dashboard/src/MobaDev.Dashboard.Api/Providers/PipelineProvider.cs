@@ -14,6 +14,7 @@ public sealed partial class PipelineProvider
     private readonly ICommandRunner _commandRunner;
     private readonly object _fallbackLock = new();
     private readonly Dictionary<string, PipelineResponse> _lastSuccessfulResponses = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, WorkflowRunsCacheEntry> _lastSuccessfulWorkflowRuns = new(StringComparer.OrdinalIgnoreCase);
 
     public PipelineProvider(ICommandRunner commandRunner)
     {
@@ -51,8 +52,9 @@ public sealed partial class PipelineProvider
 
         var projectTask = TryLoadActiveKanbanBoardAsync(options, cancellationToken);
         var issuesTask = TryLoadIssuesAsync(options, cancellationToken);
+        var workflowRunsTask = TryLoadWorkflowRunsAsync(options, cancellationToken);
 
-        await Task.WhenAll(openPrTask, mergedPrTask, projectTask, issuesTask).ConfigureAwait(false);
+        await Task.WhenAll(openPrTask, mergedPrTask, projectTask, issuesTask, workflowRunsTask).ConfigureAwait(false);
 
         var openResult = openPrTask.Result;
         var pullRequestsDisabled = await IsPullRequestsDisabledAsync(
@@ -61,7 +63,7 @@ public sealed partial class PipelineProvider
             cancellationToken).ConfigureAwait(false);
         if (!openResult.Succeeded && !pullRequestsDisabled)
         {
-            return BuildUnavailableOrCached(options, now, openResult);
+            return BuildUnavailableOrCached(options, now, openResult, workflowRunsTask.Result);
         }
 
         var (projectAvailable, projectNotice, projectStatuses, kanbanItems) = projectTask.Result;
@@ -104,6 +106,8 @@ public sealed partial class PipelineProvider
                 ? "Pull requests are disabled on this repository; showing issues and project board only."
                 : null;
 
+            var cacheKey = BuildCacheKey(options);
+            var workflowState = ResolveWorkflowRunsState(cacheKey, now, workflowRunsTask.Result);
             var response = new PipelineResponse(
                 GeneratedAtUtc: now,
                 Repository: options.GitHubRepository,
@@ -113,9 +117,10 @@ public sealed partial class PipelineProvider
                 ProjectBoardAvailable: projectAvailable,
                 ProjectBoardNotice: projectNotice,
                 ProjectBoardUrl: projectBoardUrl,
-                Source: new SourceHealth("ok", now, sourceNotice));
+                Source: new SourceHealth("ok", now, sourceNotice),
+                WorkflowRuns: workflowState.Runs,
+                WorkflowRunsSource: workflowState.Source);
 
-            var cacheKey = BuildCacheKey(options);
             lock (_fallbackLock)
             {
                 _lastSuccessfulResponses[cacheKey] = response;
@@ -128,7 +133,8 @@ public sealed partial class PipelineProvider
             return BuildUnavailableOrCached(
                 options,
                 now,
-                new CommandResult(-1, string.Empty, ex.Message));
+                new CommandResult(-1, string.Empty, ex.Message),
+                workflowRunsTask.Result);
         }
     }
 
@@ -186,13 +192,44 @@ public sealed partial class PipelineProvider
         return (false, has404);
     }
 
+    private (IReadOnlyList<WorkflowRunInfo>? Runs, SourceHealth? Source) ResolveWorkflowRunsState(
+        string cacheKey,
+        DateTimeOffset now,
+        WorkflowRunLoadResult workflowFetch)
+    {
+        lock (_fallbackLock)
+        {
+            if (workflowFetch.Succeeded)
+            {
+                _lastSuccessfulWorkflowRuns[cacheKey] = new WorkflowRunsCacheEntry(workflowFetch.Runs, now);
+                return (workflowFetch.Runs, new SourceHealth("ok", now));
+            }
+
+            if (_lastSuccessfulWorkflowRuns.TryGetValue(cacheKey, out var cachedRuns))
+            {
+                return (
+                    cachedRuns.Runs,
+                    new SourceHealth(
+                        "degraded",
+                        cachedRuns.UpdatedAtUtc,
+                        "GitHub Actions query failed — showing cached workflow runs.",
+                        FromCache: true));
+            }
+
+            return (null, null);
+        }
+    }
+
     private PipelineResponse BuildUnavailableOrCached(
         DashboardOptions options,
         DateTimeOffset now,
-        CommandResult failedResult)
+        CommandResult failedResult,
+        WorkflowRunLoadResult workflowFetch)
     {
-        PipelineResponse? cached;
         var cacheKey = BuildCacheKey(options);
+        var workflowState = ResolveWorkflowRunsState(cacheKey, now, workflowFetch);
+
+        PipelineResponse? cached;
         lock (_fallbackLock)
         {
             _lastSuccessfulResponses.TryGetValue(cacheKey, out cached);
@@ -209,6 +246,8 @@ public sealed partial class PipelineProvider
             return cached with
             {
                 GeneratedAtUtc = now,
+                WorkflowRuns = workflowState.Runs,
+                WorkflowRunsSource = workflowState.Source,
                 Source = new SourceHealth(
                     "degraded",
                     cached.Source.UpdatedAtUtc,
@@ -226,12 +265,19 @@ public sealed partial class PipelineProvider
             ProjectBoardAvailable: false,
             ProjectBoardNotice: null,
             ProjectBoardUrl: null,
-            Source: new SourceHealth("unavailable", now, reason));
+            Source: new SourceHealth("unavailable", now, reason),
+            WorkflowRuns: workflowState.Runs,
+            WorkflowRunsSource: workflowState.Source);
     }
 
-    private static string BuildCacheKey(DashboardOptions options)
+    private sealed record WorkflowRunsCacheEntry(IReadOnlyList<WorkflowRunInfo> Runs, DateTimeOffset UpdatedAtUtc);
+
+    internal static string BuildCacheKey(DashboardOptions options)
     {
-        return $"{options.GitHubRepository?.Trim()}|{options.GitHubProjectOwner?.Trim()}|{options.GitHubProjectNumber}";
+        var validatedRepos = options.ResolveMonitoredRepositories()
+            .Where(IsValidGitHubRepositorySlug);
+        var monitoredRepos = string.Join(";", validatedRepos);
+        return $"{options.GitHubRepository?.Trim()}|{options.GitHubProjectOwner?.Trim()}|{options.GitHubProjectNumber}|{monitoredRepos}";
     }
 
     private const string ActiveKanbanGraphQlQuery =
@@ -1424,6 +1470,155 @@ public sealed partial class PipelineProvider
 
     [GeneratedRegex(@"(?:^|[-_/])issue[-_]?(\d+)(?:[-_/]|$)", RegexOptions.IgnoreCase)]
     private static partial Regex BranchIssueRegex();
+
+    private readonly record struct WorkflowRunLoadResult(bool Succeeded, IReadOnlyList<WorkflowRunInfo> Runs);
+    private readonly record struct RepoWorkflowRunLoadResult(bool Succeeded, List<WorkflowRunInfo> Runs);
+
+    private async Task<WorkflowRunLoadResult> TryLoadWorkflowRunsAsync(
+        DashboardOptions options,
+        CancellationToken cancellationToken)
+    {
+        var repos = options.ResolveMonitoredRepositories();
+        if (repos.Count == 0)
+        {
+            return new WorkflowRunLoadResult(false, []);
+        }
+
+        var tasks = repos.Select(repo => TryLoadRepoWorkflowRunsAsync(repo, cancellationToken)).ToArray();
+        var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+        var anySucceeded = results.Any(static r => r.Succeeded);
+
+        var runs = results
+            .SelectMany(static list => list.Runs)
+            .OrderByDescending(run => IsActiveWorkflowStatus(run.Status))
+            .ThenByDescending(run => run.UpdatedAtUtc)
+            .Take(12)
+            .ToList();
+        return new WorkflowRunLoadResult(anySucceeded, runs);
+    }
+
+    private async Task<RepoWorkflowRunLoadResult> TryLoadRepoWorkflowRunsAsync(
+        string repository,
+        CancellationToken cancellationToken)
+    {
+        if (!IsValidGitHubRepositorySlug(repository))
+        {
+            return new RepoWorkflowRunLoadResult(false, []);
+        }
+
+        try
+        {
+            var result = await _commandRunner.RunAsync(
+                "gh",
+                [
+                    "run", "list",
+                    "--repo", repository,
+                    "--limit", "5",
+                    "--json", "databaseId,workflowName,displayTitle,headBranch,status,conclusion,url,createdAt,updatedAt"
+                ],
+                workingDirectory: null,
+                timeout: TimeSpan.FromSeconds(10),
+                cancellationToken).ConfigureAwait(false);
+
+            if (!result.Succeeded || string.IsNullOrWhiteSpace(result.StdOut))
+            {
+                return new RepoWorkflowRunLoadResult(false, []);
+            }
+
+            return new RepoWorkflowRunLoadResult(true, ParseWorkflowRuns(result.StdOut, repository));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return new RepoWorkflowRunLoadResult(false, []);
+        }
+    }
+
+    internal static List<WorkflowRunInfo> ParseWorkflowRuns(string json, string repository)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var runs = new List<WorkflowRunInfo>();
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            if (el.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var id = el.TryGetProperty("databaseId", out var idProp) && idProp.TryGetInt64(out var parsedId)
+                ? parsedId
+                : 0L;
+            var workflowName = GetString(el, "workflowName") ?? "CI";
+            var displayTitle = GetString(el, "displayTitle") ?? workflowName;
+            var headBranch = GetString(el, "headBranch") ?? string.Empty;
+            var status = GetString(el, "status") ?? "unknown";
+            var conclusion = GetString(el, "conclusion");
+            var url = GetString(el, "url") ?? string.Empty;
+            var createdAt = ParseDateTimeOffset(el, "createdAt") ?? DateTimeOffset.UtcNow;
+            var updatedAt = ParseDateTimeOffset(el, "updatedAt") ?? createdAt;
+
+            runs.Add(new WorkflowRunInfo(
+                DatabaseId: id,
+                Repository: repository,
+                WorkflowName: workflowName,
+                DisplayTitle: displayTitle,
+                HeadBranch: headBranch,
+                Status: status,
+                Conclusion: conclusion,
+                Url: url,
+                CreatedAtUtc: createdAt,
+                UpdatedAtUtc: updatedAt));
+        }
+
+        return runs;
+    }
+
+    internal static bool IsActiveWorkflowStatus(string? status) =>
+        status is not null &&
+        (string.Equals(status, "in_progress", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(status, "waiting", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(status, "requested", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase));
+
+    internal static bool IsValidGitHubRepositorySlug(string? repository)
+    {
+        if (string.IsNullOrWhiteSpace(repository))
+        {
+            return false;
+        }
+
+        var trimmed = repository.Trim();
+        var slashIndex = trimmed.IndexOf('/');
+        if (slashIndex <= 0 || slashIndex != trimmed.LastIndexOf('/') || slashIndex == trimmed.Length - 1)
+        {
+            return false;
+        }
+
+        var repo = trimmed[(slashIndex + 1)..];
+        if (repo is "." or ".." || trimmed.Contains("..", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return GitHubRepoSlugRegex().IsMatch(trimmed);
+    }
+
+    [GeneratedRegex(@"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._-]+$")]
+    private static partial Regex GitHubRepoSlugRegex();
 
     [GeneratedRegex(@"#(\d+)")]
     private static partial Regex HashNumberRegex();

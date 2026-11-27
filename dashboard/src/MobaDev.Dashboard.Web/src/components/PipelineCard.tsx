@@ -39,18 +39,19 @@ import type {
   MonitorInfo,
   PipelineResponse,
   PullRequestInfo,
-  TaskParticipantInfo
+  SourceHealth,
+  TaskParticipantInfo,
+  WorkflowRunInfo
 } from '../types/dashboard';
 import { AgentRoundTable } from './AgentRoundTable';
 import { GlossaryTooltip } from './GlossaryTooltip';
-import { ModelBadge, ProfileBadge, RoleBadge, resolveProfileTone } from './RoleAndModelIcons';
 import { ContextChip } from './shared/ContextChip';
 import { StatusBadge } from './shared/StatusBadge';
 
 const useStyles = makeStyles({
   card: {
-    padding: '16px',
-    gap: '14px',
+    padding: '12px 14px',
+    gap: '10px',
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     borderTop: `3px solid ${tokens.colorNeutralStroke1}`
@@ -60,7 +61,7 @@ const useStyles = makeStyles({
     flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: '10px'
+    gap: '8px'
   },
   titleGroup: {
     display: 'flex',
@@ -90,8 +91,8 @@ const useStyles = makeStyles({
   prRow: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '8px',
-    padding: '12px 0',
+    gap: '5px',
+    padding: '8px 0',
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
     ':first-child': {
       paddingTop: '2px',
@@ -106,7 +107,7 @@ const useStyles = makeStyles({
     flexWrap: 'wrap',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    gap: '10px'
+    gap: '6px'
   },
   prTitleWrap: {
     display: 'flex',
@@ -119,13 +120,13 @@ const useStyles = makeStyles({
     display: 'flex',
     flexWrap: 'wrap',
     alignItems: 'center',
-    gap: '6px'
+    gap: '4px'
   },
   issuesRow: {
     display: 'flex',
     flexWrap: 'wrap',
     alignItems: 'center',
-    gap: '6px'
+    gap: '4px'
   },
   issuePillLink: {
     display: 'inline-flex',
@@ -145,48 +146,18 @@ const useStyles = makeStyles({
     display: 'flex',
     flexWrap: 'wrap',
     alignItems: 'center',
-    gap: '6px'
-  },
-  participantsBlock: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px'
-  },
-  participantsHeader: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '6px',
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground2
-  },
-  participantsRow: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: '6px'
-  },
-  participantPill: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '6px',
-    padding: '3px 8px',
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground2,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    whiteSpace: 'nowrap',
-    maxWidth: '100%'
+    gap: '4px'
   },
   monoPill: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: '5px',
-    padding: '2px 8px',
+    padding: '1px 6px',
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground2,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     fontSize: tokens.fontSizeBase200,
-    lineHeight: '17px',
+    lineHeight: '16px',
     color: tokens.colorNeutralForeground1,
     maxWidth: '100%',
     whiteSpace: 'normal',
@@ -239,8 +210,8 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: '8px',
-    marginTop: '4px',
-    paddingTop: '8px',
+    marginTop: '2px',
+    paddingTop: '6px',
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`
   },
   kanbanGroupTitle: {
@@ -249,6 +220,55 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     textTransform: 'uppercase',
     letterSpacing: '0.03em'
+  },
+  workflowRunsStrip: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    padding: '10px 12px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  workflowRunsHeader: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px'
+  },
+  workflowRunsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px'
+  },
+  workflowRunRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px',
+    paddingTop: '6px',
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`
+  },
+  workflowRunLeft: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '8px',
+    minWidth: 0,
+    flex: '1 1 260px'
+  },
+  workflowRunTitle: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    maxWidth: 'min(340px, 100%)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px'
   }
 });
 
@@ -334,6 +354,16 @@ export function PipelineCard({ pipeline, monitors, nowMs, isDark }: PipelineCard
         <MessageBar intent="info">
           <MessageBarBody>{pipeline.projectBoardNotice}</MessageBarBody>
         </MessageBar>
+      )}
+
+      {(pipeline.workflowRuns?.length ?? 0) > 0 && (
+        <WorkflowRunsStrip
+          runs={pipeline.workflowRuns!}
+          runsSource={pipeline.workflowRunsSource}
+          nowMs={nowMs}
+          isDark={isDark}
+          styles={styles}
+        />
       )}
 
       {pipeline.source.status !== 'unavailable' && viewMode === 'open' && activePrList.length === 0 && (
@@ -624,19 +654,6 @@ function PullRequestRow({
         participants={pr.participants}
         monitors={monitors}
         isDark={isDark}
-        defaultView="table"
-        renderPills={() => (
-          <div className={styles.participantsRow}>
-            {pr.participants.map((participant) => (
-              <ParticipantPill
-                key={`${participant.role}-${participant.tool}-${participant.profile}`}
-                participant={participant}
-                isDark={isDark}
-                styles={styles}
-              />
-            ))}
-          </div>
-        )}
       />
     </div>
   );
@@ -841,56 +858,6 @@ function LinkedIssuePill({ issue, className }: { issue: LinkedIssueInfo; classNa
       )}
       <Open16Regular style={{ width: 12, height: 12, flexShrink: 0 }} aria-hidden="true" />
     </Link>
-  );
-}
-
-function ParticipantPill({
-  participant,
-  isDark,
-  styles
-}: {
-  participant: TaskParticipantInfo;
-  isDark: boolean;
-  styles: ReturnType<typeof useStyles>;
-}) {
-  const statusColor: 'success' | 'warning' | 'danger' | 'subtle' =
-    participant.status === 'PASS' ||
-    participant.status === 'Approved' ||
-    participant.status === 'Reviewed' ||
-    participant.status === 'Consulted · PASS'
-      ? 'success'
-      : participant.status === 'Findings' ||
-          participant.status === 'Quota Limit' ||
-          participant.status === 'Implemented' ||
-          participant.status === 'Active' ||
-          participant.status === 'Involved'
-        ? 'warning'
-        : participant.status === 'Blocked'
-          ? 'danger'
-          : 'subtle';
-
-  const summaryTitle = `${participant.agent} (${participant.tool} · ${participant.model}) · Evidence: ${participant.evidenceSource}`;
-
-  return (
-    <div
-      className={styles.participantPill}
-      title={summaryTitle}
-      aria-label={`${participant.profile} ${participant.role} ${participant.tool} · ${participant.model} ${participant.status}`}
-    >
-      <GlossaryTooltip term={participant.profile}>
-        <ProfileBadge profile={participant.profile} isDark={isDark} />
-      </GlossaryTooltip>
-      <RoleBadge
-        role={participant.role}
-        isDark={isDark}
-        compact
-        identityTone={resolveProfileTone(participant.profile)}
-      />
-      <ModelBadge model={participant.model} isDark={isDark} mono />
-      <Badge appearance="tint" color={statusColor} shape="rounded" size="small">
-        {participant.status}
-      </Badge>
-    </div>
   );
 }
 
@@ -1276,19 +1243,6 @@ function KanbanItemRow({
         participants={normalizedParticipants}
         monitors={monitors}
         isDark={isDark}
-        defaultView="table"
-        renderPills={() => (
-          <div className={styles.participantsRow}>
-            {normalizedParticipants.map((participant) => (
-              <ParticipantPill
-                key={`${participant.role}-${participant.tool}-${participant.profile}`}
-                participant={participant}
-                isDark={isDark}
-                styles={styles}
-              />
-            ))}
-          </div>
-        )}
       />
     </div>
   );
@@ -1367,5 +1321,186 @@ function LinkedPullRequestPill({
       </Badge>
       <Open16Regular style={{ width: 12, height: 12, flexShrink: 0 }} aria-hidden="true" />
     </Link>
+  );
+}
+
+function isSafeHttpUrl(url?: string | null): boolean {
+  if (!url) {
+    return false;
+  }
+
+  return /^https?:\/\//i.test(url.trim());
+}
+
+function isActiveWorkflowStatus(status: string): boolean {
+  const normalized = status.trim().toLowerCase();
+  return (
+    normalized === 'in_progress' ||
+    normalized === 'queued' ||
+    normalized === 'waiting' ||
+    normalized === 'requested' ||
+    normalized === 'pending'
+  );
+}
+
+function WorkflowRunStatusIndicator({
+  status,
+  conclusion,
+  isDark
+}: {
+  status: string;
+  conclusion?: string | null;
+  isDark: boolean;
+}) {
+  if (isActiveWorkflowStatus(status)) {
+    const warnColors = getStatusStyles('warn', isDark);
+    return (
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '5px',
+          fontSize: tokens.fontSizeBase200,
+          fontWeight: tokens.fontWeightSemibold,
+          color: warnColors.fg
+        }}
+      >
+        <span className="pulse-dot" style={{ backgroundColor: warnColors.solid }} aria-hidden="true" />
+        <span>{status.replace(/_/g, ' ')}</span>
+      </span>
+    );
+  }
+
+  const normalizedConclusion = (conclusion ?? '').trim().toLowerCase();
+  if (normalizedConclusion === 'success') {
+    return (
+      <StatusBadge tone="ok" icon={<Checkmark16Regular style={{ width: 12, height: 12 }} aria-hidden="true" />}>
+        pass
+      </StatusBadge>
+    );
+  }
+
+  if (normalizedConclusion === 'failure' || normalizedConclusion === 'timed_out') {
+    return (
+      <StatusBadge tone="danger" icon={<Dismiss16Regular style={{ width: 12, height: 12 }} aria-hidden="true" />}>
+        {normalizedConclusion.replace(/_/g, ' ')}
+      </StatusBadge>
+    );
+  }
+
+  return <StatusBadge tone="neutral">{normalizedConclusion || status}</StatusBadge>;
+}
+
+function WorkflowRunsStrip({
+  runs,
+  runsSource,
+  nowMs,
+  isDark,
+  styles
+}: {
+  runs: WorkflowRunInfo[];
+  runsSource?: SourceHealth | null;
+  nowMs: number;
+  isDark: boolean;
+  styles: ReturnType<typeof useStyles>;
+}) {
+  const activeCount = runs.filter((r) => isActiveWorkflowStatus(r.status)).length;
+  const visibleRuns = runs.slice(0, 8);
+  const hiddenCount = Math.max(0, runs.length - visibleRuns.length);
+  const uniqueRepos = new Set(runs.map((r) => r.repository)).size;
+  const isStaleRuns = Boolean(runsSource?.fromCache || runsSource?.status === 'degraded');
+
+  return (
+    <section className={styles.workflowRunsStrip} aria-label="Running and Recent CI Pipelines">
+      <div className={styles.workflowRunsHeader}>
+        <div className={styles.titleGroup}>
+          <Clock16Regular aria-hidden="true" />
+          <Text size={200} weight="semibold">
+            CI Pipelines ({uniqueRepos} {uniqueRepos === 1 ? 'Repo' : 'Repos'})
+          </Text>
+          {activeCount > 0 ? (
+            <StatusBadge tone="warn" className="tabular">
+              {activeCount} running
+            </StatusBadge>
+          ) : (
+            <StatusBadge tone="ok" className="tabular">
+              idle
+            </StatusBadge>
+          )}
+          {isStaleRuns && (
+            <StatusBadge tone="warn" className="tabular">
+              cached
+            </StatusBadge>
+          )}
+          {hiddenCount > 0 && (
+            <Badge appearance="tint" color="subtle" shape="rounded" size="small" className="tabular">
+              +{hiddenCount} more
+            </Badge>
+          )}
+        </div>
+        <Text
+          size={100}
+          style={{ color: tokens.colorNeutralForeground2 }}
+          title={runsSource?.notice ?? undefined}
+        >
+          {isStaleRuns && runsSource?.updatedAtUtc
+            ? `Cached GitHub Actions (${formatRelativeTimeEn(runsSource.updatedAtUtc, nowMs)})`
+            : 'Live GitHub Actions'}
+        </Text>
+      </div>
+
+      <div className={styles.workflowRunsList}>
+        {visibleRuns.map((run, index) => {
+          const shortRepo = run.repository.split('/').pop() ?? run.repository;
+          return (
+            <div key={`${run.repository}-${run.databaseId || `idx-${index}`}`} className={styles.workflowRunRow}>
+              <div className={styles.workflowRunLeft}>
+                <ContextChip appearance="tint" title={run.repository}>
+                  {shortRepo}
+                </ContextChip>
+                <WorkflowRunStatusIndicator
+                  status={run.status}
+                  conclusion={run.conclusion}
+                  isDark={isDark}
+                />
+                {isSafeHttpUrl(run.url) ? (
+                  <Link
+                    href={run.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={styles.workflowRunTitle}
+                    title={`${run.workflowName}: ${run.displayTitle}`}
+                  >
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <strong>{run.workflowName}</strong> · {run.displayTitle}
+                    </span>
+                    <Open16Regular style={{ width: 12, height: 12, flexShrink: 0 }} aria-hidden="true" />
+                  </Link>
+                ) : (
+                  <span className={styles.workflowRunTitle} title={`${run.workflowName}: ${run.displayTitle}`}>
+                    <strong>{run.workflowName}</strong> · {run.displayTitle}
+                  </span>
+                )}
+              </div>
+
+              <div className={styles.kanbanCountsGroup}>
+                <span className={`${styles.monoPill} mono`} title={`Branch: ${run.headBranch}`}>
+                  <BranchFork16Regular style={{ flexShrink: 0 }} aria-hidden="true" />
+                  <span>{run.headBranch}</span>
+                </span>
+                <Text
+                  size={200}
+                  className="tabular"
+                  style={{ color: tokens.colorNeutralForeground2 }}
+                  title={formatAbsoluteEn(run.updatedAtUtc)}
+                >
+                  {formatRelativeTimeEn(run.updatedAtUtc, nowMs)}
+                </Text>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }

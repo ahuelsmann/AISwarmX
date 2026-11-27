@@ -1180,6 +1180,362 @@ public sealed class PipelineAndWorktreeProviderTests
         }
     }
 
+    [Fact]
+    public async Task PipelineProvider_LoadsWorkflowRunsAcrossMonitoredRepositoriesAndSortsActiveFirst()
+    {
+        var runner = new FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("open"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("pr") && args.Contains("merged"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("issue"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("graphql"))
+            {
+                return new CommandResult(1, string.Empty, "missing scope");
+            }
+
+            if (fileName == "gh" && args.Contains("run"))
+            {
+                var repoIndex = args.ToList().IndexOf("--repo");
+                var repo = repoIndex >= 0 && repoIndex + 1 < args.Count ? args[repoIndex + 1] : string.Empty;
+
+                if (repo == "ahuelsmann/MOBAflow")
+                {
+                    return new CommandResult(0, """
+                        [
+                          {
+                            "databaseId": 1001,
+                            "workflowName": "Windows CI",
+                            "displayTitle": "fix: a11y trackplan",
+                            "headBranch": "main",
+                            "status": "completed",
+                            "conclusion": "success",
+                            "url": "https://github.com/ahuelsmann/MOBAflow/actions/runs/1001",
+                            "createdAt": "2026-11-27T21:50:00Z",
+                            "updatedAt": "2026-11-27T21:55:00Z"
+                          }
+                        ]
+                        """, string.Empty);
+                }
+
+                if (repo == "ahuelsmann/SentiX")
+                {
+                    return new CommandResult(0, """
+                        [
+                          {
+                            "databaseId": 2002,
+                            "workflowName": "SentiX Linux CI",
+                            "displayTitle": "docs(specs): phase 3",
+                            "headBranch": "feat/phase3-shadow-dashboard",
+                            "status": "in_progress",
+                            "conclusion": null,
+                            "url": "https://github.com/ahuelsmann/SentiX/actions/runs/2002",
+                            "createdAt": "2026-11-27T21:58:00Z",
+                            "updatedAt": "2026-11-27T21:59:00Z"
+                          }
+                        ]
+                        """, string.Empty);
+                }
+
+                if (repo == "ahuelsmann/AISwarmX")
+                {
+                    return new CommandResult(1, string.Empty, "rate limited for single repo");
+                }
+            }
+
+            return new CommandResult(1, string.Empty, "unexpected");
+        });
+
+        var options = new DashboardOptions
+        {
+            GitHubRepository = "ahuelsmann/MOBAflow",
+            GitHubProjectNumber = 0
+        };
+
+        var provider = new PipelineProvider(runner);
+        var result = await provider.GetPipelineAsync(options, CancellationToken.None);
+
+        Assert.Equal("ok", result.Source.Status);
+        Assert.NotNull(result.WorkflowRuns);
+        Assert.Equal(2, result.WorkflowRuns!.Count);
+        Assert.Equal("ahuelsmann/SentiX", result.WorkflowRuns[0].Repository);
+        Assert.Equal("in_progress", result.WorkflowRuns[0].Status);
+        Assert.Equal(2002, result.WorkflowRuns[0].DatabaseId);
+        Assert.Equal("ahuelsmann/MOBAflow", result.WorkflowRuns[1].Repository);
+        Assert.Equal("success", result.WorkflowRuns[1].Conclusion);
+    }
+
+    [Fact]
+    public void PipelineProvider_ValidatesSlugsResolvesMonitoredReposAndPreventsCacheCollisions()
+    {
+        Assert.True(PipelineProvider.IsValidGitHubRepositorySlug("ahuelsmann/MOBAflow"));
+        Assert.True(PipelineProvider.IsValidGitHubRepositorySlug("my-org-1/repo.name-2"));
+        Assert.False(PipelineProvider.IsValidGitHubRepositorySlug("my_org/repo"));
+        Assert.False(PipelineProvider.IsValidGitHubRepositorySlug("-x/y"));
+        Assert.False(PipelineProvider.IsValidGitHubRepositorySlug("a/b/c"));
+        Assert.False(PipelineProvider.IsValidGitHubRepositorySlug("/x"));
+        Assert.False(PipelineProvider.IsValidGitHubRepositorySlug("./.."));
+        Assert.False(PipelineProvider.IsValidGitHubRepositorySlug("../x"));
+        Assert.False(PipelineProvider.IsValidGitHubRepositorySlug("owner/."));
+        Assert.False(PipelineProvider.IsValidGitHubRepositorySlug("owner/.."));
+
+        var defaultRepos = new DashboardOptions { GitHubRepository = "ahuelsmann/MOBAflow" }.ResolveMonitoredRepositories();
+        Assert.Equal(["ahuelsmann/MOBAflow", "ahuelsmann/SentiX", "ahuelsmann/AISwarmX"], defaultRepos);
+
+        var dedupedRepos = new DashboardOptions
+        {
+            MonitoredRepositories = ["ahuelsmann/SentiX", "AHUELSMANN/sentix", " ahuelsmann/MOBAflow "]
+        }.ResolveMonitoredRepositories();
+        Assert.Equal(["ahuelsmann/SentiX", "ahuelsmann/MOBAflow"], dedupedRepos);
+
+        var keyInvalidComma = PipelineProvider.BuildCacheKey(new DashboardOptions { MonitoredRepositories = ["a/b,c/d"] });
+        var keyValidPair = PipelineProvider.BuildCacheKey(new DashboardOptions { MonitoredRepositories = ["a/b", "c/d"] });
+        Assert.NotEqual(keyInvalidComma, keyValidPair);
+    }
+
+    [Fact]
+    public async Task PipelineProvider_PreservesWorkflowRunsWhenPrLookupFails()
+    {
+        var runner = new FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("run"))
+            {
+                return new CommandResult(0, """
+                    [
+                      {
+                        "databaseId": 3003,
+                        "workflowName": "SentiX Linux CI",
+                        "displayTitle": "phase 3 check",
+                        "headBranch": "main",
+                        "status": "in_progress",
+                        "conclusion": null,
+                        "url": "https://github.com/ahuelsmann/SentiX/actions/runs/3003",
+                        "createdAt": "2026-11-27T22:00:00Z",
+                        "updatedAt": "2026-11-27T22:01:00Z"
+                      }
+                    ]
+                    """, string.Empty);
+            }
+
+            return new CommandResult(1, string.Empty, "pr api error");
+        });
+
+        var options = new DashboardOptions
+        {
+            GitHubRepository = "ahuelsmann/MOBAflow",
+            GitHubProjectNumber = 0,
+            MonitoredRepositories = ["ahuelsmann/SentiX"]
+        };
+
+        var result = await new PipelineProvider(runner).GetPipelineAsync(options, CancellationToken.None);
+
+        Assert.Equal("unavailable", result.Source.Status);
+        Assert.NotNull(result.WorkflowRuns);
+        var run = Assert.Single(result.WorkflowRuns!);
+        Assert.Equal(3003, run.DatabaseId);
+        Assert.Equal("in_progress", run.Status);
+    }
+
+    [Fact]
+    public async Task PipelineProvider_AuthoritativeEmptyWorkflowRunsClearsCachedQueuedRun()
+    {
+        var runsJson = """
+            [
+              {
+                "databaseId": 4004,
+                "workflowName": "SentiX Linux CI",
+                "displayTitle": "queued run",
+                "headBranch": "main",
+                "status": "queued",
+                "conclusion": null,
+                "url": "https://github.com/ahuelsmann/SentiX/actions/runs/4004",
+                "createdAt": "2026-11-27T22:00:00Z",
+                "updatedAt": "2026-11-27T22:01:00Z"
+              }
+            ]
+            """;
+        var prFailing = false;
+        var runner = new FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("run"))
+            {
+                return new CommandResult(0, runsJson, string.Empty);
+            }
+
+            if (prFailing)
+            {
+                return new CommandResult(1, string.Empty, "pr error");
+            }
+
+            if (fileName == "gh" && args.Contains("pr"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            if (fileName == "gh" && args.Contains("issue"))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            return new CommandResult(1, string.Empty, "skip");
+        });
+
+        var options = new DashboardOptions
+        {
+            GitHubRepository = "ahuelsmann/MOBAflow",
+            GitHubProjectNumber = 0,
+            MonitoredRepositories = ["ahuelsmann/SentiX"]
+        };
+
+        var provider = new PipelineProvider(runner);
+        var initial = await provider.GetPipelineAsync(options, CancellationToken.None);
+        Assert.Single(initial.WorkflowRuns!);
+
+        // Now queued run was deleted upstream (gh run list succeeds returning []) AND PR lookup fails
+        runsJson = "[]";
+        prFailing = true;
+        var updated = await provider.GetPipelineAsync(options, CancellationToken.None);
+
+        Assert.Equal("degraded", updated.Source.Status);
+        Assert.Equal("ok", updated.WorkflowRunsSource?.Status);
+        Assert.NotNull(updated.WorkflowRuns);
+        Assert.Empty(updated.WorkflowRuns!);
+    }
+
+    [Fact]
+    public async Task PipelineProvider_UpdatesWorkflowCacheIndependentlyWhenPrFailsAndFlagsStaleWhenCiFails()
+    {
+        var runsJson = """
+            [
+              {
+                "databaseId": 5005,
+                "workflowName": "SentiX Linux CI",
+                "displayTitle": "queued run",
+                "headBranch": "main",
+                "status": "queued",
+                "conclusion": null,
+                "url": "https://github.com/ahuelsmann/SentiX/actions/runs/5005",
+                "createdAt": "2026-11-27T22:00:00Z",
+                "updatedAt": "2026-11-27T22:01:00Z"
+              }
+            ]
+            """;
+        var prFailing = false;
+        var ciFailing = false;
+        var runner = new FakeCommandRunner((fileName, args) =>
+        {
+            if (fileName == "gh" && args.Contains("run"))
+            {
+                return ciFailing
+                    ? new CommandResult(1, string.Empty, "actions outage")
+                    : new CommandResult(0, runsJson, string.Empty);
+            }
+
+            if (prFailing)
+            {
+                return new CommandResult(1, string.Empty, "pr outage");
+            }
+
+            if (fileName == "gh" && (args.Contains("pr") || args.Contains("issue")))
+            {
+                return new CommandResult(0, "[]", string.Empty);
+            }
+
+            return new CommandResult(1, string.Empty, "skip");
+        });
+
+        var options = new DashboardOptions
+        {
+            GitHubRepository = "ahuelsmann/MOBAflow",
+            GitHubProjectNumber = 0,
+            MonitoredRepositories = ["ahuelsmann/SentiX"]
+        };
+
+        var provider = new PipelineProvider(runner);
+        var seeded = await provider.GetPipelineAsync(options, CancellationToken.None);
+        Assert.Single(seeded.WorkflowRuns!);
+        Assert.Equal("ok", seeded.WorkflowRunsSource?.Status);
+        Assert.False(seeded.WorkflowRunsSource?.FromCache);
+
+        // PR succeeds + CI fails -> Source="ok", but cached WorkflowRuns flagged degraded + FromCache=true
+        ciFailing = true;
+        var staleCiOnly = await provider.GetPipelineAsync(options, CancellationToken.None);
+        Assert.Equal("ok", staleCiOnly.Source.Status);
+        Assert.Single(staleCiOnly.WorkflowRuns!);
+        Assert.Equal("degraded", staleCiOnly.WorkflowRunsSource?.Status);
+        Assert.True(staleCiOnly.WorkflowRunsSource?.FromCache);
+
+        // PR fails + CI authoritatively returns [] -> clears independent workflow cache
+        ciFailing = false;
+        prFailing = true;
+        runsJson = "[]";
+        var cleared = await provider.GetPipelineAsync(options, CancellationToken.None);
+        Assert.Equal("degraded", cleared.Source.Status);
+        Assert.Equal("ok", cleared.WorkflowRunsSource?.Status);
+        Assert.Empty(cleared.WorkflowRuns!);
+
+        // Next refresh BOTH PR and CI fail -> old queued run MUST NOT reappear
+        ciFailing = true;
+        var bothFailing = await provider.GetPipelineAsync(options, CancellationToken.None);
+        Assert.Equal("degraded", bothFailing.Source.Status);
+        Assert.NotNull(bothFailing.WorkflowRuns);
+        Assert.Empty(bothFailing.WorkflowRuns!);
+    }
+
+    [Fact]
+    public void SwarmLiveBroadcastService_ChangeKeyDetectsNonFirstWorkflowTransitionAndMonitorUpdates()
+    {
+        var now = DateTimeOffset.UtcNow;
+        static MobaDev.Dashboard.Api.Contracts.DashboardSnapshot MakeSnapshot(
+            DateTimeOffset ts,
+            string secondRunStatus,
+            string claudeState) => new(
+            GeneratedAtUtc: ts,
+            ReadOnly: true,
+            BindAddress: "127.0.0.1:5179",
+            OverallStatus: "ok",
+            WarningCount: 0,
+            Monitors: new MobaDev.Dashboard.Api.Contracts.MonitorsResponse(ts, [
+                new MobaDev.Dashboard.Api.Contracts.MonitorInfo(
+                    "claude-monitor", "AiSwarmX Claude Opus", "COO", "P1", "Claude Code",
+                    claudeState, "Claude Opus 5.5", ts, null, 1, null,
+                    new MobaDev.Dashboard.Api.Contracts.SourceHealth("ok", ts), 0, null)
+            ], new MobaDev.Dashboard.Api.Contracts.SourceHealth("ok", ts)),
+            Governance: new MobaDev.Dashboard.Api.Contracts.GovernanceResponse(
+                ts, [], [], [], [], [], 0, 0, 0,
+                new MobaDev.Dashboard.Api.Contracts.SourceHealth("ok", ts)),
+            Pipeline: new MobaDev.Dashboard.Api.Contracts.PipelineResponse(
+                ts, "ahuelsmann/MOBAflow", [], [], [], false, null, null,
+                new MobaDev.Dashboard.Api.Contracts.SourceHealth("ok", ts),
+                WorkflowRuns: [
+                    new MobaDev.Dashboard.Api.Contracts.WorkflowRunInfo(1, "ahuelsmann/MOBAflow", "Win CI", "a", "main", "in_progress", null, "https://github.com/ahuelsmann/MOBAflow/actions/runs/1", ts, ts),
+                    new MobaDev.Dashboard.Api.Contracts.WorkflowRunInfo(2, "ahuelsmann/SentiX", "Linux CI", "b", "main", secondRunStatus, null, "https://github.com/ahuelsmann/SentiX/actions/runs/2", ts, ts)
+                ]),
+            Hygiene: new MobaDev.Dashboard.Api.Contracts.HygieneResponse(
+                ts, [], [], 0, new MobaDev.Dashboard.Api.Contracts.SourceHealth("ok", ts)));
+
+        var keyQueued = MobaDev.Dashboard.Api.Services.SwarmLiveBroadcastService.BuildSnapshotChangeKey(
+            MakeSnapshot(now, "queued", "standby"));
+        var keyInProgress = MobaDev.Dashboard.Api.Services.SwarmLiveBroadcastService.BuildSnapshotChangeKey(
+            MakeSnapshot(now, "in_progress", "standby"));
+        var keyBusy = MobaDev.Dashboard.Api.Services.SwarmLiveBroadcastService.BuildSnapshotChangeKey(
+            MakeSnapshot(now, "in_progress", "busy"));
+
+        Assert.NotEqual(keyQueued, keyInProgress);
+        Assert.NotEqual(keyInProgress, keyBusy);
+    }
+
     private sealed class MutableOptionsMonitor<T>(T value) : Microsoft.Extensions.Options.IOptionsMonitor<T>
     {
         private T _current = value;

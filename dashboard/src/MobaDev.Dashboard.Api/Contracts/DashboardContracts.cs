@@ -361,6 +361,18 @@ public sealed record PullRequestInfo(
     IReadOnlyList<LinkedIssueInfo> LinkedIssues,
     IReadOnlyList<string> MergeBlockReasons);
 
+public sealed record WorkflowRunInfo(
+    long DatabaseId,
+    string Repository,
+    string WorkflowName,
+    string DisplayTitle,
+    string HeadBranch,
+    string Status,
+    string? Conclusion,
+    string Url,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc);
+
 public sealed record PipelineResponse(
     DateTimeOffset GeneratedAtUtc,
     string Repository,
@@ -370,7 +382,9 @@ public sealed record PipelineResponse(
     bool ProjectBoardAvailable,
     string? ProjectBoardNotice,
     string? ProjectBoardUrl,
-    SourceHealth Source);
+    SourceHealth Source,
+    IReadOnlyList<WorkflowRunInfo>? WorkflowRuns = null,
+    SourceHealth? WorkflowRunsSource = null);
 
 public sealed record ToolSessionHygiene(
     string Tool,

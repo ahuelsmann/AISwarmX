@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using MobaDev.Dashboard.Api.Configuration;
+using MobaDev.Dashboard.Api.Contracts;
 using MobaDev.Dashboard.Api.Hubs;
 using MobaDev.SwarmBus.Core.Contracts;
 
@@ -190,19 +191,42 @@ public sealed class SwarmLiveBroadcastService(
         }
     }
 
+    internal static string BuildSnapshotChangeKey(DashboardSnapshot snapshot)
+    {
+        var workflowKey = snapshot.Pipeline.WorkflowRuns is { Count: > 0 } runs
+            ? string.Join(",", runs.Select(static r => $"{r.Repository}:{r.DatabaseId}:{r.Status}:{r.Conclusion ?? string.Empty}"))
+            : string.Empty;
+
+        var monitorKey = snapshot.Monitors.Monitors is { Count: > 0 } monitors
+            ? string.Join(",", monitors.Select(static m =>
+            {
+                var subSummary = m.ActiveSubAgentsByModel is { Count: > 0 }
+                    ? string.Join("+", m.ActiveSubAgentsByModel
+                        .OrderBy(static kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+                        .Select(static kv => $"{kv.Key}={kv.Value}"))
+                    : string.Empty;
+                return $"{m.Id}:{m.State}:{m.Model}:{m.ActiveSessionCount}:{m.ActiveSubAgentCount}:[{subSummary}]";
+            }))
+            : string.Empty;
+
+        return string.Join('|',
+            snapshot.OverallStatus,
+            snapshot.WarningCount,
+            snapshot.Pipeline.PullRequests.Count,
+            snapshot.Pipeline.RecentlyMerged.FirstOrDefault()?.Number ?? 0,
+            snapshot.Pipeline.ActiveIssues.Count,
+            workflowKey,
+            monitorKey,
+            snapshot.SwarmBus?.UnreadCount ?? 0,
+            snapshot.SwarmBus?.ActiveLockCount ?? 0);
+    }
+
     private async Task<string> PublishSnapshotIfChangedAsync(string previousKey, CancellationToken cancellationToken)
     {
         try
         {
             var snapshot = await snapshotService.GetSnapshotAsync(forceRefresh: false, cancellationToken).ConfigureAwait(false);
-            var key = string.Join('|',
-                snapshot.OverallStatus,
-                snapshot.WarningCount,
-                snapshot.Pipeline.PullRequests.Count,
-                snapshot.Pipeline.RecentlyMerged.FirstOrDefault()?.Number ?? 0,
-                snapshot.Pipeline.ActiveIssues.Count,
-                snapshot.SwarmBus?.UnreadCount ?? 0,
-                snapshot.SwarmBus?.ActiveLockCount ?? 0);
+            var key = BuildSnapshotChangeKey(snapshot);
 
             if (!string.Equals(key, previousKey, StringComparison.Ordinal))
             {
