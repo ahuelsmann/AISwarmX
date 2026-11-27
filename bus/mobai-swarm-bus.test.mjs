@@ -1360,7 +1360,7 @@ if (args[0] === 'api' && args.some((a) => a.startsWith('repos/ahuelsmann/MOBAflo
 
 if (args[0] === 'issue' && args[1] === 'view') {
   const num = Number(args[2]);
-  if (mode === 'landed_done' && num === 961) {
+  if ((mode === 'landed_done' && num === 961) || (mode === 'landed_commit' && num === 960)) {
     console.log(JSON.stringify({ state: 'CLOSED', projectItems: [{ status: 'Done' }] }));
   } else {
     console.log(JSON.stringify({ state: 'OPEN', projectItems: [{ status: 'In progress' }] }));
@@ -1462,9 +1462,203 @@ console.log('[]');
     const doneNextEv = rep3.NewEventsDispatched.find((e) => e.EventType === 'NextWorkAvailable');
     assert.ok(doneNextEv, 'Expected NextWorkAvailable after #961 closed/Done');
 
+    const inboxClaude = JSON.parse((await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'inbox', '--agent', 'claude-opus'], busEnv)).stdout);
+    assert.ok(inboxClaude.messages.some((m) => m.topic === 'NextWorkAvailable'));
     const inboxCodex = JSON.parse((await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'inbox', '--agent', 'codex'], busEnv)).stdout);
-    assert.ok(inboxCodex.messages.some((m) => m.topic === 'NextWorkAvailable'));
+    assert.equal(inboxCodex.messages.some((m) => m.topic === 'NextWorkAvailable'), false);
   } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Invoke-SwarmWatchdog guards reopened/reclaimed commits, ambiguous 404 PR errors, and COO/Acting-COO intake routing', async () => {
+  const pwshCheck = spawnSync('pwsh', ['--version'], { encoding: 'utf8' });
+  if (pwshCheck.status !== 0) {
+    return;
+  }
+
+  const { dir, dbPath } = createTempDbPath();
+  const localAppDir = path.join(dir, 'localapp');
+  const binDir = path.join(dir, 'bin');
+  fs.mkdirSync(localAppDir, { recursive: true });
+  fs.mkdirSync(binDir, { recursive: true });
+
+  const olderCommitIso = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const staleIso = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+  let mockClaudeState = 'online';
+
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      monitors: [
+        { id: 'claude-monitor', displayName: 'MOBAi Claude Opus', state: mockClaudeState, model: 'Opus 5.5', lastActivityUtc: new Date().toISOString() },
+        { id: 'antigravity-monitor', displayName: 'MOBAi Antigravity Gemini', state: 'online', model: 'Gemini 4 Carbon', lastActivityUtc: new Date().toISOString() },
+        { id: 'codex-monitor', displayName: 'MOBAi ChatGPT Codex', state: 'idle', model: 'GPT-6.2 Sol', lastActivityUtc: staleIso }
+      ]
+    }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+
+  const mockGhScript = path.join(dir, 'mock-gh-guards.mjs');
+  fs.writeFileSync(mockGhScript, `
+const args = process.argv.slice(2);
+const mode = process.env.MOCK_GUARD_MODE || 'reopened_claim';
+
+if (args[0] === 'api' && args[1] === 'repos/ahuelsmann/MOBAflow') {
+  console.log(JSON.stringify({ has_pull_requests: mode !== 'reopened_claim' && mode !== 'acting_coo_intake' }));
+  process.exit(0);
+}
+
+if (args[0] === 'pr' && args[1] === 'list') {
+  if (mode === 'ambiguous_404') {
+    console.error('HTTP 404: Not Found (/repos/ahuelsmann/MOBAflow/pulls)');
+  } else {
+    console.error('GraphQL: Pull requests are disabled for this repository');
+  }
+  process.exit(1);
+}
+
+if (args[0] === 'api' && args.some((a) => a.startsWith('repos/ahuelsmann/MOBAflow/commits'))) {
+  if (mode === 'reopened_claim' || mode === 'acting_coo_intake') {
+    console.log(JSON.stringify([{
+      sha: mode === 'acting_coo_intake' ? 'cafe1234567890abcdef1234567890abcdef1234' : 'beef1234567890abcdef1234567890abcdef1234',
+      html_url: 'https://github.com/ahuelsmann/MOBAflow/commit/beef1234',
+      commit: {
+        message: mode === 'acting_coo_intake' ? 'feat: ship item (Closes #969)' : 'feat: first pass (Closes #965)',
+        committer: { date: ${JSON.stringify(olderCommitIso)} }
+      }
+    }]));
+  } else {
+    console.log('[]');
+  }
+  process.exit(0);
+}
+
+if (args[0] === 'issue' && args[1] === 'view') {
+  const num = Number(args[2]);
+  if (mode === 'acting_coo_intake' && num === 969) {
+    console.log(JSON.stringify({ state: 'CLOSED', projectItems: [{ status: 'Done' }] }));
+  } else {
+    console.log(JSON.stringify({ state: 'OPEN', projectItems: [{ status: 'In progress' }] }));
+  }
+  process.exit(0);
+}
+
+if (args[0] === 'api' && args[1] === 'graphql') {
+  const nodes = mode === 'reopened_claim'
+    ? [
+        {
+          id: 'INPROGRESS_965',
+          fieldValues: { nodes: [
+            { name: 'In progress', field: { name: 'Status' } },
+            { name: 'P1', field: { name: 'Priority' } },
+            { name: 'M', field: { name: 'Risk class' } }
+          ] },
+          content: { __typename: 'Issue', number: 965, title: 'Reopened Reclaimed 965', state: 'OPEN' }
+        },
+        {
+          id: 'READY_971',
+          fieldValues: { nodes: [
+            { name: 'Ready', field: { name: 'Status' } },
+            { name: 'P1', field: { name: 'Priority' } },
+            { name: 'M', field: { name: 'Risk class' } }
+          ] },
+          content: { __typename: 'Issue', number: 971, title: 'Fresh Ready Item', state: 'OPEN' }
+        }
+      ]
+    : [
+        {
+          id: 'READY_971',
+          fieldValues: { nodes: [
+            { name: 'Ready', field: { name: 'Status' } },
+            { name: 'P1', field: { name: 'Priority' } },
+            { name: 'M', field: { name: 'Risk class' } }
+          ] },
+          content: { __typename: 'Issue', number: 971, title: 'Fresh Ready Item', state: 'OPEN' }
+        }
+      ];
+
+  console.log(JSON.stringify({
+    data: {
+      user: {
+        projectV2: {
+          fields: { nodes: [{ name: 'Status' }, { name: 'Priority' }, { name: 'Risk class' }] },
+          items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes }
+        }
+      }
+    }
+  }));
+  process.exit(0);
+}
+console.log('[]');
+`, 'utf8');
+  fs.writeFileSync(path.join(binDir, 'gh.cmd'), `@echo off\r\n"${process.execPath}" "${mockGhScript}" %*\r\n`, 'utf8');
+
+  try {
+    const busEnv = { ...process.env, MOBADEV_SWARM_BUS_DB: dbPath };
+    const wdEnv = {
+      ...process.env,
+      LOCALAPPDATA: localAppDir,
+      MOBADEV_SWARM_BUS_DB: dbPath,
+      PATH: `${binDir}${path.delimiter}${process.env.PATH}`
+    };
+
+    // Seed #965 claimed AFTER olderCommitIso (T1 > T0) by antigravity-opus (so codex holds NO active claim)
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'upsert', '--issue-number', '965', '--title', 'Reopened Reclaimed 965', '--priority', '1', '--risk-class', 'M'], busEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'next', '--agent', 'antigravity-opus'], busEnv);
+    await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'sync-meta', '--meta-key', 'code_wip', '--meta-value', '2'], busEnv);
+
+    // 1. Ambiguous HTTP 404 when has_pull_requests: true MUST NOT trigger PR-disabled mode and MUST preserve code_wip & claimed leases
+    const res404 = await runProcessAsync('pwsh', [
+      '-NoProfile', '-File', WATCHDOG_SCRIPT,
+      '-SkipHygiene', '-SyncQueue', '-Json', '-DashboardApiUrl', `http://127.0.0.1:${port}`
+    ], { ...wdEnv, MOCK_GUARD_MODE: 'ambiguous_404' });
+    assert.equal(res404.status, 0, res404.stderr);
+    const rep404 = JSON.parse(res404.stdout);
+    assert.equal(rep404.PullRequestsDisabled, false);
+    assert.equal(rep404.QueueSync.OpenPrsReadSucceeded, false);
+    assert.equal(rep404.QueueSync.SchemaValid, false);
+    assert.equal(rep404.QueueSync.RemovedCount, 0);
+    assert.equal(rep404.QueueSync.DoneCount, 0);
+    const listAfter404 = JSON.parse((await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'list'], busEnv)).stdout);
+    assert.equal(listAfter404.code_wip, 2);
+    assert.equal(listAfter404.items.find((i) => i.issue_number === 965).status, 'claimed');
+
+    // 2. Older T0 Closes #965 commit in 2h window MUST NOT close reopened/reclaimed #965 (T1 > T0, OPEN In progress);
+    //    and HeadIdleWake with no Codex claim routes new-issue intake to COO (claude-opus), NOT codex.
+    const resReopen = await runProcessAsync('pwsh', [
+      '-NoProfile', '-File', WATCHDOG_SCRIPT,
+      '-SkipHygiene', '-DispatchEvents', '-SyncQueue', '-Json', '-DashboardApiUrl', `http://127.0.0.1:${port}`
+    ], { ...wdEnv, MOCK_GUARD_MODE: 'reopened_claim' });
+    assert.equal(resReopen.status, 0, resReopen.stderr);
+    const repReopen = JSON.parse(resReopen.stdout);
+    assert.equal(repReopen.PullRequestsDisabled, true);
+    assert.equal(repReopen.QueueSync.DoneCount, 0);
+    const listAfterReopen = JSON.parse((await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'queue', '--action', 'list'], busEnv)).stdout);
+    assert.equal(listAfterReopen.items.find((i) => i.issue_number === 965).status, 'claimed');
+
+    const idleWakeCoo = repReopen.NewEventsDispatched.find((e) => e.EventType === 'HeadIdleWake');
+    assert.ok(idleWakeCoo, 'Expected HeadIdleWake intake notification to active COO');
+    assert.equal(idleWakeCoo.BusRecipient, 'claude-opus');
+    assert.equal(idleWakeCoo.WakeViaBus, false);
+
+    // 3. During Claude quota pause (rate_limited), NextWorkAvailable & new-issue HeadIdleWake route strictly to Acting COO (antigravity-gemini), never waking codex to self-claim
+    mockClaudeState = 'rate_limited';
+    const resFailover = await runProcessAsync('pwsh', [
+      '-NoProfile', '-File', WATCHDOG_SCRIPT,
+      '-SkipHygiene', '-DispatchEvents', '-SyncQueue', '-ResetEventState', '-Json', '-DashboardApiUrl', `http://127.0.0.1:${port}`
+    ], { ...wdEnv, MOCK_GUARD_MODE: 'acting_coo_intake' });
+    assert.equal(resFailover.status, 0, resFailover.stderr);
+    const repFailover = JSON.parse(resFailover.stdout);
+    const actingNext = repFailover.NewEventsDispatched.find((e) => e.EventType === 'NextWorkAvailable');
+    const actingIdle = repFailover.NewEventsDispatched.find((e) => e.EventType === 'HeadIdleWake');
+    assert.ok(actingNext && actingNext.BusRecipient === 'antigravity-gemini');
+    assert.ok(actingIdle && actingIdle.BusRecipient === 'antigravity-gemini' && actingIdle.WakeViaBus === false);
+    const codexInbox = JSON.parse((await runProcessAsync(process.execPath, ['--no-warnings', BUS_SCRIPT, '--cli', 'inbox', '--agent', 'codex'], busEnv)).stdout);
+    assert.equal(codexInbox.messages.some((m) => m.topic === 'HeadIdleWake' || m.topic === 'NextWorkAvailable'), false);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
