@@ -343,7 +343,12 @@ export function App() {
               <MainLandingTickerCard pipeline={snapshot.pipeline} nowMs={nowMs} />
 
               <div className={styles.liveSplit}>
-                <PipelineCard pipeline={snapshot.pipeline} nowMs={nowMs} isDark={isDark} />
+                <PipelineCard
+                  pipeline={snapshot.pipeline}
+                  monitors={snapshot.monitors.monitors}
+                  nowMs={nowMs}
+                  isDark={isDark}
+                />
                 <HygieneAndSyncPanel
                   governance={snapshot.governance}
                   hygiene={snapshot.hygiene}

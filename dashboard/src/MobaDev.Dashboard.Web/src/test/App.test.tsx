@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as swarmHubClient from '../api/swarmHubClient';
 import { App } from '../App';
 import { deriveActiveAgentsSummary } from '../components/ActiveAgentsStrip';
+import { isParticipantActivelyWorking } from '../components/AgentRoundTable';
 import { rankPullRequestsForMain } from '../components/MainLandingTickerCard';
 import {
   clearMonitorGridCookie,
@@ -1649,5 +1650,173 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     } finally {
       withUrlSpy.mockRestore();
     }
+  });
+
+  it('detects actively working Round Table participants only when live monitor or sub-agent is busy', () => {
+    const monitors = createSnapshotFixture().monitors.monitors;
+    const codexWriter = {
+      agent: 'Codex Writer',
+      tool: 'ChatGPT Codex',
+      role: 'Writer',
+      profile: 'P2',
+      model: 'GPT-6.2 Sol',
+      status: 'Active',
+      evidenceSource: 'GitHub Kanban Assignee'
+    };
+
+    // Standby monitor -> false even though participant status says Active
+    expect(isParticipantActivelyWorking(codexWriter, monitors, 'In progress')).toBe(false);
+
+    // Busy matching monitor -> true
+    const busyCodexMonitors = monitors.map((m) =>
+      m.id === 'codex-monitor' ? { ...m, state: 'busy' as const } : m
+    );
+    expect(isParticipantActivelyWorking(codexWriter, busyCodexMonitors, 'In progress')).toBe(true);
+
+    // Merged / Closed / PASS / Assigned -> false even when monitor is busy
+    expect(isParticipantActivelyWorking(codexWriter, busyCodexMonitors, 'Merged')).toBe(false);
+    expect(
+      isParticipantActivelyWorking({ ...codexWriter, status: 'PASS' }, busyCodexMonitors, 'In progress')
+    ).toBe(false);
+    expect(
+      isParticipantActivelyWorking({ ...codexWriter, status: 'Assigned' }, busyCodexMonitors, 'In progress')
+    ).toBe(false);
+
+    // Disambiguates Antigravity P1 Opus (standby) vs Antigravity P3 Gemini (busy)
+    const agyP1Reviewer = {
+      agent: 'Antigravity Opus Reviewer',
+      tool: 'Antigravity',
+      role: 'Final Reviewer',
+      profile: 'P1',
+      model: 'Claude Opus 5.5',
+      status: 'Active',
+      evidenceSource: 'Label'
+    };
+    const agyP3UiUx = {
+      agent: 'Head of UI/UX',
+      tool: 'Antigravity',
+      role: 'Head of UI/UX',
+      profile: 'P3',
+      model: 'Gemini 4 Carbon',
+      status: 'Active',
+      evidenceSource: 'Label'
+    };
+    expect(isParticipantActivelyWorking(agyP1Reviewer, monitors, 'In review')).toBe(false);
+    expect(isParticipantActivelyWorking(agyP3UiUx, monitors, 'In review')).toBe(true);
+
+    // Active sub-agents on matching model mark participant live-working even when root monitor is standby
+    const subAgentMonitors = monitors.map((m) =>
+      m.id === 'codex-monitor'
+        ? { ...m, state: 'standby' as const, activeSubAgentsByModel: { 'gpt-6.2-sol': 1 } }
+        : m
+    );
+    expect(isParticipantActivelyWorking(codexWriter, subAgentMonitors, 'In progress')).toBe(true);
+
+    // Regression (Codex + Claude P1): missing Opus monitor + busy P3 Gemini monitor must NOT pulse Active P1 Opus seat
+    const onlyBusyGemini = monitors.filter((m) => m.id === 'antigravity-monitor');
+    expect(isParticipantActivelyWorking(agyP1Reviewer, onlyBusyGemini, 'In review')).toBe(false);
+
+    // Single busy Claude P1 Opus monitor must NOT pulse an Active P4 Sonnet seat unless Sonnet sub-agent is active
+    const onlyBusyClaudeOpus = monitors.map((m) =>
+      m.id === 'claude-monitor' ? { ...m, state: 'busy' as const, activeSubAgentsByModel: null } : m
+    );
+    const claudeP4Sonnet = {
+      agent: 'Claude Sonnet Helper',
+      tool: 'Claude Code',
+      role: 'Senior Developer',
+      profile: 'P4',
+      model: 'Claude Sonnet 5.5',
+      status: 'Active',
+      evidenceSource: 'Subagent'
+    };
+    expect(isParticipantActivelyWorking(claudeP4Sonnet, onlyBusyClaudeOpus, 'In progress')).toBe(false);
+    const busyClaudeWithSonnetSub = onlyBusyClaudeOpus.map((m) =>
+      m.id === 'claude-monitor' ? { ...m, activeSubAgentsByModel: { 'claude-sonnet-5-5': 1 } } : m
+    );
+    expect(isParticipantActivelyWorking(claudeP4Sonnet, busyClaudeWithSonnetSub, 'In progress')).toBe(true);
+
+    // Terminal gitHubState flag suppresses pulse even with board drift (In progress)
+    expect(isParticipantActivelyWorking(codexWriter, busyCodexMonitors, 'In progress', true)).toBe(false);
+  });
+
+  it('renders pulsing halo only on Round Table seats whose live monitor is actively working', async () => {
+    const busySnapshot = createSnapshotFixture();
+    busySnapshot.monitors.monitors = busySnapshot.monitors.monitors.map((m) =>
+      m.id === 'codex-monitor' ? { ...m, state: 'busy' as const } : m
+    );
+    busySnapshot.pipeline.activeIssues = [
+      {
+        number: 47,
+        itemKind: 'Issue',
+        title: 'Build feature with active Codex Writer',
+        url: 'https://github.com/ahuelsmann/MOBAflow/issues/47',
+        gitHubState: 'OPEN',
+        kanbanStatus: 'In progress',
+        priority: 'P1',
+        area: 'UI',
+        issueType: 'Feature',
+        riskClass: 'M',
+        writer: 'Codex',
+        lockedAreas: [],
+        updatedAtUtc: busySnapshot.generatedAtUtc,
+        linkedPullRequests: [],
+        linkedIssues: [],
+        participants: [
+          {
+            agent: 'Codex Writer',
+            tool: 'ChatGPT Codex',
+            role: 'Writer',
+            profile: 'P2',
+            model: 'GPT-6.2 Sol',
+            status: 'Active',
+            evidenceSource: 'GitHub Kanban Assignee'
+          },
+          {
+            agent: 'Final Reviewer',
+            tool: 'Antigravity',
+            role: 'Final Reviewer',
+            profile: 'P1',
+            model: 'Claude Opus 5.5',
+            status: 'Assigned',
+            evidenceSource: 'Risk Class M rule'
+          }
+        ],
+        boardDriftReason: null
+      }
+    ];
+
+    stubDashboardFetch(busySnapshot);
+    const { unmount } = render(<App />);
+    try {
+      const writerSeat = await screen.findByRole('button', {
+        name: /P2 Writer · GPT-6\.2 Sol · Active · Live working/i
+      });
+      expect(writerSeat).toHaveAttribute('data-live-working', 'true');
+      expect(writerSeat.querySelector('.roundtable-pulse-halo')).not.toBeNull();
+      expect(writerSeat.querySelector('.roundtable-pulse-dot')).not.toBeNull();
+
+      const reviewerSeat = screen.getByRole('button', {
+        name: /P1 Final Reviewer · Claude Opus 5\.5 · Assigned/i
+      });
+      expect(reviewerSeat).toHaveAttribute('data-live-working', 'false');
+      expect(reviewerSeat.querySelector('.roundtable-pulse-halo')).toBeNull();
+    } finally {
+      unmount();
+    }
+
+    // Standby monitor -> no pulse halo rendered even on Active participant
+    const standbySnapshot = createSnapshotFixture();
+    standbySnapshot.monitors.monitors = standbySnapshot.monitors.monitors.map((m) =>
+      m.id === 'codex-monitor' ? { ...m, state: 'standby' as const } : m
+    );
+    standbySnapshot.pipeline.activeIssues = busySnapshot.pipeline.activeIssues;
+    stubDashboardFetch(standbySnapshot);
+    render(<App />);
+
+    const standbyWriterSeat = await screen.findByRole('button', {
+      name: /P2 Writer · GPT-6.2 Sol · Active$/i
+    });
+    expect(standbyWriterSeat).toHaveAttribute('data-live-working', 'false');
+    expect(standbyWriterSeat.querySelector('.roundtable-pulse-halo')).toBeNull();
   });
 });

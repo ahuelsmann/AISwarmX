@@ -8,7 +8,7 @@ import {
   type StatusToneKey,
   type ToneStylePair
 } from '../theme/mobaFluentTheme';
-import type { TaskParticipantInfo } from '../types/dashboard';
+import type { MonitorInfo, TaskParticipantInfo } from '../types/dashboard';
 import { GlossaryTooltip } from './GlossaryTooltip';
 import { resolveProfileTone, resolveToolTone } from './RoleAndModelIcons';
 
@@ -92,7 +92,9 @@ interface AgentRoundTableProps {
   centerSub: string;
   centerStatus: string;
   centerTone: AccentTone;
+  isTerminal?: boolean;
   participants: TaskParticipantInfo[];
+  monitors?: readonly MonitorInfo[];
   isDark: boolean;
   defaultView?: 'table' | 'pills';
   renderPills: () => ReactNode;
@@ -180,12 +182,149 @@ function resolveParticipantStatusTone(status: string): { tone: StatusToneKey; da
     return { tone: STATUS_TONES.ok, dashed: false };
   }
   if (
-    /\b(?:active|implemented|involved|findings|pending)\b/.test(normalized) ||
+    /\b(?:active|in\s+progress|working|reviewing|implemented|involved|findings|pending)\b/.test(normalized) ||
     /\bquota\b/.test(normalized)
   ) {
     return { tone: STATUS_TONES.warn, dashed: false };
   }
   return { tone: STATUS_TONES.neutral, dashed: true };
+}
+
+type ToolFamily = 'codex' | 'claude' | 'antigravity';
+
+function normalizeToolFamily(toolOrModel: string | null | undefined): ToolFamily | null {
+  const normalized = (toolOrModel ?? '').trim().toLowerCase();
+  if (/codex|chatgpt|\bgpt\b|openai/.test(normalized)) {
+    return 'codex';
+  }
+  if (/antigravity|gemini|google/.test(normalized)) {
+    return 'antigravity';
+  }
+  if (/claude|anthropic/.test(normalized)) {
+    return 'claude';
+  }
+  return null;
+}
+
+const MODEL_TOKENS = [
+  'gpt-oss',
+  'sol',
+  'astra',
+  'opus',
+  'sonnet',
+  'haiku',
+  'carbon',
+  'argon',
+  'hydrogen',
+  'claude',
+  'gemini'
+] as const;
+
+function extractModelToken(model: string | null | undefined): string | null {
+  const normalized = (model ?? '').trim().toLowerCase();
+  for (const token of MODEL_TOKENS) {
+    const matched =
+      token === 'sol'
+        ? /(?:^|[\s\-_/])sol(?:$|[\s\-_/0-9.])/.test(normalized)
+        : normalized.includes(token);
+    if (matched) {
+      return token === 'argon' || token === 'carbon' ? 'gemini' : token;
+    }
+  }
+  return null;
+}
+
+function isCompatibleStandingMonitor(
+  monitor: MonitorInfo,
+  participantProfile: string,
+  participantModelToken: string | null
+): boolean {
+  const monitorProfile = (monitor.profile ?? '').trim().toLowerCase();
+  const monitorModelToken = extractModelToken(monitor.model);
+
+  if (participantProfile && monitorProfile && participantProfile !== monitorProfile) {
+    return false;
+  }
+  if (participantModelToken && monitorModelToken && participantModelToken !== monitorModelToken) {
+    return false;
+  }
+  if (!participantProfile && !participantModelToken) {
+    return true;
+  }
+  return (
+    (participantProfile !== '' && monitorProfile === participantProfile) ||
+    (participantModelToken !== null && monitorModelToken === participantModelToken)
+  );
+}
+
+/**
+ * Returns true only when a Round Table seat is actively executing (e.g. `Active`/`In progress`,
+ * not `Assigned`/`PASS`/`Merged`) AND either a compatible standing monitor reports `busy`
+ * or an in-family monitor reports active sub-agents for that seat's model.
+ */
+export function isParticipantActivelyWorking(
+  participant: TaskParticipantInfo,
+  monitors?: readonly MonitorInfo[],
+  centerStatus?: string,
+  isTerminal?: boolean
+): boolean {
+  if (!monitors || monitors.length === 0 || isTerminal) {
+    return false;
+  }
+
+  if (centerStatus && /\b(?:merged|closed|done)\b/i.test(centerStatus)) {
+    return false;
+  }
+
+  const normalizedStatus = (participant.status ?? '').trim().toLowerCase();
+  if (
+    /\b(?:pass|approved|reviewed|assigned|blocked|fail(?:ed|ing)?|error|quota)\b/.test(
+      normalizedStatus
+    ) ||
+    !/\b(?:active|in\s+progress|working|reviewing)\b/.test(normalizedStatus)
+  ) {
+    return false;
+  }
+
+  const participantFamily =
+    normalizeToolFamily(participant.tool) ?? normalizeToolFamily(participant.model);
+  if (!participantFamily) {
+    return false;
+  }
+
+  const toolMatches = monitors.filter(
+    (m) => normalizeToolFamily(m.tool) === participantFamily
+  );
+  if (toolMatches.length === 0) {
+    return false;
+  }
+
+  const participantProfile = (participant.profile ?? '').trim().toLowerCase();
+  const participantModelToken = extractModelToken(participant.model);
+
+  const compatibleBusy = toolMatches.some(
+    (m) =>
+      m.state === 'busy' &&
+      isCompatibleStandingMonitor(m, participantProfile, participantModelToken)
+  );
+  if (compatibleBusy) {
+    return true;
+  }
+
+  if (!participantModelToken) {
+    return false;
+  }
+
+  return toolMatches.some((m) => {
+    const subAgents = m.activeSubAgentsByModel;
+    if (!subAgents) {
+      return false;
+    }
+    return Object.entries(subAgents).some(
+      ([subModel, count]) =>
+        count > 0 && extractModelToken(subModel) === participantModelToken
+    );
+  });
 }
 
 function shortRoleLabel(role: string): string {
@@ -537,7 +676,9 @@ export function AgentRoundTable({
   centerSub,
   centerStatus,
   centerTone,
+  isTerminal = false,
   participants,
+  monitors,
   isDark,
   defaultView = 'table',
   renderPills
@@ -878,6 +1019,12 @@ export function AgentRoundTable({
             {/* Agent Seats (Axis 1 Identity) + Top-Right Status Dot & Framed Visitenkarten */}
             {seats.map((seat) => {
               const isFocused = focusKey === seat.key;
+              const isLiveWorking = isParticipantActivelyWorking(
+                seat.participant,
+                monitors,
+                centerStatus,
+                isTerminal
+              );
               const statusColors = getToneStyles(seat.statusTone, isDark);
               const profileColors = getToneStyles(seat.identityTone, isDark);
               const statusStroke = seat.statusDashed
@@ -903,10 +1050,11 @@ export function AgentRoundTable({
                 <g
                   key={seat.key}
                   className="roundtable-seat"
+                  data-live-working={isLiveWorking ? 'true' : 'false'}
                   style={{ cursor: 'pointer' }}
                   tabIndex={0}
                   role="button"
-                  aria-label={`${seat.participant.profile} ${seat.participant.role} · ${seat.participant.model} · ${seat.participant.status}`}
+                  aria-label={`${seat.participant.profile} ${seat.participant.role} · ${seat.participant.model} · ${seat.participant.status}${isLiveWorking ? ' · Live working' : ''}`}
                   onMouseEnter={() => setHoveredKey(seat.key)}
                   onMouseLeave={() => setHoveredKey(null)}
                   onFocus={() => setHoveredKey(seat.key)}
@@ -919,7 +1067,7 @@ export function AgentRoundTable({
                     }
                   }}
                 >
-                  <title>{`${seat.participant.agent} (${seat.participant.tool} · ${seat.participant.model}) · Evidence: ${seat.participant.evidenceSource}`}</title>
+                  <title>{`${seat.participant.agent} (${seat.participant.tool} · ${seat.participant.model}) · Evidence: ${seat.participant.evidenceSource}${isLiveWorking ? ' · Live: working' : ''}`}</title>
 
                   {/* Connector stem between circular seat and Visitenkarte */}
                   <line
@@ -940,6 +1088,19 @@ export function AgentRoundTable({
                       stroke={profileColors.solid}
                       strokeWidth={2}
                       opacity={0.45}
+                    />
+                  )}
+
+                  {isLiveWorking && (
+                    <circle
+                      className="roundtable-pulse-halo"
+                      cx={seat.x.toFixed(1)}
+                      cy={seat.y.toFixed(1)}
+                      r={R_NODE + 1}
+                      fill="none"
+                      stroke={statusColors.solid}
+                      strokeWidth={2.5}
+                      aria-hidden="true"
                     />
                   )}
 
@@ -1003,6 +1164,18 @@ export function AgentRoundTable({
                   )}
 
                   {/* Top-right Axis-2 live status indicator dot */}
+                  {isLiveWorking && (
+                    <circle
+                      className="roundtable-pulse-dot"
+                      cx={statusDotX.toFixed(1)}
+                      cy={statusDotY.toFixed(1)}
+                      r={5.5}
+                      fill="none"
+                      stroke={statusColors.solid}
+                      strokeWidth={1.6}
+                      aria-hidden="true"
+                    />
+                  )}
                   <circle
                     cx={statusDotX.toFixed(1)}
                     cy={statusDotY.toFixed(1)}

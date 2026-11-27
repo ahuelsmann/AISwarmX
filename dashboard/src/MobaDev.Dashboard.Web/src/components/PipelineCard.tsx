@@ -36,6 +36,7 @@ import type {
   ActiveIssueInfo,
   LinkedIssueInfo,
   LinkedPullRequestRef,
+  MonitorInfo,
   PipelineResponse,
   PullRequestInfo,
   TaskParticipantInfo
@@ -253,6 +254,7 @@ const useStyles = makeStyles({
 
 interface PipelineCardProps {
   pipeline: PipelineResponse;
+  monitors?: readonly MonitorInfo[];
   nowMs: number;
   isDark: boolean;
 }
@@ -261,7 +263,7 @@ type PipelineViewMode = 'open' | 'issues';
 
 const KANBAN_GROUPS = ['Ready', 'In progress', 'In review', 'Via Open PR'] as const;
 
-export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
+export function PipelineCard({ pipeline, monitors, nowMs, isDark }: PipelineCardProps) {
   const styles = useStyles();
   const [viewMode, setViewMode] = useState<PipelineViewMode>('issues');
 
@@ -348,6 +350,7 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
             <PullRequestRow
               key={`${pr.state}-${pr.number}`}
               pr={pr}
+              monitors={monitors}
               nowMs={nowMs}
               isDark={isDark}
               styles={styles}
@@ -450,6 +453,7 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
                     <KanbanItemRow
                       key={`${item.itemKind ?? 'Issue'}-${item.number}`}
                       issue={item}
+                      monitors={monitors}
                       nowMs={nowMs}
                       isDark={isDark}
                       styles={styles}
@@ -467,11 +471,13 @@ export function PipelineCard({ pipeline, nowMs, isDark }: PipelineCardProps) {
 
 function PullRequestRow({
   pr,
+  monitors,
   nowMs,
   isDark,
   styles
 }: {
   pr: PullRequestInfo;
+  monitors?: readonly MonitorInfo[];
   nowMs: number;
   isDark: boolean;
   styles: ReturnType<typeof useStyles>;
@@ -614,7 +620,9 @@ function PullRequestRow({
                 ? ('gold' as AccentTone)
                 : ('neutral' as AccentTone)
         }
+        isTerminal={isMerged}
         participants={pr.participants}
+        monitors={monitors}
         isDark={isDark}
         defaultView="table"
         renderPills={() => (
@@ -1080,11 +1088,13 @@ function normalizeIssueParticipants(participants: TaskParticipantInfo[]): TaskPa
 
 function KanbanItemRow({
   issue,
+  monitors,
   nowMs,
   isDark,
   styles
 }: {
   issue: ActiveIssueInfo;
+  monitors?: readonly MonitorInfo[];
   nowMs: number;
   isDark: boolean;
   styles: ReturnType<typeof useStyles>;
@@ -1262,7 +1272,9 @@ function KanbanItemRow({
                 ? ('gold' as AccentTone)
                 : ('neutral' as AccentTone)
         }
+        isTerminal={isClosed}
         participants={normalizedParticipants}
+        monitors={monitors}
         isDark={isDark}
         defaultView="table"
         renderPills={() => (
