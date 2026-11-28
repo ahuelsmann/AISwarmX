@@ -26,16 +26,16 @@ AISwarmX/
 └── dashboard/
     ├── DESIGN.md                           # Dieses Konzept (Slice 1)
     ├── Start-Dashboard.ps1                 # Lokales Startskript (inkl. -Background & -RegisterAutoStart)
-    ├── MobaDev.Dashboard.slnx              # Eigenständige Solution (entkoppelt von MOBAflow)
+    ├── AISwarmX.Dashboard.slnx              # Eigenständige Solution (entkoppelt von MOBAflow)
     ├── src/
-    │   ├── MobaDev.Dashboard.Api/          # ASP.NET Core Minimal API (net10.0)
+    │   ├── AISwarmX.Dashboard.Api/          # ASP.NET Core Minimal API (net10.0)
     │   │   ├── Configuration/              # DashboardOptions (lokale Pfade via Env / Development.json)
     │   │   ├── Contracts/                  # Typisierte Read-Only DTOs (JSON)
     │   │   ├── Providers/                  # Isolierte Quellen-Adapter (Claude, Codex, Antigravity, Git/GH, Governance)
     │   │   └── Services/                   # Snapshot-Aggregator, TTL-Cache, optional SSE-Stream
-    │   └── MobaDev.Dashboard.Web/          # React + TypeScript + Vite (statisch auslieferbar)
+    │   └── AISwarmX.Dashboard.Web/          # React + TypeScript + Vite (statisch auslieferbar)
     └── tests/
-        └── MobaDev.Dashboard.Api.Tests/    # Unit-Tests gegen synthetische Fixtures (Whitelist, Drift, Graceful Degradation)
+        └── AISwarmX.Dashboard.Api.Tests/    # Unit-Tests gegen synthetische Fixtures (Whitelist, Drift, Graceful Degradation)
 ```
 
 ### Laufzeit- & Aktualisierungsmodell
@@ -150,8 +150,8 @@ Die Umsetzung läuft parallel zum `MOBAflow`-Refactoring in 3 kleinen, unabhäng
 | Slice | Risikoklasse | Scope & Deliverables | Verifikation |
 | --- | --- | --- | --- |
 | **Slice 1** *(dieses Dokument)* | `L` | `dashboard/DESIGN.md` + Referenz in `README.md` | Maintainer-Freigabe; optionale Sicherheitsprüfung durch `P1`/`P2` |
-| **Slice 2 — Backend API** | `M` | `MobaDev.Dashboard.Api` (`.NET 10` Minimal API, `127.0.0.1`), alle Read-Only-Provider, Whitelist-Filter, Drift-Hash-Check + `MobaDev.Dashboard.Api.Tests` gegen synthetische Fixtures; `.gitignore`-Ergänzung für `appsettings.Development.json` & `dist/` | `dotnet build`, `dotnet test`, Security-/Whitelist-Tests (kein Zugriff auf Denylist-Dateien), `sonar analyze secrets` |
-| **Slice 3 — React Frontend & Startskript** | `M` | `MobaDev.Dashboard.Web` (`React` + `TypeScript` + `Vite`) mit den 4 Kernansichten, Light/Dark-Toggle, deutschen Tooltips, Graceful-Degradation-Zuständen + `dashboard/Start-Dashboard.ps1` | `npm run build`, TypeScript-Check (`tsc --noEmit`), UI-Test gegen Mock-/Live-API (erst nach expliziter App-Start-Freigabe durch Maintainer) |
+| **Slice 2 — Backend API** | `M` | `AISwarmX.Dashboard.Api` (`.NET 10` Minimal API, `127.0.0.1`), alle Read-Only-Provider, Whitelist-Filter, Drift-Hash-Check + `AISwarmX.Dashboard.Api.Tests` gegen synthetische Fixtures; `.gitignore`-Ergänzung für `appsettings.Development.json` & `dist/` | `dotnet build`, `dotnet test`, Security-/Whitelist-Tests (kein Zugriff auf Denylist-Dateien), `sonar analyze secrets` |
+| **Slice 3 — React Frontend & Startskript** | `M` | `AISwarmX.Dashboard.Web` (`React` + `TypeScript` + `Vite`) mit den 4 Kernansichten, Light/Dark-Toggle, deutschen Tooltips, Graceful-Degradation-Zuständen + `dashboard/Start-Dashboard.ps1` | `npm run build`, TypeScript-Check (`tsc --noEmit`), UI-Test gegen Mock-/Live-API (erst nach expliziter App-Start-Freigabe durch Maintainer) |
 
 ---
 

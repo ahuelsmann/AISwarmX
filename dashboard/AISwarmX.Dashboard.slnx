@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AISwarmX.Dashboard.Api/AISwarmX.Dashboard.Api.csproj" />
+    <Project Path="src/AISwarmX.SwarmBus.Core/AISwarmX.SwarmBus.Core.csproj" />
+    <Project Path="src/AISwarmX.SwarmBus.Mcp/AISwarmX.SwarmBus.Mcp.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AISwarmX.Dashboard.Api.Tests/AISwarmX.Dashboard.Api.Tests.csproj" />
+    <Project Path="tests/AISwarmX.SwarmBus.Tests/AISwarmX.SwarmBus.Tests.csproj" />
+  </Folder>
+</Solution>

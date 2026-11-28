@@ -159,7 +159,7 @@
   },
   "dashboard": {
     "bindUrl": "http://127.0.0.1:5179",
-    "staticWebRootPath": "dashboard/src/MobaDev.Dashboard.Web/dist",
+    "staticWebRootPath": "dashboard/src/AISwarmX.Dashboard.Web/dist",
     "localCacheTtlSeconds": 8,
     "githubCacheTtlSeconds": 45
   }

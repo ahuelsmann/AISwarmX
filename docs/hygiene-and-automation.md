@@ -77,7 +77,7 @@ Keeps the read-only local Dashboard (`http://127.0.0.1:5179`) alive independentl
 # Launch detached if not already running (idempotent, 0 LLM tokens)
 pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\dashboard\Start-Dashboard.ps1 -Background
 
-# Register per-user Windows logon task (MOBAdev-Dashboard-AutoStart)
+# Register per-user Windows logon task (AISwarmX-Dashboard-AutoStart)
 pwsh -NoProfile -File C:\Repo\ahuelsmann\MOBAdev\dashboard\Start-Dashboard.ps1 -RegisterAutoStart
 
 # Remove Windows logon task

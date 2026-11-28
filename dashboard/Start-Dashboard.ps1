@@ -20,11 +20,12 @@ $ErrorActionPreference = 'Stop'
 
 $DashboardRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ScriptPath = $MyInvocation.MyCommand.Path
-$AutoStartTaskName = 'MOBAdev-Dashboard-AutoStart'
-$ApiDir = Join-Path $DashboardRoot 'src\MobaDev.Dashboard.Api'
-$ApiProject = Join-Path $ApiDir 'MobaDev.Dashboard.Api.csproj'
-$ApiExe = Join-Path $ApiDir 'bin\Release\net10.0\MobaDev.Dashboard.Api.exe'
-$WebRoot = Join-Path $DashboardRoot 'src\MobaDev.Dashboard.Web'
+$AutoStartTaskName = 'AISwarmX-Dashboard-AutoStart'
+$LegacyAutoStartTaskName = 'MOBAdev-Dashboard-AutoStart'
+$ApiDir = Join-Path $DashboardRoot 'src\AISwarmX.Dashboard.Api'
+$ApiProject = Join-Path $ApiDir 'AISwarmX.Dashboard.Api.csproj'
+$ApiExe = Join-Path $ApiDir 'bin\Release\net10.0\AISwarmX.Dashboard.Api.exe'
+$WebRoot = Join-Path $DashboardRoot 'src\AISwarmX.Dashboard.Web'
 $WebDistIndex = Join-Path $WebRoot 'dist\index.html'
 $BindUrl = "http://127.0.0.1:$Port"
 
@@ -62,8 +63,38 @@ function Ensure-DashboardBuilt {
     }
 }
 
-if ($RegisterAutoStart) {
-    Ensure-DashboardBuilt
+function Find-ScheduledTask {
+    param([string]$TaskName)
+    try {
+        return (Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop)
+    }
+    catch {
+        $isNotFound = ($_.CategoryInfo.Category -eq [System.Management.Automation.ErrorCategory]::ObjectNotFound) -or
+            ($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*') -or
+            ($_.Exception -is [System.IO.FileNotFoundException])
+        if ($isNotFound) {
+            return $null
+        }
+        throw
+    }
+}
+
+function Remove-VerifiedScheduledTask {
+    param([string]$TaskName)
+    if ($null -eq (Find-ScheduledTask -TaskName $TaskName)) {
+        return $false
+    }
+
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
+    if ($null -ne (Find-ScheduledTask -TaskName $TaskName)) {
+        throw "Scheduled Task '$TaskName' still exists after Unregister-ScheduledTask."
+    }
+
+    return $true
+}
+
+function Register-DashboardAutoStartTask {
+    $hadNewTask = $null -ne (Find-ScheduledTask -TaskName $AutoStartTaskName)
     $action = New-ScheduledTaskAction -Execute $ApiExe -Argument "--urls=$BindUrl" -WorkingDirectory $ApiDir
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
     $settings = New-ScheduledTaskSettingsSet `
@@ -79,14 +110,63 @@ if ($RegisterAutoStart) {
         -Trigger $trigger `
         -Settings $settings `
         -Description 'Starts the read-only local AISwarmX Agent Network Dashboard (127.0.0.1:5179) detached at logon.' `
-        -Force | Out-Null
+        -Force `
+        -ErrorAction Stop | Out-Null
+
+    try {
+        if (Remove-VerifiedScheduledTask -TaskName $LegacyAutoStartTaskName) {
+            Write-Host "Migrated legacy task '$LegacyAutoStartTaskName' to '$AutoStartTaskName'." -ForegroundColor Yellow
+        }
+    }
+    catch {
+        $removeEx = $_.Exception
+        if (-not $hadNewTask) {
+            try {
+                [void](Remove-VerifiedScheduledTask -TaskName $AutoStartTaskName)
+            }
+            catch {
+                throw [System.AggregateException]::new(
+                    "Failed to remove legacy task '$LegacyAutoStartTaskName' ($($removeEx.Message)) AND failed to roll back '$AutoStartTaskName' ($($_.Exception.Message)).",
+                    @($removeEx, $_.Exception))
+            }
+        }
+        throw
+    }
+}
+
+function Migrate-LegacyAutoStartIfPresent {
+    if ($Port -ne 5179) {
+        return
+    }
+
+    $legacyTask = Find-ScheduledTask -TaskName $LegacyAutoStartTaskName
+    if ($null -eq $legacyTask) {
+        return
+    }
+
+    $newTask = Find-ScheduledTask -TaskName $AutoStartTaskName
+    if ($null -eq $newTask) {
+        Ensure-DashboardBuilt
+        Register-DashboardAutoStartTask
+    }
+    elseif (Remove-VerifiedScheduledTask -TaskName $LegacyAutoStartTaskName) {
+        Write-Host "Removed duplicate legacy task '$LegacyAutoStartTaskName'." -ForegroundColor Yellow
+    }
+}
+
+if ($RegisterAutoStart) {
+    Ensure-DashboardBuilt
+    Register-DashboardAutoStartTask
     Write-Host "Registered Windows Scheduled Task '$AutoStartTaskName' (AtLogOn -> $BindUrl)." -ForegroundColor Green
     exit 0
 }
 
 if ($UnregisterAutoStart) {
-    Unregister-ScheduledTask -TaskName $AutoStartTaskName -Confirm:$false -ErrorAction SilentlyContinue
-    Write-Host "Unregistered Windows Scheduled Task '$AutoStartTaskName'." -ForegroundColor Yellow
+    foreach ($taskName in @($AutoStartTaskName, $LegacyAutoStartTaskName)) {
+        if (Remove-VerifiedScheduledTask -TaskName $taskName) {
+            Write-Host "Unregistered Windows Scheduled Task '$taskName'." -ForegroundColor Yellow
+        }
+    }
     exit 0
 }
 
@@ -119,7 +199,49 @@ function Start-BrowserWhenReady {
 
 $env:Dashboard__BindUrl = $BindUrl
 
+function Stop-LegacyDashboardForTarget {
+    $legacyApiRoot = [System.IO.Path]::GetFullPath((Join-Path $DashboardRoot 'src\MobaDev.Dashboard.Api'))
+    $legacyApiDirPrefix = $legacyApiRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    $legacyProcs = @(Get-Process -Name 'MobaDev.Dashboard.Api' -ErrorAction SilentlyContinue)
+    if ($legacyProcs.Count -eq 0) {
+        return
+    }
+
+    $listenerPids = @(
+        Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique
+    )
+    foreach ($proc in $legacyProcs) {
+        if ($listenerPids -notcontains $proc.Id) {
+            continue
+        }
+
+        $procPath = $null
+        try {
+            $procPath = $proc.Path
+        }
+        catch {
+            $procPath = $null
+        }
+
+        if ([string]::IsNullOrWhiteSpace($procPath)) {
+            continue
+        }
+
+        $fullProcPath = [System.IO.Path]::GetFullPath($procPath)
+        if (-not $fullProcPath.StartsWith($legacyApiDirPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+
+        Stop-Process -Id $proc.Id -Force -ErrorAction Stop
+        Write-Host "Stopped verified legacy MobaDev.Dashboard.Api (PID=$($proc.Id)) on port $Port." -ForegroundColor Yellow
+    }
+}
+
 if ($Background) {
+    Migrate-LegacyAutoStartIfPresent
+    Stop-LegacyDashboardForTarget
+
     $healthUrl = "$BindUrl/api/health"
     if (Test-DashboardHealth -ProbeUrl $healthUrl) {
         Write-Host "AISwarmX Dashboard already running at $BindUrl" -ForegroundColor Green
@@ -133,7 +255,7 @@ if ($Background) {
 
     $launchedVia = 'Start-Process'
     $task = if ($Port -eq 5179) {
-        Get-ScheduledTask -TaskName $AutoStartTaskName -ErrorAction SilentlyContinue
+        Find-ScheduledTask -TaskName $AutoStartTaskName
     } else {
         $null
     }
