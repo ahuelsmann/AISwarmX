@@ -5,6 +5,7 @@ import type { LiveConnectionState } from '../api/swarmHubClient';
 import { getStatusStyles } from '../theme/mobaFluentTheme';
 import type {
   MonitorInfo,
+  SourceHealth,
   SwarmBusMessageInfo,
   SwarmBusResponse,
   WorkflowRunInfo
@@ -170,6 +171,7 @@ const useStyles = makeStyles({
 interface SwarmActivityPulseBarProps {
   swarmBus?: SwarmBusResponse | null;
   workflowRuns?: readonly WorkflowRunInfo[] | null;
+  workflowRunsSource?: SourceHealth | null;
   monitors?: readonly MonitorInfo[] | null;
   liveConnectionState: LiveConnectionState;
   nowMs: number;
@@ -177,9 +179,21 @@ interface SwarmActivityPulseBarProps {
   onOpenCommunication: () => void;
 }
 
+function isSourceStaleOrDegraded(source?: SourceHealth | null): boolean {
+  if (!source) {
+    return false;
+  }
+  return (
+    source.status === 'degraded' ||
+    source.status === 'unavailable' ||
+    Boolean(source.fromCache)
+  );
+}
+
 export function SwarmActivityPulseBar({
   swarmBus,
   workflowRuns,
+  workflowRunsSource,
   monitors,
   liveConnectionState,
   nowMs,
@@ -190,6 +204,19 @@ export function SwarmActivityPulseBar({
   const safeMonitors = monitors ?? [];
   const workingMonitors = safeMonitors.filter((m) => m.state === 'busy').length;
   const totalMonitors = safeMonitors.length;
+
+  const busStale = isSourceStaleOrDegraded(swarmBus?.source);
+  const ciStale = isSourceStaleOrDegraded(workflowRunsSource);
+  const hasFeedWarning = busStale || ciStale;
+  const isCachedOnly =
+    hasFeedWarning &&
+    (Boolean(swarmBus?.source?.fromCache) || Boolean(workflowRunsSource?.fromCache)) &&
+    swarmBus?.source?.status !== 'unavailable' &&
+    workflowRunsSource?.status !== 'unavailable';
+  const feedWarningLabel = isCachedOnly ? 'Cached Feed' : 'Feed Degraded';
+  const feedWarningNotice = [swarmBus?.source?.notice, workflowRunsSource?.notice]
+    .filter((n): n is string => Boolean(n && n.trim()))
+    .join(' · ');
 
   const connectionTone =
     liveConnectionState === 'live'
@@ -235,21 +262,32 @@ export function SwarmActivityPulseBar({
               aria-hidden="true"
             />
             <StatusBadge tone={connectionTone}>{connectionLabel}</StatusBadge>
+            {hasFeedWarning && (
+              <StatusBadge
+                tone="warn"
+                title={feedWarningNotice || 'SwarmBus or CI Actions feed is degraded or cached.'}
+              >
+                {feedWarningLabel}
+              </StatusBadge>
+            )}
             <Text className={`${styles.monitorCount} tabular`}>
               {workingMonitors}/{totalMonitors} working
             </Text>
           </div>
 
           <div className={styles.sparklineGroup}>
-            <span className={`${styles.sparklineCaption} tabular`}>
-              6h activity ({totalEvents})
+            <span
+              className={`${styles.sparklineCaption} tabular`}
+              title="Bounded recent feed window: up to 20 SwarmBus messages and 12 GitHub Actions runs over the last 6 hours."
+            >
+              Recent window ({totalEvents} · up to 20 bus / 12 CI in 6h)
             </span>
             <svg
               width={svgWidth}
               height={svgHeight}
               viewBox={`0 0 ${svgWidth} ${svgHeight}`}
               role="img"
-              aria-label={`Activity sparkline over last 6 hours: ${totalEvents} events across 24 buckets`}
+              aria-label={`Recent activity sparkline over 6 hours: ${totalEvents} sampled events across 24 buckets (bounded window: up to 20 bus, 12 CI)`}
             >
               {buckets.map((bucket, idx) => {
                 const height =

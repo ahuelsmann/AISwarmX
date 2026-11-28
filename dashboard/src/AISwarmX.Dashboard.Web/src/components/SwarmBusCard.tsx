@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type Ref } from 'react';
 import { Badge, Button, Card, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { Chat16Regular, LockClosed16Regular } from '@fluentui/react-icons';
 import type { SwarmBusResponse } from '../types/dashboard';
@@ -7,6 +7,7 @@ interface SwarmBusCardProps {
   swarmBus?: SwarmBusResponse | null;
   nowMs: number;
   liveConnectionState?: 'live' | 'reconnecting' | 'polling';
+  sectionRef?: Ref<HTMLElement>;
 }
 
 type StatusFilter = 'all' | 'unread' | 'acked';
@@ -150,7 +151,12 @@ function formatRemainingUtc(iso: string, nowMs: number): string {
   return remMinutesRemainder > 0 ? `in ${remHours}h ${remMinutesRemainder}m` : `in ${remHours}h`;
 }
 
-export function SwarmBusCard({ swarmBus, nowMs, liveConnectionState = 'polling' }: SwarmBusCardProps) {
+export function SwarmBusCard({
+  swarmBus,
+  nowMs,
+  liveConnectionState = 'polling',
+  sectionRef
+}: SwarmBusCardProps) {
   const styles = useStyles();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
@@ -169,7 +175,13 @@ export function SwarmBusCard({ swarmBus, nowMs, liveConnectionState = 'polling' 
   });
 
   return (
-    <section className={styles.page} aria-label="Swarm Bus Cross-Tool MCP Feed">
+    <section
+      ref={sectionRef}
+      tabIndex={-1}
+      style={{ outline: 'none' }}
+      className={styles.page}
+      aria-label="Swarm Bus Cross-Tool MCP Feed"
+    >
       <Card className={styles.card}>
         <div className={styles.header}>
           <div className={styles.titleGroup}>

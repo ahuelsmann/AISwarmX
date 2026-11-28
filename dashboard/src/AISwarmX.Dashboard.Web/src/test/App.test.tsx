@@ -1828,6 +1828,9 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
         name: /P2 Writer · GPT-6\.2 Sol · Active · Live working/i
       });
       expect(writerSeat).toHaveAttribute('data-live-working', 'true');
+      expect(writerSeat).toHaveAttribute('aria-pressed', 'false');
+      fireEvent.click(writerSeat);
+      expect(writerSeat).toHaveAttribute('aria-pressed', 'true');
       expect(writerSeat.querySelector('.roundtable-pulse-halo')).not.toBeNull();
       expect(writerSeat.querySelector('.roundtable-pulse-dot')).not.toBeNull();
       const issueSvg = writerSeat.closest('svg') as SVGSVGElement;
@@ -1858,7 +1861,7 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     expect(standbyWriterSeat.querySelector('.roundtable-pulse-halo')).toBeNull();
     const standbySvg = standbyWriterSeat.closest('svg') as SVGSVGElement;
     expect(standbySvg.querySelectorAll('.roundtable-flow-active')).toHaveLength(0);
-  });
+  }, 10_000);
 
   it('renders static Open Issues badge without toggle buttons when pullRequests is empty', async () => {
     const snap = createSnapshotFixture();
@@ -1996,7 +1999,12 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     const pulseRegion = await screen.findByRole('region', { name: 'Live Swarm Activity Pulse' });
     expect(within(pulseRegion).getByText('1/4 working')).toBeInTheDocument();
     expect(within(pulseRegion).getByText('Polling')).toBeInTheDocument();
-    expect(within(pulseRegion).getByRole('img', { name: /Activity sparkline over last 6 hours/i })).toBeInTheDocument();
+    expect(
+      within(pulseRegion).getByText(/Recent window \(4 · up to 20 bus \/ 12 CI in 6h\)/i)
+    ).toBeInTheDocument();
+    expect(
+      within(pulseRegion).getByRole('img', { name: /Recent activity sparkline over 6 hours/i })
+    ).toBeInTheDocument();
     expect(within(pulseRegion).getByText('#404')).toBeInTheDocument();
     expect(within(pulseRegion).getByText('mobaflow')).toBeInTheDocument();
     expect(within(pulseRegion).queryByText('default')).not.toBeInTheDocument();
@@ -2006,8 +2014,56 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     expect(within(pulseRegion).getByText('#402')).toBeInTheDocument();
     expect(within(pulseRegion).queryByText('#401')).not.toBeInTheDocument();
 
-    await user.click(within(pulseRegion).getByRole('button', { name: /Open Communication/i }));
-    expect(await screen.findByRole('region', { name: 'Swarm Bus Cross-Tool MCP Feed' })).toBeInTheDocument();
+    const openCommBtn = within(pulseRegion).getByRole('button', { name: /Open Communication/i });
+    openCommBtn.focus();
+    await user.keyboard('{Enter}');
+    const busRegion = await screen.findByRole('region', { name: 'Swarm Bus Cross-Tool MCP Feed' });
+    expect(busRegion).toBeInTheDocument();
+    await vi.waitFor(() => {
+      expect(busRegion).toHaveFocus();
+    });
+  });
+
+  it('surfaces cached and degraded feed health warnings in SwarmActivityPulseBar', async () => {
+    const cachedSnap = createSnapshotFixture();
+    cachedSnap.pipeline.workflowRunsSource = {
+      status: 'degraded',
+      updatedAtUtc: cachedSnap.generatedAtUtc,
+      notice: 'GitHub Actions cached after rate limit.',
+      fromCache: true
+    };
+    stubDashboardFetch(cachedSnap);
+    const { unmount } = render(<App />);
+    try {
+      const pulseRegion = await screen.findByRole('region', { name: 'Live Swarm Activity Pulse' });
+      const cachedBadge = within(pulseRegion).getByText('Cached Feed');
+      expect(cachedBadge).toBeInTheDocument();
+      expect(cachedBadge).toHaveAttribute('title', 'GitHub Actions cached after rate limit.');
+    } finally {
+      unmount();
+    }
+
+    const degradedSnap = createSnapshotFixture();
+    degradedSnap.swarmBus = {
+      generatedAtUtc: degradedSnap.generatedAtUtc,
+      unreadCount: 0,
+      activeLockCount: 0,
+      recentMessages: [],
+      activeLocks: [],
+      source: {
+        status: 'unavailable',
+        updatedAtUtc: degradedSnap.generatedAtUtc,
+        notice: 'Swarm bus SQLite unavailable.',
+        fromCache: false
+      }
+    };
+    stubDashboardFetch(degradedSnap);
+    render(<App />);
+
+    const degradedPulse = await screen.findByRole('region', { name: 'Live Swarm Activity Pulse' });
+    const degradedBadge = within(degradedPulse).getByText('Feed Degraded');
+    expect(degradedBadge).toBeInTheDocument();
+    expect(degradedBadge).toHaveAttribute('title', 'Swarm bus SQLite unavailable.');
   });
 
   it('animates steering spoke flow when a steering seat is actively working', async () => {

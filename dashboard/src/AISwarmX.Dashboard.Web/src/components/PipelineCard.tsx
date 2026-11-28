@@ -208,6 +208,7 @@ const useStyles = makeStyles({
     justifyContent: 'space-between',
     gap: '8px',
     marginTop: '2px',
+    marginBottom: '6px',
     paddingTop: '6px',
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`
   },

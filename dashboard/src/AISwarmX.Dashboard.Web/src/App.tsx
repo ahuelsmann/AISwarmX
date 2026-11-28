@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   FluentProvider,
   Link,
@@ -51,8 +51,11 @@ const useStyles = makeStyles({
   },
   hygieneSkeletonGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
-    gap: '14px'
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: '14px',
+    '@media (max-width: 859px)': {
+      gridTemplateColumns: 'minmax(0, 1fr)'
+    }
   },
   monitorsRow: {
     display: 'grid',
@@ -124,6 +127,23 @@ export function App() {
   );
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [liveConnectionState, setLiveConnectionState] = useState<LiveConnectionState>('polling');
+  const shouldFocusCommunicationRef = useRef(false);
+  const communicationSectionRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (activeTab !== 'communication' || !shouldFocusCommunicationRef.current || !snapshot) {
+      return;
+    }
+    shouldFocusCommunicationRef.current = false;
+    window.requestAnimationFrame(() => {
+      if (communicationSectionRef.current) {
+        communicationSectionRef.current.focus();
+        return;
+      }
+      const activeTabEl = document.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+      activeTabEl?.focus();
+    });
+  }, [activeTab, snapshot]);
 
   const mergeIfFresher = (
     prev: DashboardSnapshot | null,
@@ -340,11 +360,15 @@ export function App() {
               <SwarmActivityPulseBar
                 swarmBus={snapshot.swarmBus}
                 workflowRuns={snapshot.pipeline.workflowRuns}
+                workflowRunsSource={snapshot.pipeline.workflowRunsSource}
                 monitors={snapshot.monitors.monitors}
                 liveConnectionState={liveConnectionState}
                 nowMs={nowMs}
                 isDark={isDark}
-                onOpenCommunication={() => setActiveTab('communication')}
+                onOpenCommunication={() => {
+                  shouldFocusCommunicationRef.current = true;
+                  setActiveTab('communication');
+                }}
               />
 
               <MainLandingTickerCard pipeline={snapshot.pipeline} nowMs={nowMs} />
@@ -383,6 +407,7 @@ export function App() {
               swarmBus={snapshot.swarmBus}
               nowMs={nowMs}
               liveConnectionState={liveConnectionState}
+              sectionRef={communicationSectionRef}
             />
           )}
 

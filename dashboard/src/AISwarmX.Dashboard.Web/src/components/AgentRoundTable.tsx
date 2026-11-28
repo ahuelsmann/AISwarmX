@@ -339,7 +339,7 @@ function shortStatusLabel(status: string): string {
 }
 
 function shortCenterSub(sub: string): string {
-  if (sub.length > 21) return `${sub.slice(0, 19).trimEnd()}…`;
+  if (sub.length > 17) return `${sub.slice(0, 15).trimEnd()}…`;
   return sub;
 }
 
@@ -994,6 +994,7 @@ export function AgentRoundTable({
                 style={{ cursor: 'pointer' }}
                 tabIndex={0}
                 role="button"
+                aria-pressed={selectedKey === seat.key}
                 aria-label={`${seat.participant.profile} ${seat.participant.role} · ${seat.participant.model} · ${seat.participant.status}${isLiveWorking ? ' · Live working' : ''}`}
                 onMouseEnter={() => setHoveredKey(seat.key)}
                 onMouseLeave={() => setHoveredKey(null)}
