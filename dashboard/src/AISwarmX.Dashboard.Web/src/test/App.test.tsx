@@ -373,7 +373,9 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           participants: [],
           boardDriftReason: 'Closed on GitHub — move to Done on Kanban'
         }
-      ]
+      ],
+      workflowRuns: [],
+      workflowRunsSource: { status: 'ok', updatedAtUtc: nowIso, fromCache: false }
     },
     hygiene: {
       generatedAtUtc: nowIso,
@@ -475,6 +477,14 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           linkedPrNumber: 492
         }
       ]
+    },
+    swarmBus: {
+      generatedAtUtc: nowIso,
+      unreadCount: 0,
+      activeLockCount: 0,
+      recentMessages: [],
+      activeLocks: [],
+      source: { status: 'ok', updatedAtUtc: nowIso, fromCache: false }
     },
     ...overrides
   };
@@ -2064,6 +2074,57 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     const degradedBadge = within(degradedPulse).getByText('Feed Degraded');
     expect(degradedBadge).toBeInTheDocument();
     expect(degradedBadge).toHaveAttribute('title', 'Swarm bus SQLite unavailable.');
+  });
+
+  it('flags cold-start null CI source as degraded while keeping authoritative empty CI healthy in SwarmActivityPulseBar', async () => {
+    const coldFailSnap = createSnapshotFixture();
+    coldFailSnap.pipeline.workflowRuns = null;
+    coldFailSnap.pipeline.workflowRunsSource = null;
+    coldFailSnap.swarmBus = {
+      generatedAtUtc: coldFailSnap.generatedAtUtc,
+      unreadCount: 0,
+      activeLockCount: 0,
+      recentMessages: [],
+      activeLocks: [],
+      source: { status: 'ok', updatedAtUtc: coldFailSnap.generatedAtUtc, fromCache: false }
+    };
+    stubDashboardFetch(coldFailSnap);
+    const { unmount } = render(<App />);
+    try {
+      const pulseRegion = await screen.findByRole('region', { name: 'Live Swarm Activity Pulse' });
+      const degradedBadge = within(pulseRegion).getByText('Feed Degraded');
+      expect(degradedBadge).toBeInTheDocument();
+      expect(degradedBadge).toHaveAttribute('title', 'GitHub Actions CI feed unavailable.');
+      expect(within(pulseRegion).getByText(/up to 20 bus in 6h · CI unavailable/i)).toBeInTheDocument();
+      expect(
+        within(pulseRegion).getByRole('img', { name: /CI feed unavailable/i })
+      ).toBeInTheDocument();
+    } finally {
+      unmount();
+    }
+
+    const emptyHealthySnap = createSnapshotFixture();
+    emptyHealthySnap.pipeline.workflowRuns = [];
+    emptyHealthySnap.pipeline.workflowRunsSource = {
+      status: 'ok',
+      updatedAtUtc: emptyHealthySnap.generatedAtUtc,
+      fromCache: false
+    };
+    emptyHealthySnap.swarmBus = {
+      generatedAtUtc: emptyHealthySnap.generatedAtUtc,
+      unreadCount: 0,
+      activeLockCount: 0,
+      recentMessages: [],
+      activeLocks: [],
+      source: { status: 'ok', updatedAtUtc: emptyHealthySnap.generatedAtUtc, fromCache: false }
+    };
+    stubDashboardFetch(emptyHealthySnap);
+    render(<App />);
+
+    const healthyPulse = await screen.findByRole('region', { name: 'Live Swarm Activity Pulse' });
+    expect(within(healthyPulse).queryByText('Feed Degraded')).not.toBeInTheDocument();
+    expect(within(healthyPulse).queryByText('Cached Feed')).not.toBeInTheDocument();
+    expect(within(healthyPulse).getByText(/up to 20 bus \/ 12 CI in 6h/i)).toBeInTheDocument();
   });
 
   it('animates steering spoke flow when a steering seat is actively working', async () => {

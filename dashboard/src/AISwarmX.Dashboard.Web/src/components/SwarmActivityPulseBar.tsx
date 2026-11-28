@@ -205,16 +205,23 @@ export function SwarmActivityPulseBar({
   const workingMonitors = safeMonitors.filter((m) => m.state === 'busy').length;
   const totalMonitors = safeMonitors.length;
 
-  const busStale = isSourceStaleOrDegraded(swarmBus?.source);
-  const ciStale = isSourceStaleOrDegraded(workflowRunsSource);
+  const busSource = swarmBus?.source ?? null;
+  const ciSource = workflowRunsSource ?? null;
+  const busUnavailable = !busSource || busSource.status === 'unavailable';
+  const ciUnavailable = !ciSource || ciSource.status === 'unavailable';
+  const busStale = busUnavailable || isSourceStaleOrDegraded(busSource);
+  const ciStale = ciUnavailable || isSourceStaleOrDegraded(ciSource);
   const hasFeedWarning = busStale || ciStale;
   const isCachedOnly =
     hasFeedWarning &&
-    (Boolean(swarmBus?.source?.fromCache) || Boolean(workflowRunsSource?.fromCache)) &&
-    swarmBus?.source?.status !== 'unavailable' &&
-    workflowRunsSource?.status !== 'unavailable';
+    !busUnavailable &&
+    !ciUnavailable &&
+    (Boolean(busSource?.fromCache) || Boolean(ciSource?.fromCache));
   const feedWarningLabel = isCachedOnly ? 'Cached Feed' : 'Feed Degraded';
-  const feedWarningNotice = [swarmBus?.source?.notice, workflowRunsSource?.notice]
+  const feedWarningNotice = [
+    busSource?.notice || (!busSource ? 'SwarmBus feed unavailable.' : ''),
+    ciSource?.notice || (!ciSource ? 'GitHub Actions CI feed unavailable.' : '')
+  ]
     .filter((n): n is string => Boolean(n && n.trim()))
     .join(' · ');
 
@@ -241,6 +248,23 @@ export function SwarmActivityPulseBar({
   const maxTotal = Math.max(1, ...buckets.map((b) => b.total));
   const totalEvents = buckets.reduce((acc, b) => acc + b.total, 0);
   const latestHandoffs = (swarmBus?.recentMessages ?? []).slice(0, 3);
+
+  const sparklineCaption =
+    busUnavailable && ciUnavailable
+      ? `Recent window (${totalEvents} · bus & CI unavailable)`
+      : ciUnavailable
+        ? `Recent window (${totalEvents} · up to 20 bus in 6h · CI unavailable)`
+        : busUnavailable
+          ? `Recent window (${totalEvents} · bus unavailable · up to 12 CI in 6h)`
+          : `Recent window (${totalEvents} · up to 20 bus / 12 CI in 6h)`;
+  const sparklineAriaLabel =
+    busUnavailable && ciUnavailable
+      ? `Recent activity sparkline over 6 hours: ${totalEvents} sampled events across 24 buckets (incomplete sample: SwarmBus and CI feeds unavailable)`
+      : ciUnavailable
+        ? `Recent activity sparkline over 6 hours: ${totalEvents} sampled events across 24 buckets (incomplete sample: up to 20 bus, CI feed unavailable)`
+        : busUnavailable
+          ? `Recent activity sparkline over 6 hours: ${totalEvents} sampled events across 24 buckets (incomplete sample: SwarmBus feed unavailable, up to 12 CI)`
+          : `Recent activity sparkline over 6 hours: ${totalEvents} sampled events across 24 buckets (bounded window: up to 20 bus, 12 CI)`;
 
   const svgWidth = 120;
   const svgHeight = 24;
@@ -280,14 +304,14 @@ export function SwarmActivityPulseBar({
               className={`${styles.sparklineCaption} tabular`}
               title="Bounded recent feed window: up to 20 SwarmBus messages and 12 GitHub Actions runs over the last 6 hours."
             >
-              Recent window ({totalEvents} · up to 20 bus / 12 CI in 6h)
+              {sparklineCaption}
             </span>
             <svg
               width={svgWidth}
               height={svgHeight}
               viewBox={`0 0 ${svgWidth} ${svgHeight}`}
               role="img"
-              aria-label={`Recent activity sparkline over 6 hours: ${totalEvents} sampled events across 24 buckets (bounded window: up to 20 bus, 12 CI)`}
+              aria-label={sparklineAriaLabel}
             >
               {buckets.map((bucket, idx) => {
                 const height =
