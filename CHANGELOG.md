@@ -1,9 +1,27 @@
 # Changelog
 
-All notable changes to **MOBAdev** and the local **MOBAdev Agent Swarm Gen#3 Dashboard** are documented in this file.
+All notable changes to **AISwarmX** (formerly **MOBAdev**) and the local **AISwarmX Agent Network Dashboard** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
+
+## [3.15.0] - 2026-11-28
+
+### Added & Changed
+- **AISwarmX Gen3.5 Rebrand & Consistent Solution Rename (`20c2546`, `081fde9`, `b7f1ea2`):**
+  - Renamed `dashboard/MobaDev.Dashboard.slnx` to `dashboard/AISwarmX.Dashboard.slnx`, all 6 projects/directories/namespaces (`AISwarmX.Dashboard.Api`, `AISwarmX.Dashboard.Web`, `AISwarmX.SwarmBus.Core`, `AISwarmX.SwarmBus.Mcp`, `AISwarmX.Dashboard.Api.Tests`, `AISwarmX.SwarmBus.Tests`), `package.json` (`aiswarmx-dashboard-web`), and `Start-Dashboard.ps1` banners & ScheduledTask (`MOBAdev-Dashboard-AutoStart` -> `AISwarmX-Dashboard-AutoStart` with safe rollback, directory-boundary process cleanup, and 6 mocked `pwsh` regression tests).
+  - Preserved runtime backwards compatibility for existing local paths (`C:\Repo\ahuelsmann\MOBAdev`, `%LOCALAPPDATA%\MOBAdev\swarm-bus.db`), `MOBADEV_*` env vars, and legacy cookies/localStorage.
+- **Repo-Agnostic Workspace Configuration (`cf2edc8`, `081fde9`, Refs #57):**
+  - Added `swarm.config.json` schema, loader, dual-prefix monitor support, and `presets/mobaflow.swarm.json` preset for multi-repo operation.
+- **.NET 10 SwarmBus Core, MCP Server & SignalR Live Push (`aeff032`, `dd9352e`, `74eec83`, `f1606c6`, Refs #56):**
+  - Implemented `AISwarmX.SwarmBus.Core` (SQLite WAL bus, file locks, wake leases) and `AISwarmX.SwarmBus.Mcp` (stdio MCP server + CLI, Codex `turn/steer` wake, Claude live drain hook, fail-closed reparse handling & fast EOF drain).
+  - Added SignalR live push hub (`SwarmHub`) and SwarmBus WAL broadcaster in `AISwarmX.Dashboard.Api` for real-time UI updates.
+- **Live Multi-Repo CI Pipelines, Headless Claude Detection & Compact Round Table (`1f6d2d3`, `131669e`):**
+  - Added live multi-repo GitHub Actions CI Pipelines strip (`AISwarmX`, `MOBAflow`, `SentiX`) with independent `_lastSuccessfulWorkflowRuns` cache and `cached` badge fallback.
+  - Added headless `claude -p` tri-state transcript detection and pulsing halo animation on actively working Round Table agents.
+  - Removed obsolete `Round Table / Pills` and `Arrows: On/Off` toggles (arrows always visible) and compacted Issue Frame + `AgentRoundTable` SVG (`CARD_H=48`, `R_TABLE=46`, `R_ORBIT=84`, hover/click inspector footer).
+
+---
 
 ## [3.14.0] - 2026-11-26
 
