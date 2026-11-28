@@ -123,6 +123,7 @@ interface StatusHeaderProps {
   onTabChange: (tab: DashboardTab) => void;
   driftBadgeCount: number;
   communicationUnreadCount?: number;
+  hygieneWarningCount?: number;
   isDark: boolean;
 }
 
@@ -143,6 +144,7 @@ export function StatusHeader({
   onTabChange,
   driftBadgeCount,
   communicationUnreadCount = 0,
+  hygieneWarningCount = 0,
   isDark
 }: StatusHeaderProps) {
   const styles = useStyles();
@@ -395,6 +397,14 @@ export function StatusHeader({
                 <span>Communication</span>
                 {communicationUnreadCount > 0 && (
                   <CounterBadge count={communicationUnreadCount} color="informative" size="small" />
+                )}
+              </span>
+            </Tab>
+            <Tab value="hygiene">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span>Hygiene</span>
+                {hygieneWarningCount > 0 && (
+                  <CounterBadge count={hygieneWarningCount} color="important" size="small" />
                 )}
               </span>
             </Tab>

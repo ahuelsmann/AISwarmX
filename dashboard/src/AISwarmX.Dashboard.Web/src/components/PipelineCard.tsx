@@ -372,11 +372,11 @@ export function PipelineCard({ pipeline, monitors, nowMs, isDark }: PipelineCard
   const effectiveViewMode: PipelineViewMode = hasPullRequests ? viewMode : 'issues';
 
   return (
-    <Card className={styles.card} appearance="filled" aria-label="Task and PR Pipeline MOBAflow">
+    <Card className={styles.card} appearance="filled" aria-label="Task and CI Pipeline">
       <div className={styles.header}>
         <div className={styles.titleGroup}>
           <BranchRequest20Regular aria-hidden="true" />
-          <h2 className={styles.title}>Task &amp; PR Pipeline</h2>
+          <h2 className={styles.title}>Task &amp; CI Pipeline</h2>
           <ContextChip mono>Repository: {pipeline.repository}</ContextChip>
         </div>
 

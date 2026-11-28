@@ -196,6 +196,7 @@ export function HygieneAndSyncPanel({
       {/* Rules State · Actual vs. Target */}
       <Card
         id="section-rules"
+        tabIndex={-1}
         className={styles.card}
         appearance="filled"
         aria-label="Rules State Actual vs Target"
@@ -253,6 +254,7 @@ export function HygieneAndSyncPanel({
       {/* Session Hygiene · Actual vs. Target */}
       <Card
         id="section-sessions"
+        tabIndex={-1}
         className={styles.card}
         appearance="filled"
         aria-label="Session Hygiene per Tool"
@@ -310,6 +312,7 @@ export function HygieneAndSyncPanel({
       {/* Git Worktrees (MOBAflow) */}
       <Card
         id="section-worktrees"
+        tabIndex={-1}
         className={styles.card}
         appearance="filled"
         aria-label="Git Worktrees MOBAflow"
@@ -417,6 +420,7 @@ export function HygieneAndSyncPanel({
       {/* Branch Hygiene (MOBAflow & AISwarmX) */}
       <Card
         id="section-branches"
+        tabIndex={-1}
         className={styles.card}
         appearance="filled"
         aria-label="Branch Hygiene MOBAflow and AISwarmX"

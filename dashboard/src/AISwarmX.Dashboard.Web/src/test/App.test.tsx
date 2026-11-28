@@ -723,7 +723,8 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     expect(screen.getByText('Issue #366')).toBeInTheDocument();
     expect(screen.getByText('2 Agents')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Round table of 2 Agents for #492' })).toBeInTheDocument();
-    const pipelineSection = screen.getByLabelText('Task and PR Pipeline MOBAflow');
+    const pipelineSection = screen.getByLabelText('Task and CI Pipeline');
+    expect(within(pipelineSection).getByRole('heading', { name: 'Task & CI Pipeline' })).toBeInTheDocument();
     expect(within(pipelineSection).queryByRole('button', { name: 'Pills' })).not.toBeInTheDocument();
     expect(within(pipelineSection).queryByRole('button', { name: 'Round Table' })).not.toBeInTheDocument();
     expect(within(pipelineSection).queryByRole('button', { name: /Arrows:/i })).not.toBeInTheDocument();
@@ -732,6 +733,20 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     expect(within(pipelineSection).getByText('Final Reviewer')).toBeInTheDocument();
     expect(within(pipelineSection).getByText('Claude Opus 5.5')).toBeInTheDocument();
     expect(screen.getByText(/missing read:project scope/i)).toBeInTheDocument();
+
+    // Closed PRs toggle is intentionally removed in Live Operations, and Hygiene cards moved to dedicated Hygiene tab
+    expect(screen.queryByRole('button', { name: /Closed PRs/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Git Worktrees MOBAflow')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Branch Hygiene MOBAflow and AISwarmX')).not.toBeInTheDocument();
+
+    // Switch to dedicated Hygiene tab (4 stale worktrees + 3 stale branches + 1 extra session = 8 warnings)
+    const hygieneTab = screen.getByRole('tab', { name: /^Hygiene/i });
+    expect(within(hygieneTab).getAllByText('8').length).toBeGreaterThanOrEqual(1);
+    await user.click(hygieneTab);
+
+    expect(await screen.findByLabelText('Rules State Actual vs Target')).toBeInTheDocument();
+    expect(screen.getByLabelText('Session Hygiene per Tool')).toBeInTheDocument();
+    expect(screen.getByLabelText('Git Worktrees MOBAflow')).toBeInTheDocument();
 
     // Branch Hygiene card shows local/remote stale counts and active branches
     const branchCard = screen.getByLabelText('Branch Hygiene MOBAflow and AISwarmX');
@@ -746,9 +761,6 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     expect(screen.queryByText('codex/old-4')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Show all 4 stale worktrees/i }));
     expect(screen.getByText('codex/old-4')).toBeInTheDocument();
-
-    // Closed PRs toggle is intentionally removed in Live Operations
-    expect(screen.queryByRole('button', { name: /Closed PRs/i })).not.toBeInTheDocument();
     },
     10_000
   );
@@ -878,7 +890,8 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
       render(<App />);
       await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' });
 
-      const pipelineSection = screen.getByLabelText('Task and PR Pipeline MOBAflow');
+      const pipelineSection = screen.getByLabelText('Task and CI Pipeline');
+    expect(within(pipelineSection).getByRole('heading', { name: 'Task & CI Pipeline' })).toBeInTheDocument();
       expect(within(pipelineSection).getByText('Ready: 0')).toBeInTheDocument();
       expect(within(pipelineSection).getByText('In progress: 3')).toBeInTheDocument();
       expect(within(pipelineSection).getByText('In review: 1')).toBeInTheDocument();
@@ -938,7 +951,8 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     render(<App />);
     await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' });
 
-    const pipelineSection = screen.getByLabelText('Task and PR Pipeline MOBAflow');
+    const pipelineSection = screen.getByLabelText('Task and CI Pipeline');
+    expect(within(pipelineSection).getByRole('heading', { name: 'Task & CI Pipeline' })).toBeInTheDocument();
     expect(
       within(pipelineSection).queryByText(/REDUNDANT_MULTI_AGENT_WRITER_TEXT/)
     ).not.toBeInTheDocument();
@@ -1206,6 +1220,8 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     stubDashboardFetch(customPayload);
 
     render(<App />);
+    const hygieneTab = await screen.findByRole('tab', { name: /^Hygiene/i });
+    await user.click(hygieneTab);
     const worktreesCard = await screen.findByLabelText('Git Worktrees MOBAflow');
     expect(within(worktreesCard).getByText('1 Stale')).toBeInTheDocument();
     expect(within(worktreesCard).getByText('Stale / Merged')).toBeInTheDocument();
@@ -1881,7 +1897,8 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     render(<App />);
     await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' });
 
-    const pipelineSection = screen.getByLabelText('Task and PR Pipeline MOBAflow');
+    const pipelineSection = screen.getByLabelText('Task and CI Pipeline');
+    expect(within(pipelineSection).getByRole('heading', { name: 'Task & CI Pipeline' })).toBeInTheDocument();
     expect(within(pipelineSection).queryByRole('group', { name: 'Filter pipeline view' })).not.toBeInTheDocument();
     expect(within(pipelineSection).queryByRole('button', { name: /Open PRs/i })).not.toBeInTheDocument();
     expect(within(pipelineSection).queryByRole('button', { name: /Open Issues/i })).not.toBeInTheDocument();
@@ -2324,7 +2341,7 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     stubDashboardFetch(snap);
     render(<App />);
 
-    const pipelineSection = await screen.findByLabelText('Task and PR Pipeline MOBAflow');
+    const pipelineSection = await screen.findByLabelText('Task and CI Pipeline');
     const text = pipelineSection.textContent ?? '';
 
     // Summary funnel preserves left-to-right lifecycle order
@@ -2367,5 +2384,23 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     await user.click(within(pipelineSection).getByRole('button', { name: 'Ready: 4' }));
     expect(within(pipelineSection).getByText('Ready backlog slice #604')).toBeInTheDocument();
     expect(within(pipelineSection).queryByText('In progress (3)')).not.toBeInTheDocument();
+  });
+
+  it('switches from Live Operations to dedicated Hygiene tab when clicking View Worktrees in Warning Breakdown popover', async () => {
+    const user = userEvent.setup();
+    stubDashboardFetch();
+
+    render(<App />);
+    await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' });
+    expect(screen.queryByLabelText('Git Worktrees MOBAflow')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /10 Warnings — show breakdown/i }));
+    const popoverRegion = screen.getByRole('region', { name: 'Warning breakdown' });
+    await user.click(within(popoverRegion).getByRole('button', { name: 'View Worktrees' }));
+
+    const hygieneTab = screen.getByRole('tab', { name: /^Hygiene/i });
+    expect(hygieneTab).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByLabelText('Git Worktrees MOBAflow')).toBeInTheDocument();
+    expect(screen.getByLabelText('Branch Hygiene MOBAflow and AISwarmX')).toBeInTheDocument();
   });
 });

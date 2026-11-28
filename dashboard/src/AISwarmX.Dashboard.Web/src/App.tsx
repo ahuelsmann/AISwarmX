@@ -49,14 +49,6 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: '12px'
   },
-  hygieneSkeletonGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-    gap: '14px',
-    '@media (max-width: 859px)': {
-      gridTemplateColumns: 'minmax(0, 1fr)'
-    }
-  },
   monitorsRow: {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
@@ -129,6 +121,7 @@ export function App() {
   const [liveConnectionState, setLiveConnectionState] = useState<LiveConnectionState>('polling');
   const shouldFocusCommunicationRef = useRef(false);
   const communicationSectionRef = useRef<HTMLElement | null>(null);
+  const pendingScrollIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (activeTab !== 'communication' || !shouldFocusCommunicationRef.current || !snapshot) {
@@ -142,6 +135,23 @@ export function App() {
       }
       const activeTabEl = document.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
       activeTabEl?.focus();
+    });
+  }, [activeTab, snapshot]);
+
+  useEffect(() => {
+    if (activeTab !== 'hygiene' || !pendingScrollIdRef.current || !snapshot) {
+      return;
+    }
+    const targetId = pendingScrollIdRef.current;
+    pendingScrollIdRef.current = null;
+    const reducedMotion =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const scrollBehavior: ScrollBehavior = reducedMotion ? 'auto' : 'smooth';
+    window.requestAnimationFrame(() => {
+      const el = document.getElementById(targetId);
+      el?.scrollIntoView?.({ behavior: scrollBehavior, block: 'start' });
+      el?.focus?.({ preventScroll: true });
     });
   }, [activeTab, snapshot]);
 
@@ -258,21 +268,28 @@ export function App() {
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const scrollBehavior: ScrollBehavior = reducedMotion ? 'auto' : 'smooth';
 
-    setActiveTab('live');
     if (target === 'monitors') {
+      setActiveTab('live');
       window.scrollTo?.({ top: 0, behavior: scrollBehavior });
       return;
     }
 
-    window.requestAnimationFrame(() => {
-      const id =
-        target === 'worktrees'
-          ? 'section-worktrees'
-          : target === 'branches'
-            ? 'section-branches'
-            : 'section-sessions';
-      document.getElementById(id)?.scrollIntoView?.({ behavior: scrollBehavior, block: 'start' });
-    });
+    const id =
+      target === 'worktrees'
+        ? 'section-worktrees'
+        : target === 'branches'
+          ? 'section-branches'
+          : 'section-sessions';
+    pendingScrollIdRef.current = id;
+    setActiveTab('hygiene');
+    if (activeTab === 'hygiene' && snapshot) {
+      window.requestAnimationFrame(() => {
+        const el = document.getElementById(id);
+        el?.scrollIntoView?.({ behavior: scrollBehavior, block: 'start' });
+        el?.focus?.({ preventScroll: true });
+        pendingScrollIdRef.current = null;
+      });
+    }
   };
 
   const handleOpenDoc = (scope: ConfigDocsScope, relativePath: string) => {
@@ -304,6 +321,10 @@ export function App() {
       }
     : { rulesDrift: 0, staleWorktrees: 0, staleBranches: 0, extraSessions: 0, quotaPauses: 0 };
 
+  const hygieneWarningCount =
+    warningBreakdown.staleWorktrees +
+    warningBreakdown.staleBranches +
+    warningBreakdown.extraSessions;
   const isDark = resolvedTheme === 'dark';
 
   return (
@@ -326,6 +347,7 @@ export function App() {
           onTabChange={setActiveTab}
           driftBadgeCount={driftBadgeCount}
           communicationUnreadCount={snapshot?.swarmBus?.unreadCount ?? 0}
+          hygieneWarningCount={hygieneWarningCount}
           isDark={isDark}
         />
 
@@ -340,6 +362,7 @@ export function App() {
             !snapshot &&
             (activeTab === 'live' ||
               activeTab === 'communication' ||
+              activeTab === 'hygiene' ||
               activeTab === 'architecture' ||
               activeTab === 'matrix') && (
               <LoadingSkeleton styles={styles} />
@@ -380,12 +403,6 @@ export function App() {
                 isDark={isDark}
               />
 
-              <HygieneAndSyncPanel
-                governance={snapshot.governance}
-                hygiene={snapshot.hygiene}
-                onOpenMatrixSync={handleOpenMatrixSync}
-              />
-
               <div className={styles.liveFooter}>
                 <Link
                   href="#live-top"
@@ -408,6 +425,14 @@ export function App() {
               nowMs={nowMs}
               liveConnectionState={liveConnectionState}
               sectionRef={communicationSectionRef}
+            />
+          )}
+
+          {snapshot && activeTab === 'hygiene' && (
+            <HygieneAndSyncPanel
+              governance={snapshot.governance}
+              hygiene={snapshot.hygiene}
+              onOpenMatrixSync={handleOpenMatrixSync}
             />
           )}
 
@@ -459,10 +484,6 @@ function LoadingSkeleton({ styles }: { styles: ReturnType<typeof useStyles> }) {
       </div>
       <SkeletonItem style={{ height: 68, borderRadius: tokens.borderRadiusMedium }} />
       <SkeletonItem style={{ height: 280, borderRadius: tokens.borderRadiusMedium }} />
-      <div className={styles.hygieneSkeletonGrid}>
-        <SkeletonItem style={{ height: 180, borderRadius: tokens.borderRadiusMedium }} />
-        <SkeletonItem style={{ height: 180, borderRadius: tokens.borderRadiusMedium }} />
-      </div>
     </Skeleton>
   );
 }

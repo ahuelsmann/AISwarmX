@@ -341,4 +341,10 @@ export interface DashboardSnapshot {
 }
 
 export type ThemePreference = 'system' | 'light' | 'dark';
-export type DashboardTab = 'live' | 'communication' | 'architecture' | 'matrix' | 'mobadev-docs';
+export type DashboardTab =
+  | 'live'
+  | 'communication'
+  | 'hygiene'
+  | 'architecture'
+  | 'matrix'
+  | 'mobadev-docs';

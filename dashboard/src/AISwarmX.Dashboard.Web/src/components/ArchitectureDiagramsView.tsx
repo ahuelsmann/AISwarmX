@@ -804,7 +804,7 @@ export function ArchitectureDiagramsView({
                 fontSize="13"
                 fontWeight="700"
               >
-                Ephemeral Task &amp; PR Sub-Agents (Isolated Worktrees)
+                Ephemeral Task &amp; Slice Sub-Agents (Isolated Worktrees)
               </text>
               <rect
                 x="836"

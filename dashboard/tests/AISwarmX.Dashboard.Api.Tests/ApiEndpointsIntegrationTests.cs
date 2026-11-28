@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
+using AISwarmX.Dashboard.Api.Configuration;
 using AISwarmX.Dashboard.Api.Contracts;
 using AISwarmX.Dashboard.Api.Providers;
 using AISwarmX.Dashboard.Api.Services;
@@ -307,6 +309,305 @@ public sealed class ApiEndpointsIntegrationTests
             releaseGhTcs.TrySetResult();
             await blockedPipelineTask;
         }
+    }
+
+    [Fact]
+    public async Task HealthEndpoint_NonCooperativeColdProvider_ReturnsStartingWithinColdWaitBudget()
+    {
+        using var fx = new TempDashboardFixture();
+        await File.WriteAllTextAsync(Path.Combine(fx.MobaDevPath, "manifest.md"), "# MOBAdev\n");
+
+        var ghEnteredTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseColdGhTcs = new TaskCompletionSource<CommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var runner = new AsyncDelegateCommandRunner(async (fileName, _, _) =>
+        {
+            if (fileName == "gh")
+            {
+                ghEnteredTcs.TrySetResult();
+                // Deliberately ignore CancellationToken to simulate a non-cooperative / hung cold provider
+                return await releaseColdGhTcs.Task;
+            }
+
+            return new CommandResult(0, string.Empty, string.Empty);
+        });
+
+        await using var factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Testing");
+                builder.ConfigureAppConfiguration((_, config) =>
+                {
+                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Dashboard:BindUrl"] = "http://127.0.0.1:5179",
+                        ["Dashboard:MobaDevRepoPath"] = fx.MobaDevPath,
+                        ["Dashboard:MobaFlowRepoPath"] = fx.MobaFlowPath,
+                        ["Dashboard:ClaudeHomePath"] = fx.ClaudeHomePath,
+                        ["Dashboard:CodexHomePath"] = fx.CodexHomePath,
+                        ["Dashboard:AntigravityHomePath"] = fx.AntigravityHomePath,
+                        ["Dashboard:GeminiConfigPath"] = fx.GeminiConfigPath
+                    });
+                });
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<ICommandRunner>();
+                    services.AddSingleton<ICommandRunner>(runner);
+                });
+            });
+
+        using var client = factory.CreateClient();
+        var snapshotService = factory.Services.GetRequiredService<DashboardSnapshotService>();
+        snapshotService.ColdHealthWaitBudget = TimeSpan.FromMilliseconds(120);
+
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            var healthRes = await client.GetAsync("/api/health");
+            sw.Stop();
+
+            Assert.Equal(HttpStatusCode.OK, healthRes.StatusCode);
+            Assert.True(sw.ElapsedMilliseconds < 800, $"Expected cold /api/health < 800ms, actual {sw.ElapsedMilliseconds}ms.");
+            Assert.False(releaseColdGhTcs.Task.IsCompleted);
+            await ghEnteredTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var health = await healthRes.Content.ReadFromJsonAsync<HealthResponse>();
+            Assert.NotNull(health);
+            Assert.Equal("starting", health.Status);
+            Assert.Empty(health.Sources);
+            Assert.Equal("http://127.0.0.1:5179", health.BindAddress);
+        }
+        finally
+        {
+            releaseColdGhTcs.TrySetResult(new CommandResult(0, "[]", string.Empty));
+            await snapshotService.WaitForInflightHealthRefreshForTestingAsync();
+        }
+    }
+
+    [Fact]
+    public async Task HealthEndpoint_ExpiredWarmCacheWithNoLockHolder_ReturnsCachedImmediatelyAndRefreshesOffThread()
+    {
+        using var fx = new TempDashboardFixture();
+        await File.WriteAllTextAsync(Path.Combine(fx.MobaDevPath, "manifest.md"), "# MOBAdev\n");
+
+        var blockGhCommands = false;
+        var backgroundRefreshEnteredTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseBackgroundGhTcs = new TaskCompletionSource<CommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var runner = new AsyncDelegateCommandRunner(async (fileName, args, _) =>
+        {
+            if (fileName == "gh")
+            {
+                if (Volatile.Read(ref blockGhCommands))
+                {
+                    backgroundRefreshEnteredTcs.TrySetResult();
+                    // Non-cooperative wait while _pipelineLock & _localLock were completely free before /api/health arrived
+                    return await releaseBackgroundGhTcs.Task;
+                }
+
+                if (args.Contains("pr") || args.Contains("issue") || args.Contains("run"))
+                {
+                    return new CommandResult(0, "[]", string.Empty);
+                }
+
+                return new CommandResult(1, string.Empty, "missing scope");
+            }
+
+            if (fileName == "git" && args.Contains("worktree"))
+            {
+                return new CommandResult(
+                    0,
+                    $"worktree {fx.MobaFlowPath.Replace('\\', '/')}\nHEAD abcdef123456\nbranch refs/heads/main\n",
+                    string.Empty);
+            }
+
+            return new CommandResult(0, string.Empty, string.Empty);
+        });
+
+        await using var factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Testing");
+                builder.ConfigureAppConfiguration((_, config) =>
+                {
+                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Dashboard:BindUrl"] = "http://127.0.0.1:5179",
+                        ["Dashboard:MobaDevRepoPath"] = fx.MobaDevPath,
+                        ["Dashboard:MobaFlowRepoPath"] = fx.MobaFlowPath,
+                        ["Dashboard:ClaudeHomePath"] = fx.ClaudeHomePath,
+                        ["Dashboard:CodexHomePath"] = fx.CodexHomePath,
+                        ["Dashboard:AntigravityHomePath"] = fx.AntigravityHomePath,
+                        ["Dashboard:GeminiConfigPath"] = fx.GeminiConfigPath
+                    });
+                });
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<ICommandRunner>();
+                    services.AddSingleton<ICommandRunner>(runner);
+                });
+            });
+
+        using var client = factory.CreateClient();
+
+        var warmSnapshot = await (await client.GetAsync("/api/snapshot")).Content.ReadFromJsonAsync<DashboardSnapshot>();
+        Assert.NotNull(warmSnapshot);
+
+        var snapshotService = factory.Services.GetRequiredService<DashboardSnapshotService>();
+        snapshotService.ExpireCachesForTesting();
+        Volatile.Write(ref blockGhCommands, true);
+
+        try
+        {
+            // Neither _pipelineLock nor _localLock is held when /api/health arrives
+            var sw = Stopwatch.StartNew();
+            var healthRes = await client.GetAsync("/api/health");
+            sw.Stop();
+
+            Assert.Equal(HttpStatusCode.OK, healthRes.StatusCode);
+            Assert.True(sw.ElapsedMilliseconds < 200, $"Expected warm expired /api/health < 200ms, actual {sw.ElapsedMilliseconds}ms.");
+
+            var health = await healthRes.Content.ReadFromJsonAsync<HealthResponse>();
+            Assert.NotNull(health);
+            Assert.Equal(warmSnapshot.OverallStatus, health.Status);
+            Assert.Equal(warmSnapshot.GeneratedAtUtc, health.GeneratedAtUtc);
+            Assert.Contains("pipeline", health.Sources.Keys);
+
+            // Confirm coalesced Task.Run background refresh was kicked off asynchronously
+            await backgroundRefreshEnteredTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            releaseBackgroundGhTcs.TrySetResult(new CommandResult(0, "[]", string.Empty));
+            await snapshotService.WaitForInflightHealthRefreshForTestingAsync();
+        }
+    }
+
+    [Fact]
+    public async Task HealthEndpoint_WorkspaceSwitchFromWarmAToColdB_DoesNotLeakWorkspaceASources()
+    {
+        using var fx = new TempDashboardFixture();
+        await File.WriteAllTextAsync(Path.Combine(fx.MobaDevPath, "manifest.md"), "# MOBAdev\n");
+
+        DashboardOptions CreateOptions(string repo, string bindUrl) => new()
+        {
+            BindUrl = bindUrl,
+            GitHubRepository = repo,
+            MobaDevRepoPath = fx.MobaDevPath,
+            MobaFlowRepoPath = fx.MobaFlowPath,
+            ClaudeHomePath = fx.ClaudeHomePath,
+            CodexHomePath = fx.CodexHomePath,
+            AntigravityHomePath = fx.AntigravityHomePath,
+            GeminiConfigPath = fx.GeminiConfigPath
+        };
+
+        var mutableOptions = new MutableOptionsMonitor<DashboardOptions>(
+            CreateOptions("ahuelsmann/MOBAflow", "http://127.0.0.1:5179"));
+
+        var blockWorkspaceB = false;
+        var sentiXEnteredTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSentiXTcs = new TaskCompletionSource<CommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var runner = new AsyncDelegateCommandRunner(async (fileName, args, _) =>
+        {
+            if (fileName == "gh")
+            {
+                if (Volatile.Read(ref blockWorkspaceB) &&
+                    args.Any(a => a.Contains("ahuelsmann/SentiX", StringComparison.OrdinalIgnoreCase)))
+                {
+                    sentiXEnteredTcs.TrySetResult();
+                    return await releaseSentiXTcs.Task;
+                }
+
+                if (args.Contains("pr") || args.Contains("issue") || args.Contains("run"))
+                {
+                    return new CommandResult(0, "[]", string.Empty);
+                }
+
+                return new CommandResult(1, string.Empty, "missing scope");
+            }
+
+            if (fileName == "git" && args.Contains("worktree"))
+            {
+                return new CommandResult(
+                    0,
+                    $"worktree {fx.MobaFlowPath.Replace('\\', '/')}\nHEAD abcdef123456\nbranch refs/heads/main\n",
+                    string.Empty);
+            }
+
+            return new CommandResult(0, string.Empty, string.Empty);
+        });
+
+        await using var factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Testing");
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<IOptionsMonitor<DashboardOptions>>();
+                    services.AddSingleton<IOptionsMonitor<DashboardOptions>>(mutableOptions);
+                    services.RemoveAll<ICommandRunner>();
+                    services.AddSingleton<ICommandRunner>(runner);
+                });
+            });
+
+        using var client = factory.CreateClient();
+        var snapshotService = factory.Services.GetRequiredService<DashboardSnapshotService>();
+
+        // 1. Warm Workspace A ("ahuelsmann/MOBAflow") deterministically, then verify /api/health
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/snapshot")).StatusCode);
+        var warmARes = await client.GetAsync("/api/health");
+        Assert.Equal(HttpStatusCode.OK, warmARes.StatusCode);
+        var warmA = await warmARes.Content.ReadFromJsonAsync<HealthResponse>();
+        Assert.NotNull(warmA);
+        Assert.NotEqual("starting", warmA.Status);
+        Assert.Contains("pipeline", warmA.Sources.Keys);
+
+        // 2. Switch to cold Workspace B ("ahuelsmann/SentiX") whose gh call blocks
+        snapshotService.ColdHealthWaitBudget = TimeSpan.FromMilliseconds(120);
+        Volatile.Write(ref blockWorkspaceB, true);
+        mutableOptions.Update(CreateOptions("ahuelsmann/SentiX", "http://127.0.0.1:5180"));
+
+        try
+        {
+            var coldBRes = await client.GetAsync("/api/health");
+            Assert.Equal(HttpStatusCode.OK, coldBRes.StatusCode);
+            var coldB = await coldBRes.Content.ReadFromJsonAsync<HealthResponse>();
+            Assert.NotNull(coldB);
+            Assert.Equal("starting", coldB.Status);
+            Assert.Empty(coldB.Sources);
+            Assert.Equal("http://127.0.0.1:5180", coldB.BindAddress);
+
+            await sentiXEnteredTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            releaseSentiXTcs.TrySetResult(new CommandResult(0, "[]", string.Empty));
+            await snapshotService.WaitForInflightHealthRefreshForTestingAsync();
+        }
+
+        // 3. Once Workspace B unblocks, /api/health returns Workspace B's coherent health
+        var warmBRes = await client.GetAsync("/api/health");
+        Assert.Equal(HttpStatusCode.OK, warmBRes.StatusCode);
+        var warmB = await warmBRes.Content.ReadFromJsonAsync<HealthResponse>();
+        Assert.NotNull(warmB);
+        Assert.NotEqual("starting", warmB.Status);
+        Assert.Equal("http://127.0.0.1:5180", warmB.BindAddress);
+        Assert.Contains("pipeline", warmB.Sources.Keys);
+    }
+
+    private sealed class MutableOptionsMonitor<T>(T initial) : IOptionsMonitor<T>
+        where T : class
+    {
+        private T _current = initial;
+
+        public T CurrentValue => Volatile.Read(ref _current);
+
+        public T Get(string? name) => CurrentValue;
+
+        public IDisposable? OnChange(Action<T, string?> listener) => null;
+
+        public void Update(T next) => Volatile.Write(ref _current, next);
     }
 
     private sealed class AsyncDelegateCommandRunner(

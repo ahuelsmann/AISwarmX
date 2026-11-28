@@ -241,7 +241,9 @@ export function MainLandingTickerCard({ pipeline, nowMs }: MainLandingTickerCard
       </div>
 
       {ranked.length === 0 ? (
-        <Text className={styles.empty}>Quiet window — no open PRs waiting for main.</Text>
+        <Text className={styles.empty}>
+          Direct-to-main mode — verified slices merge directly onto main after CI &amp; review gates.
+        </Text>
       ) : (
         <ol className={styles.list} aria-label="Features approaching main">
           {ranked.map((item) => (

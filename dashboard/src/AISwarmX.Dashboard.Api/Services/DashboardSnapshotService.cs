@@ -23,8 +23,19 @@ public sealed partial class DashboardSnapshotService
     private readonly Providers.WorktreeProvider _worktreeProvider;
     private readonly Providers.SwarmBusProvider _swarmBusProvider;
 
+    private sealed record CachedHealthEntry(
+        string WorkspaceKey,
+        HealthResponse Response,
+        DateTimeOffset ExpiresAtUtc);
+
+    private static readonly TimeSpan DefaultColdHealthWaitBudget = TimeSpan.FromMilliseconds(1500);
+
     private readonly SemaphoreSlim _localLock = new(1, 1);
     private readonly SemaphoreSlim _pipelineLock = new(1, 1);
+    private readonly Lock _healthRefreshGate = new();
+
+    private (string WorkspaceKey, Task RefreshTask)? _inflightHealthRefresh;
+    private CachedHealthEntry? _cachedHealthEntry;
 
     private MonitorsResponse? _cachedMonitors;
     private GovernanceResponse? _cachedGovernance;
@@ -38,6 +49,8 @@ public sealed partial class DashboardSnapshotService
     private PipelineResponse? _cachedPipeline;
     private string? _cachedPipelineKey;
     private DateTimeOffset _pipelineCacheExpiresAt = DateTimeOffset.MinValue;
+
+    internal TimeSpan ColdHealthWaitBudget { get; set; } = DefaultColdHealthWaitBudget;
 
     public DashboardSnapshotService(
         IOptionsMonitor<DashboardOptions> optionsMonitor,
@@ -63,99 +76,122 @@ public sealed partial class DashboardSnapshotService
 
     public async Task<HealthResponse> GetHealthAsync(CancellationToken cancellationToken)
     {
-        var monitors = Volatile.Read(ref _cachedMonitors);
-        var governance = Volatile.Read(ref _cachedGovernance);
-        var pipeline = Volatile.Read(ref _cachedPipeline);
-        var hygiene = Volatile.Read(ref _cachedHygiene);
-        var swarmBus = Volatile.Read(ref _cachedSwarmBus);
+        cancellationToken.ThrowIfCancellationRequested();
 
-        if (monitors is not null && governance is not null && pipeline is not null && hygiene is not null)
+        var options = _optionsMonitor.CurrentValue;
+        var paths = options.ResolvePaths();
+        var workspaceKey = GetCurrentHealthWorkspaceKey(options, paths);
+
+        var cached = Volatile.Read(ref _cachedHealthEntry);
+        if (cached is not null &&
+            string.Equals(cached.WorkspaceKey, workspaceKey, StringComparison.OrdinalIgnoreCase))
         {
-            var now = DateTimeOffset.UtcNow;
-            if ((now >= _pipelineCacheExpiresAt || now >= _localCacheExpiresAt) &&
-                _pipelineLock.CurrentCount > 0)
+            if (DateTimeOffset.UtcNow >= cached.ExpiresAtUtc)
             {
-                _ = RefreshInBackgroundSafeAsync();
+                _ = EnsureBackgroundSnapshotRefreshStarted(workspaceKey);
             }
 
-            var (overallStatus, _) = ComputeOverallStatus(monitors, governance, pipeline, hygiene);
-            var cachedSources = new Dictionary<string, SourceHealth>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["monitors"] = monitors.Source,
-                ["governance"] = governance.Source,
-                ["pipeline"] = pipeline.Source,
-                ["hygiene"] = hygiene.Source
-            };
-            if (swarmBus is not null)
-            {
-                cachedSources["swarmBus"] = swarmBus.Source;
-            }
-
-            return new HealthResponse(
-                Status: overallStatus,
-                DotNetVersion: RuntimeInformation.FrameworkDescription,
-                ReadOnly: true,
-                BindAddress: _optionsMonitor.CurrentValue.BindUrl,
-                GeneratedAtUtc: now,
-                Sources: cachedSources);
+            return cached.Response;
         }
 
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        linkedCts.CancelAfter(TimeSpan.FromMilliseconds(1500));
+        var refreshTask = EnsureBackgroundSnapshotRefreshStarted(workspaceKey);
         try
         {
-            var snapshot = await GetSnapshotAsync(forceRefresh: false, linkedCts.Token).ConfigureAwait(false);
-            var sources = new Dictionary<string, SourceHealth>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["monitors"] = snapshot.Monitors.Source,
-                ["governance"] = snapshot.Governance.Source,
-                ["pipeline"] = snapshot.Pipeline.Source,
-                ["hygiene"] = snapshot.Hygiene.Source
-            };
-            if (snapshot.SwarmBus is not null)
-            {
-                sources["swarmBus"] = snapshot.SwarmBus.Source;
-            }
-
-            return new HealthResponse(
-                Status: snapshot.OverallStatus,
-                DotNetVersion: RuntimeInformation.FrameworkDescription,
-                ReadOnly: true,
-                BindAddress: snapshot.BindAddress,
-                GeneratedAtUtc: snapshot.GeneratedAtUtc,
-                Sources: sources);
+            await refreshTask.WaitAsync(ColdHealthWaitBudget, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (TimeoutException)
         {
-            _ = RefreshInBackgroundSafeAsync();
-            return new HealthResponse(
-                Status: "starting",
-                DotNetVersion: RuntimeInformation.FrameworkDescription,
-                ReadOnly: true,
-                BindAddress: _optionsMonitor.CurrentValue.BindUrl,
-                GeneratedAtUtc: DateTimeOffset.UtcNow,
-                Sources: new Dictionary<string, SourceHealth>(StringComparer.OrdinalIgnoreCase));
+            // Cold-start or workspace-switch wait budget elapsed; return "starting" while background refresh continues.
         }
+
+        cached = Volatile.Read(ref _cachedHealthEntry);
+        if (cached is not null &&
+            string.Equals(cached.WorkspaceKey, workspaceKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return cached.Response;
+        }
+
+        return new HealthResponse(
+            Status: "starting",
+            DotNetVersion: RuntimeInformation.FrameworkDescription,
+            ReadOnly: true,
+            BindAddress: options.BindUrl,
+            GeneratedAtUtc: DateTimeOffset.UtcNow,
+            Sources: new Dictionary<string, SourceHealth>(StringComparer.OrdinalIgnoreCase));
     }
 
     internal void ExpireCachesForTesting()
     {
         _pipelineCacheExpiresAt = DateTimeOffset.MinValue;
         _localCacheExpiresAt = DateTimeOffset.MinValue;
+        var existing = Volatile.Read(ref _cachedHealthEntry);
+        if (existing is not null)
+        {
+            Volatile.Write(ref _cachedHealthEntry, existing with { ExpiresAtUtc = DateTimeOffset.MinValue });
+        }
     }
 
-    private async Task RefreshInBackgroundSafeAsync()
+    internal Task WaitForInflightHealthRefreshForTestingAsync()
     {
-        try
+        lock (_healthRefreshGate)
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-            await GetSnapshotAsync(forceRefresh: false, cts.Token).ConfigureAwait(false);
-        }
-        catch
-        {
-            // Ignore background refresh exceptions so fire-and-forget health triggers never fault.
+            return _inflightHealthRefresh?.RefreshTask ?? Task.CompletedTask;
         }
     }
+
+    private Task EnsureBackgroundSnapshotRefreshStarted(string workspaceKey)
+    {
+        lock (_healthRefreshGate)
+        {
+            if (_inflightHealthRefresh is { } inflight &&
+                !inflight.RefreshTask.IsCompleted &&
+                string.Equals(inflight.WorkspaceKey, workspaceKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return inflight.RefreshTask;
+            }
+
+            var refreshTask = Task.Run(async () =>
+            {
+                try
+                {
+                    await GetSnapshotAsync(forceRefresh: false, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Background refresh errors never fault health callers.
+                }
+            });
+
+            _inflightHealthRefresh = (workspaceKey, refreshTask);
+            return refreshTask;
+        }
+    }
+
+    private static HealthResponse BuildHealthResponseFromSnapshot(DashboardSnapshot snapshot)
+    {
+        var sources = new Dictionary<string, SourceHealth>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["monitors"] = snapshot.Monitors.Source,
+            ["governance"] = snapshot.Governance.Source,
+            ["pipeline"] = snapshot.Pipeline.Source,
+            ["hygiene"] = snapshot.Hygiene.Source
+        };
+        if (snapshot.SwarmBus is not null)
+        {
+            sources["swarmBus"] = snapshot.SwarmBus.Source;
+        }
+
+        return new HealthResponse(
+            Status: snapshot.OverallStatus,
+            DotNetVersion: RuntimeInformation.FrameworkDescription,
+            ReadOnly: true,
+            BindAddress: snapshot.BindAddress,
+            GeneratedAtUtc: snapshot.GeneratedAtUtc,
+            Sources: sources);
+    }
+
+    private static string GetCurrentHealthWorkspaceKey(DashboardOptions options, ResolvedDashboardPaths paths) =>
+        $"{options.BindUrl?.Trim()}||{BuildPipelineCacheKey(options)}||{BuildLocalCacheKey(paths, options)}";
 
     public async Task<MonitorsResponse> GetMonitorsAsync(bool forceRefresh, CancellationToken cancellationToken)
     {
@@ -199,7 +235,8 @@ public sealed partial class DashboardSnapshotService
     public async Task<PipelineResponse> GetPipelineAsync(bool forceRefresh, CancellationToken cancellationToken)
     {
         var options = _optionsMonitor.CurrentValue;
-        return await GetPipelineCachedAsync(options, forceRefresh, cancellationToken).ConfigureAwait(false);
+        var (pipeline, _) = await GetPipelineCachedAsync(options, forceRefresh, cancellationToken).ConfigureAwait(false);
+        return pipeline;
     }
 
     public async Task<HygieneResponse> GetHygieneAsync(bool forceRefresh, CancellationToken cancellationToken)
@@ -246,6 +283,7 @@ public sealed partial class DashboardSnapshotService
         DashboardOptions options;
         ResolvedDashboardPaths paths;
         string localCacheKey;
+        string observedWorkspaceKey;
         long observedEpoch;
 
         await _localLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -254,6 +292,7 @@ public sealed partial class DashboardSnapshotService
             options = _optionsMonitor.CurrentValue;
             paths = options.ResolvePaths();
             localCacheKey = BuildLocalCacheKey(paths, options);
+            observedWorkspaceKey = GetCurrentHealthWorkspaceKey(options, paths);
             observedEpoch = _swarmBusCacheEpoch;
         }
         finally
@@ -267,14 +306,33 @@ public sealed partial class DashboardSnapshotService
         try
         {
             var currentOptions = _optionsMonitor.CurrentValue;
-            var currentKey = BuildLocalCacheKey(currentOptions.ResolvePaths(), currentOptions);
+            var currentPaths = currentOptions.ResolvePaths();
+            var currentKey = BuildLocalCacheKey(currentPaths, currentOptions);
+            var currentWorkspaceKey = GetCurrentHealthWorkspaceKey(currentOptions, currentPaths);
             var sameWorkspace = string.Equals(currentKey, localCacheKey, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(currentWorkspaceKey, observedWorkspaceKey, StringComparison.OrdinalIgnoreCase)
                 && (_cachedLocalKey is null || string.Equals(_cachedLocalKey, localCacheKey, StringComparison.OrdinalIgnoreCase));
             if (sameWorkspace && observedEpoch == _swarmBusCacheEpoch)
             {
                 _cachedSwarmBus = fresh;
                 _cachedLocalKey ??= localCacheKey;
                 _swarmBusCacheEpoch++;
+
+                var existingHealth = Volatile.Read(ref _cachedHealthEntry);
+                if (existingHealth is not null &&
+                    string.Equals(existingHealth.WorkspaceKey, currentWorkspaceKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    var updatedSources = new Dictionary<string, SourceHealth>(
+                        existingHealth.Response.Sources,
+                        StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["swarmBus"] = fresh.Source
+                    };
+                    Volatile.Write(
+                        ref _cachedHealthEntry,
+                        existingHealth with { Response = existingHealth.Response with { Sources = updatedSources } });
+                }
+
                 return fresh;
             }
 
@@ -290,15 +348,17 @@ public sealed partial class DashboardSnapshotService
     {
         var options = _optionsMonitor.CurrentValue;
         var paths = options.ResolvePaths();
+        var workspaceKey = GetCurrentHealthWorkspaceKey(options, paths);
         var now = DateTimeOffset.UtcNow;
 
-        var pipeline = await GetPipelineCachedAsync(options, forceRefresh, cancellationToken).ConfigureAwait(false);
+        var (pipeline, pipelineExpiresAt) = await GetPipelineCachedAsync(options, forceRefresh, cancellationToken).ConfigureAwait(false);
 
         MonitorsResponse monitors;
         GovernanceResponse governance;
         HygieneResponse hygiene;
         SwarmBusResponse swarmBus;
         string? changelogVersion;
+        DateTimeOffset localExpiresAt;
 
         var localCacheKey = BuildLocalCacheKey(paths, options);
         await _localLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -317,6 +377,7 @@ public sealed partial class DashboardSnapshotService
                 hygiene = _cachedHygiene;
                 swarmBus = _cachedSwarmBus;
                 changelogVersion = _cachedChangelogVersion;
+                localExpiresAt = _localCacheExpiresAt;
             }
             else
             {
@@ -369,7 +430,8 @@ public sealed partial class DashboardSnapshotService
                 _swarmBusCacheEpoch++;
 
                 var ttl = Math.Max(1, options.LocalCacheTtlSeconds);
-                _localCacheExpiresAt = now.AddSeconds(ttl);
+                localExpiresAt = now.AddSeconds(ttl);
+                _localCacheExpiresAt = localExpiresAt;
             }
         }
         finally
@@ -379,7 +441,7 @@ public sealed partial class DashboardSnapshotService
 
         var (overallStatus, warningCount) = ComputeOverallStatus(monitors, governance, pipeline, hygiene);
 
-        return new DashboardSnapshot(
+        var snapshot = new DashboardSnapshot(
             GeneratedAtUtc: now,
             ReadOnly: true,
             BindAddress: options.BindUrl,
@@ -391,9 +453,21 @@ public sealed partial class DashboardSnapshotService
             Hygiene: hygiene,
             ChangelogVersion: changelogVersion,
             SwarmBus: swarmBus);
+
+        var currentOptions = _optionsMonitor.CurrentValue;
+        var currentWorkspaceKey = GetCurrentHealthWorkspaceKey(currentOptions, currentOptions.ResolvePaths());
+        if (string.Equals(currentWorkspaceKey, workspaceKey, StringComparison.OrdinalIgnoreCase))
+        {
+            var healthExpiresAt = pipelineExpiresAt < localExpiresAt ? pipelineExpiresAt : localExpiresAt;
+            Volatile.Write(
+                ref _cachedHealthEntry,
+                new CachedHealthEntry(workspaceKey, BuildHealthResponseFromSnapshot(snapshot), healthExpiresAt));
+        }
+
+        return snapshot;
     }
 
-    private async Task<PipelineResponse> GetPipelineCachedAsync(
+    private async Task<(PipelineResponse Response, DateTimeOffset ExpiresAtUtc)> GetPipelineCachedAsync(
         DashboardOptions options,
         bool forceRefresh,
         CancellationToken cancellationToken)
@@ -409,7 +483,7 @@ public sealed partial class DashboardSnapshotService
                 string.Equals(_cachedPipelineKey, pipelineKey, StringComparison.OrdinalIgnoreCase) &&
                 now < _pipelineCacheExpiresAt)
             {
-                return _cachedPipeline;
+                return (_cachedPipeline, _pipelineCacheExpiresAt);
             }
 
             var result = await _pipelineProvider.GetPipelineAsync(options, cancellationToken).ConfigureAwait(false);
@@ -417,8 +491,9 @@ public sealed partial class DashboardSnapshotService
             _cachedPipelineKey = pipelineKey;
 
             var ttl = Math.Max(5, options.GitHubCacheTtlSeconds);
-            _pipelineCacheExpiresAt = now.AddSeconds(ttl);
-            return result;
+            var expiresAt = now.AddSeconds(ttl);
+            _pipelineCacheExpiresAt = expiresAt;
+            return (result, expiresAt);
         }
         finally
         {
