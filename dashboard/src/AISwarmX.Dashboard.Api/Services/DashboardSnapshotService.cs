@@ -28,13 +28,21 @@ public sealed partial class DashboardSnapshotService
         HealthResponse Response,
         DateTimeOffset ExpiresAtUtc);
 
+    private sealed class InflightHealthRefresh(string workspaceKey)
+    {
+        public string WorkspaceKey { get; } = workspaceKey;
+
+        public Task RefreshTask { get; set; } = Task.CompletedTask;
+    }
+
     private static readonly TimeSpan DefaultColdHealthWaitBudget = TimeSpan.FromMilliseconds(1500);
+    private static readonly TimeSpan DefaultBackgroundHealthRefreshTimeout = TimeSpan.FromSeconds(45);
 
     private readonly SemaphoreSlim _localLock = new(1, 1);
     private readonly SemaphoreSlim _pipelineLock = new(1, 1);
     private readonly Lock _healthRefreshGate = new();
 
-    private (string WorkspaceKey, Task RefreshTask)? _inflightHealthRefresh;
+    private InflightHealthRefresh? _inflightHealthRefresh;
     private CachedHealthEntry? _cachedHealthEntry;
 
     private MonitorsResponse? _cachedMonitors;
@@ -51,6 +59,8 @@ public sealed partial class DashboardSnapshotService
     private DateTimeOffset _pipelineCacheExpiresAt = DateTimeOffset.MinValue;
 
     internal TimeSpan ColdHealthWaitBudget { get; set; } = DefaultColdHealthWaitBudget;
+
+    internal TimeSpan BackgroundHealthRefreshTimeout { get; set; } = DefaultBackgroundHealthRefreshTimeout;
 
     public DashboardSnapshotService(
         IOptionsMonitor<DashboardOptions> optionsMonitor,
@@ -122,12 +132,20 @@ public sealed partial class DashboardSnapshotService
 
     internal void ExpireCachesForTesting()
     {
-        _pipelineCacheExpiresAt = DateTimeOffset.MinValue;
-        _localCacheExpiresAt = DateTimeOffset.MinValue;
-        var existing = Volatile.Read(ref _cachedHealthEntry);
-        if (existing is not null)
+        _localLock.Wait();
+        try
         {
-            Volatile.Write(ref _cachedHealthEntry, existing with { ExpiresAtUtc = DateTimeOffset.MinValue });
+            _pipelineCacheExpiresAt = DateTimeOffset.MinValue;
+            _localCacheExpiresAt = DateTimeOffset.MinValue;
+            var existing = Volatile.Read(ref _cachedHealthEntry);
+            if (existing is not null)
+            {
+                Volatile.Write(ref _cachedHealthEntry, existing with { ExpiresAtUtc = DateTimeOffset.MinValue });
+            }
+        }
+        finally
+        {
+            _localLock.Release();
         }
     }
 
@@ -143,26 +161,40 @@ public sealed partial class DashboardSnapshotService
     {
         lock (_healthRefreshGate)
         {
-            if (_inflightHealthRefresh is { } inflight &&
-                !inflight.RefreshTask.IsCompleted &&
-                string.Equals(inflight.WorkspaceKey, workspaceKey, StringComparison.OrdinalIgnoreCase))
+            if (_inflightHealthRefresh is { } existing &&
+                !existing.RefreshTask.IsCompleted &&
+                string.Equals(existing.WorkspaceKey, workspaceKey, StringComparison.OrdinalIgnoreCase))
             {
-                return inflight.RefreshTask;
+                return existing.RefreshTask;
             }
 
+            var inflight = new InflightHealthRefresh(workspaceKey);
+            var timeout = BackgroundHealthRefreshTimeout;
             var refreshTask = Task.Run(async () =>
             {
                 try
                 {
-                    await GetSnapshotAsync(forceRefresh: false, CancellationToken.None).ConfigureAwait(false);
+                    using var refreshCts = new CancellationTokenSource(timeout);
+                    await GetSnapshotAsync(forceRefresh: false, refreshCts.Token).ConfigureAwait(false);
                 }
                 catch
                 {
-                    // Background refresh errors never fault health callers.
+                    // Background refresh errors or deadlines never fault health callers.
+                }
+                finally
+                {
+                    lock (_healthRefreshGate)
+                    {
+                        if (ReferenceEquals(_inflightHealthRefresh, inflight))
+                        {
+                            _inflightHealthRefresh = null;
+                        }
+                    }
                 }
             });
 
-            _inflightHealthRefresh = (workspaceKey, refreshTask);
+            inflight.RefreshTask = refreshTask;
+            _inflightHealthRefresh = inflight;
             return refreshTask;
         }
     }
@@ -360,6 +392,7 @@ public sealed partial class DashboardSnapshotService
         string? changelogVersion;
         DateTimeOffset localExpiresAt;
 
+        DashboardSnapshot snapshot;
         var localCacheKey = BuildLocalCacheKey(paths, options);
         await _localLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -433,35 +466,36 @@ public sealed partial class DashboardSnapshotService
                 localExpiresAt = now.AddSeconds(ttl);
                 _localCacheExpiresAt = localExpiresAt;
             }
+
+            var (overallStatus, warningCount) = ComputeOverallStatus(monitors, governance, pipeline, hygiene);
+
+            snapshot = new DashboardSnapshot(
+                GeneratedAtUtc: now,
+                ReadOnly: true,
+                BindAddress: options.BindUrl,
+                OverallStatus: overallStatus,
+                WarningCount: warningCount,
+                Monitors: monitors,
+                Governance: governance,
+                Pipeline: pipeline,
+                Hygiene: hygiene,
+                ChangelogVersion: changelogVersion,
+                SwarmBus: swarmBus);
+
+            var currentOptions = _optionsMonitor.CurrentValue;
+            var currentPaths = currentOptions.ResolvePaths();
+            var currentWorkspaceKey = GetCurrentHealthWorkspaceKey(currentOptions, currentPaths);
+            if (string.Equals(currentWorkspaceKey, workspaceKey, StringComparison.OrdinalIgnoreCase))
+            {
+                var healthExpiresAt = pipelineExpiresAt < localExpiresAt ? pipelineExpiresAt : localExpiresAt;
+                Volatile.Write(
+                    ref _cachedHealthEntry,
+                    new CachedHealthEntry(workspaceKey, BuildHealthResponseFromSnapshot(snapshot), healthExpiresAt));
+            }
         }
         finally
         {
             _localLock.Release();
-        }
-
-        var (overallStatus, warningCount) = ComputeOverallStatus(monitors, governance, pipeline, hygiene);
-
-        var snapshot = new DashboardSnapshot(
-            GeneratedAtUtc: now,
-            ReadOnly: true,
-            BindAddress: options.BindUrl,
-            OverallStatus: overallStatus,
-            WarningCount: warningCount,
-            Monitors: monitors,
-            Governance: governance,
-            Pipeline: pipeline,
-            Hygiene: hygiene,
-            ChangelogVersion: changelogVersion,
-            SwarmBus: swarmBus);
-
-        var currentOptions = _optionsMonitor.CurrentValue;
-        var currentWorkspaceKey = GetCurrentHealthWorkspaceKey(currentOptions, currentOptions.ResolvePaths());
-        if (string.Equals(currentWorkspaceKey, workspaceKey, StringComparison.OrdinalIgnoreCase))
-        {
-            var healthExpiresAt = pipelineExpiresAt < localExpiresAt ? pipelineExpiresAt : localExpiresAt;
-            Volatile.Write(
-                ref _cachedHealthEntry,
-                new CachedHealthEntry(workspaceKey, BuildHealthResponseFromSnapshot(snapshot), healthExpiresAt));
         }
 
         return snapshot;

@@ -596,6 +596,224 @@ public sealed class ApiEndpointsIntegrationTests
         Assert.Contains("pipeline", warmB.Sources.Keys);
     }
 
+    [Fact]
+    public async Task HealthEndpoint_CooperativelyStalledBackgroundRefresh_TimesOutReleasesSlotAndRecovers()
+    {
+        using var fx = new TempDashboardFixture();
+        await File.WriteAllTextAsync(Path.Combine(fx.MobaDevPath, "manifest.md"), "# MOBAdev\n");
+
+        var stallCooperatively = true;
+        var stallEnteredTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stallCanceledTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var runner = new AsyncDelegateCommandRunner(async (fileName, args, ct) =>
+        {
+            if (fileName == "gh")
+            {
+                if (Volatile.Read(ref stallCooperatively))
+                {
+                    stallEnteredTcs.TrySetResult();
+                    try
+                    {
+                        await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        stallCanceledTcs.TrySetResult();
+                        throw;
+                    }
+                }
+
+                if (args.Contains("pr") || args.Contains("issue") || args.Contains("run"))
+                {
+                    return new CommandResult(0, "[]", string.Empty);
+                }
+
+                return new CommandResult(1, string.Empty, "missing scope");
+            }
+
+            if (fileName == "git" && args.Contains("worktree"))
+            {
+                return new CommandResult(
+                    0,
+                    $"worktree {fx.MobaFlowPath.Replace('\\', '/')}\nHEAD abcdef123456\nbranch refs/heads/main\n",
+                    string.Empty);
+            }
+
+            return new CommandResult(0, string.Empty, string.Empty);
+        });
+
+        await using var factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Testing");
+                builder.ConfigureAppConfiguration((_, config) =>
+                {
+                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Dashboard:BindUrl"] = "http://127.0.0.1:5179",
+                        ["Dashboard:MobaDevRepoPath"] = fx.MobaDevPath,
+                        ["Dashboard:MobaFlowRepoPath"] = fx.MobaFlowPath,
+                        ["Dashboard:ClaudeHomePath"] = fx.ClaudeHomePath,
+                        ["Dashboard:CodexHomePath"] = fx.CodexHomePath,
+                        ["Dashboard:AntigravityHomePath"] = fx.AntigravityHomePath,
+                        ["Dashboard:GeminiConfigPath"] = fx.GeminiConfigPath
+                    });
+                });
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<ICommandRunner>();
+                    services.AddSingleton<ICommandRunner>(runner);
+                });
+            });
+
+        using var client = factory.CreateClient();
+        var snapshotService = factory.Services.GetRequiredService<DashboardSnapshotService>();
+        snapshotService.ColdHealthWaitBudget = TimeSpan.FromMilliseconds(80);
+        snapshotService.BackgroundHealthRefreshTimeout = TimeSpan.FromMilliseconds(200);
+
+        // 1. First /api/health starts background refresh that stalls cooperatively on ct
+        var startingRes = await client.GetAsync("/api/health");
+        Assert.Equal(HttpStatusCode.OK, startingRes.StatusCode);
+        var startingHealth = await startingRes.Content.ReadFromJsonAsync<HealthResponse>();
+        Assert.NotNull(startingHealth);
+        Assert.Equal("starting", startingHealth.Status);
+
+        // 2. Service-owned BackgroundHealthRefreshTimeout cancels the stalled refresh and clears the slot
+        await stallEnteredTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await stallCanceledTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await snapshotService.WaitForInflightHealthRefreshForTestingAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        // 3. Once provider recovers, next /api/health starts a fresh refresh and returns healthy
+        Volatile.Write(ref stallCooperatively, false);
+        snapshotService.ColdHealthWaitBudget = TimeSpan.FromMilliseconds(1500);
+        snapshotService.BackgroundHealthRefreshTimeout = TimeSpan.FromSeconds(10);
+
+        var recoveredRes = await client.GetAsync("/api/health");
+        Assert.Equal(HttpStatusCode.OK, recoveredRes.StatusCode);
+        var recoveredHealth = await recoveredRes.Content.ReadFromJsonAsync<HealthResponse>();
+        Assert.NotNull(recoveredHealth);
+        Assert.NotEqual("starting", recoveredHealth.Status);
+        Assert.Contains("pipeline", recoveredHealth.Sources.Keys);
+        Assert.Contains("monitors", recoveredHealth.Sources.Keys);
+    }
+
+    [Fact]
+    public async Task HealthEndpoint_ConcurrentSnapshotAndSwarmBusRefresh_SerializesHealthPublicationUnderLocalLock()
+    {
+        using var fx = new TempDashboardFixture();
+        await File.WriteAllTextAsync(Path.Combine(fx.MobaDevPath, "manifest.md"), "# MOBAdev\n");
+
+        var busNotice = "swarmbus-initial-v1";
+        var busProvider = new ControllableSwarmBusProvider(() =>
+        {
+            var currentNotice = Volatile.Read(ref busNotice);
+            var now = DateTimeOffset.UtcNow;
+            return new SwarmBusResponse(
+                GeneratedAtUtc: now,
+                UnreadCount: 0,
+                ActiveLockCount: 0,
+                RecentMessages: [],
+                ActiveLocks: [],
+                Source: new SourceHealth("ok", now, currentNotice));
+        });
+
+        var runner = new AsyncDelegateCommandRunner((fileName, args, _) =>
+        {
+            if (fileName == "gh" && (args.Contains("pr") || args.Contains("issue") || args.Contains("run")))
+            {
+                return Task.FromResult(new CommandResult(0, "[]", string.Empty));
+            }
+
+            if (fileName == "git" && args.Contains("worktree"))
+            {
+                return Task.FromResult(new CommandResult(
+                    0,
+                    $"worktree {fx.MobaFlowPath.Replace('\\', '/')}\nHEAD abcdef123456\nbranch refs/heads/main\n",
+                    string.Empty));
+            }
+
+            return Task.FromResult(new CommandResult(1, string.Empty, "missing scope"));
+        });
+
+        await using var factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Testing");
+                builder.ConfigureAppConfiguration((_, config) =>
+                {
+                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Dashboard:BindUrl"] = "http://127.0.0.1:5179",
+                        ["Dashboard:LocalCacheTtlSeconds"] = "60",
+                        ["Dashboard:GitHubCacheTtlSeconds"] = "60",
+                        ["Dashboard:MobaDevRepoPath"] = fx.MobaDevPath,
+                        ["Dashboard:MobaFlowRepoPath"] = fx.MobaFlowPath,
+                        ["Dashboard:ClaudeHomePath"] = fx.ClaudeHomePath,
+                        ["Dashboard:CodexHomePath"] = fx.CodexHomePath,
+                        ["Dashboard:AntigravityHomePath"] = fx.AntigravityHomePath,
+                        ["Dashboard:GeminiConfigPath"] = fx.GeminiConfigPath
+                    });
+                });
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<ICommandRunner>();
+                    services.AddSingleton<ICommandRunner>(runner);
+                    services.RemoveAll<SwarmBusProvider>();
+                    services.AddSingleton<SwarmBusProvider>(busProvider);
+                });
+            });
+
+        using var client = factory.CreateClient();
+        var snapshotService = factory.Services.GetRequiredService<DashboardSnapshotService>();
+
+        // 1. Warm initial snapshot with "swarmbus-initial-v1"
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/snapshot")).StatusCode);
+        var initialHealth = await (await client.GetAsync("/api/health")).Content.ReadFromJsonAsync<HealthResponse>();
+        Assert.NotNull(initialHealth);
+        Assert.Equal("swarmbus-initial-v1", initialHealth.Sources["swarmBus"].Notice);
+
+        // 2. Race concurrent GetSnapshotAsync(forceRefresh: false) calls against RefreshSwarmBusAsync("swarmbus-fresh-v2")
+        // Use async TaskCompletionSource so zero ThreadPool worker threads block synchronously.
+        var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Volatile.Write(ref busNotice, "swarmbus-fresh-v2");
+
+        var snapshotRacers = Enumerable.Range(0, 12)
+            .Select(_ => Task.Run(async () =>
+            {
+                await startGate.Task;
+                await snapshotService.GetSnapshotAsync(forceRefresh: false, CancellationToken.None);
+            }))
+            .ToArray();
+
+        var busRefreshTask = Task.Run(async () =>
+        {
+            await startGate.Task;
+            return await snapshotService.RefreshSwarmBusAsync(CancellationToken.None);
+        });
+
+        startGate.TrySetResult();
+        var refreshedBus = await busRefreshTask;
+        Assert.Equal("swarmbus-fresh-v2", refreshedBus.Source.Notice);
+        await Task.WhenAll(snapshotRacers);
+
+        // 3. Because _cachedHealthEntry publication is serialized under _localLock, no racing snapshot can overwrite v2 back to v1
+        var finalHealth = await (await client.GetAsync("/api/health")).Content.ReadFromJsonAsync<HealthResponse>();
+        Assert.NotNull(finalHealth);
+        Assert.Equal("swarmbus-fresh-v2", finalHealth.Sources["swarmBus"].Notice);
+    }
+
+    private sealed class ControllableSwarmBusProvider(Func<SwarmBusResponse> factory) : SwarmBusProvider
+    {
+        public override Task<SwarmBusResponse> GetSwarmBusAsync(
+            ResolvedDashboardPaths paths,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(factory());
+        }
+    }
+
     private sealed class MutableOptionsMonitor<T>(T initial) : IOptionsMonitor<T>
         where T : class
     {
