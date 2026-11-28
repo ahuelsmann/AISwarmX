@@ -5,6 +5,24 @@ All notable changes to **AISwarmX** (formerly **MOBAdev**) and the local **AISwa
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.17.0] - 2026-11-28
+
+### Added & Changed
+- **PR-Free Toggle Cleanup & Elevated Issue/PR Cards (`PipelineCard.tsx`, `AgentRoundTable.tsx`, `App.tsx`, `HygieneAndSyncPanel.tsx`):**
+  - Hidden the `Open Issues (N) | Open PRs (0)` segmented toggle when `pullRequests.length === 0`, rendering a static `Open Issues (N)` badge instead (auto-restoring the toggle whenever open PRs exist) and removing the obsolete `No PR yet` badge from issue cards.
+  - Replaced hairline row dividers with framed, elevated cards (`borderRadiusLarge`, `colorNeutralBackground2`, `colorNeutralStroke1`, `shadow4`, `12px` gap) and elevated `AgentRoundTable` + pill surfaces (`colorNeutralBackground1`) for clear visual separation.
+  - Promoted `PipelineCard` to full-width above a responsive 2-column `HygieneAndSyncPanel` grid (`minmax(380px, 1fr)`), and enlarged `AgentRoundTable` Visitenkarten (`CARD_W=252`, `CARD_H=54`, `+1px–1.5px` typography) for improved readability.
+- **Live Swarm Activity Pulse Bar (`SwarmActivityPulseBar.tsx`, `App.tsx`):**
+  - Added a compact Live Swarm Activity Pulse bar between `MonitorCards` and `MainLandingTickerCard` showing a reduced-motion-safe heartbeat dot, SignalR `Live Push` / `Polling` status, working/total monitors, a deterministic 24-bucket (6h / 15m) SVG activity sparkline across SwarmBus + CI events, and the latest 3 SwarmBus handoffs with an `Open Communication` shortcut.
+- **Animated Round Table Signal Flow (`AgentRoundTable.tsx`, `base.css`):**
+  - Added subtle `stroke-dashoffset` flow animation on workflow arcs and steering spokes connected to actively working (`isLiveWorking`) seats, strictly guarded inside `@media (prefers-reduced-motion: no-preference)`.
+
+### Fixed
+- **UTF-8 Encoding for `gh` CLI Output (`ProcessCommandRunner.cs`):**
+  - Configured `StandardOutputEncoding = Encoding.UTF8` and `StandardErrorEncoding = Encoding.UTF8` on `ProcessStartInfo` so German umlauts (`für`, `Änderungen`, `einführen`) in GitHub issue and PR titles never degrade into CP850 mojibake.
+
+---
+
 ## [3.16.0] - 2026-11-28
 
 ### Added & Changed

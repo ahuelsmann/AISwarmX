@@ -86,21 +86,18 @@ const useStyles = makeStyles({
   },
   prList: {
     display: 'flex',
-    flexDirection: 'column'
+    flexDirection: 'column',
+    gap: '12px'
   },
   prRow: {
     display: 'flex',
     flexDirection: 'column',
     gap: '5px',
-    padding: '8px 0',
-    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-    ':first-child': {
-      paddingTop: '2px',
-      borderTop: 'none'
-    },
-    ':last-child': {
-      paddingBottom: 0
-    }
+    padding: '10px 12px',
+    borderRadius: tokens.borderRadiusLarge,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    boxShadow: tokens.shadow4
   },
   prTop: {
     display: 'flex',
@@ -134,7 +131,7 @@ const useStyles = makeStyles({
     gap: '5px',
     padding: '2px 8px',
     borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground2,
+    backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     fontSize: tokens.fontSizeBase200,
     textDecorationLine: 'none',
@@ -154,7 +151,7 @@ const useStyles = makeStyles({
     gap: '5px',
     padding: '1px 6px',
     borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground2,
+    backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     fontSize: tokens.fontSizeBase200,
     lineHeight: '16px',
@@ -303,6 +300,8 @@ export function PipelineCard({ pipeline, monitors, nowMs, isDark }: PipelineCard
   ].filter((g) => g.items.length > 0);
 
   const activePrList = pipeline.pullRequests;
+  const hasPullRequests = activePrList.length > 0;
+  const effectiveViewMode: PipelineViewMode = hasPullRequests ? viewMode : 'issues';
 
   return (
     <Card className={styles.card} appearance="filled" aria-label="Task and PR Pipeline MOBAflow">
@@ -313,24 +312,30 @@ export function PipelineCard({ pipeline, monitors, nowMs, isDark }: PipelineCard
           <ContextChip mono>Repository: {pipeline.repository}</ContextChip>
         </div>
 
-        <div className={styles.filterGroup} role="group" aria-label="Filter pipeline view">
-          <ToggleButton
-            size="small"
-            appearance={viewMode === 'issues' ? 'primary' : 'subtle'}
-            checked={viewMode === 'issues'}
-            onClick={() => setViewMode('issues')}
-          >
-            <span className="tabular">Open Issues ({allKanbanItems.length})</span>
-          </ToggleButton>
-          <ToggleButton
-            size="small"
-            appearance={viewMode === 'open' ? 'primary' : 'subtle'}
-            checked={viewMode === 'open'}
-            onClick={() => setViewMode('open')}
-          >
-            <span className="tabular">Open PRs ({pipeline.pullRequests.length})</span>
-          </ToggleButton>
-        </div>
+        {hasPullRequests ? (
+          <div className={styles.filterGroup} role="group" aria-label="Filter pipeline view">
+            <ToggleButton
+              size="small"
+              appearance={effectiveViewMode === 'issues' ? 'primary' : 'subtle'}
+              checked={effectiveViewMode === 'issues'}
+              onClick={() => setViewMode('issues')}
+            >
+              <span className="tabular">Open Issues ({allKanbanItems.length})</span>
+            </ToggleButton>
+            <ToggleButton
+              size="small"
+              appearance={effectiveViewMode === 'open' ? 'primary' : 'subtle'}
+              checked={effectiveViewMode === 'open'}
+              onClick={() => setViewMode('open')}
+            >
+              <span className="tabular">Open PRs ({activePrList.length})</span>
+            </ToggleButton>
+          </div>
+        ) : (
+          <Badge appearance="tint" color="subtle" shape="rounded" className="tabular">
+            Open Issues ({allKanbanItems.length})
+          </Badge>
+        )}
       </div>
 
       {pipeline.source.status === 'degraded' && (
@@ -366,7 +371,7 @@ export function PipelineCard({ pipeline, monitors, nowMs, isDark }: PipelineCard
         />
       )}
 
-      {pipeline.source.status !== 'unavailable' && viewMode === 'open' && activePrList.length === 0 && (
+      {pipeline.source.status !== 'unavailable' && effectiveViewMode === 'open' && activePrList.length === 0 && (
         <div className={styles.emptyState}>
           <CheckmarkCircle16Regular style={{ width: 22, height: 22 }} aria-hidden="true" />
           <Text weight="semibold">No open PRs in MOBAflow</Text>
@@ -374,7 +379,7 @@ export function PipelineCard({ pipeline, monitors, nowMs, isDark }: PipelineCard
         </div>
       )}
 
-      {viewMode === 'open' && activePrList.length > 0 && (
+      {effectiveViewMode === 'open' && activePrList.length > 0 && (
         <div className={styles.prList}>
           {activePrList.map((pr) => (
             <PullRequestRow
@@ -389,7 +394,7 @@ export function PipelineCard({ pipeline, monitors, nowMs, isDark }: PipelineCard
         </div>
       )}
 
-      {pipeline.source.status !== 'unavailable' && viewMode === 'issues' && (
+      {pipeline.source.status !== 'unavailable' && effectiveViewMode === 'issues' && (
         <>
           <div className={styles.kanbanSummaryStrip}>
             <div className={styles.kanbanCountsGroup}>
@@ -1067,8 +1072,6 @@ function KanbanItemRow({
   styles: ReturnType<typeof useStyles>;
 }) {
   const isPr = issue.itemKind?.toLowerCase() === 'pullrequest';
-  const hasOpenPr = isPr || issue.linkedPullRequests.some((p) => !p.isMerged);
-  const hasDrift = Boolean(issue.boardDriftReason);
   const isClosed = ['CLOSED', 'MERGED'].includes(issue.gitHubState.toUpperCase());
   const normalizedParticipants = normalizeIssueParticipants(issue.participants);
   const dangerStyles = getStatusStyles('danger', isDark);
@@ -1108,11 +1111,6 @@ function KanbanItemRow({
           <KanbanStatusBadge status={issue.kanbanStatus} />
           {issue.priority && <PriorityBadge priority={issue.priority} />}
           {issue.riskClass && <RiskClassBadge riskClass={issue.riskClass} />}
-          {!isPr && !hasOpenPr && !hasDrift && (
-            <Badge appearance="outline" color="subtle" shape="rounded">
-              No PR yet
-            </Badge>
-          )}
         </div>
       </div>
 

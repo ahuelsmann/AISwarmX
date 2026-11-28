@@ -14,6 +14,7 @@ import {
   readMonitorGridCookie
 } from '../components/MonitorCards';
 import { resolveModelVisual, resolveProfileTone, resolveRoleVisual } from '../components/RoleAndModelIcons';
+import { buildActivitySparklineBuckets } from '../components/SwarmActivityPulseBar';
 import type {
   ConfigDocContentResponse,
   ConfigDocsCatalogResponse,
@@ -892,7 +893,7 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
       expect(
         screen.getByText('Quality and refactoring programme: RF-01 through RF-18')
       ).toBeInTheDocument();
-      expect(screen.getByText('No PR yet')).toBeInTheDocument();
+      expect(screen.queryByText('No PR yet')).not.toBeInTheDocument();
 
       // Round Table renders graphically by default even on 0-agent open issues; Writer pill shows when 0 participants
       expect(screen.getAllByText('Writer: COO (Claude)').length).toBeGreaterThanOrEqual(1);
@@ -1829,6 +1830,8 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
       expect(writerSeat).toHaveAttribute('data-live-working', 'true');
       expect(writerSeat.querySelector('.roundtable-pulse-halo')).not.toBeNull();
       expect(writerSeat.querySelector('.roundtable-pulse-dot')).not.toBeNull();
+      const issueSvg = writerSeat.closest('svg') as SVGSVGElement;
+      expect(issueSvg.querySelectorAll('.roundtable-flow-active[data-flow-active="true"]').length).toBeGreaterThanOrEqual(1);
 
       const reviewerSeat = screen.getByRole('button', {
         name: /P1 Final Reviewer · Claude Opus 5\.5 · Assigned/i
@@ -1853,6 +1856,205 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     });
     expect(standbyWriterSeat).toHaveAttribute('data-live-working', 'false');
     expect(standbyWriterSeat.querySelector('.roundtable-pulse-halo')).toBeNull();
+    const standbySvg = standbyWriterSeat.closest('svg') as SVGSVGElement;
+    expect(standbySvg.querySelectorAll('.roundtable-flow-active')).toHaveLength(0);
+  });
+
+  it('renders static Open Issues badge without toggle buttons when pullRequests is empty', async () => {
+    const snap = createSnapshotFixture();
+    snap.pipeline.pullRequests = [];
+    stubDashboardFetch(snap);
+
+    render(<App />);
+    await screen.findByRole('heading', { name: 'AISwarmX — Autonomous Dev Engine Gen3.5' });
+
+    const pipelineSection = screen.getByLabelText('Task and PR Pipeline MOBAflow');
+    expect(within(pipelineSection).queryByRole('group', { name: 'Filter pipeline view' })).not.toBeInTheDocument();
+    expect(within(pipelineSection).queryByRole('button', { name: /Open PRs/i })).not.toBeInTheDocument();
+    expect(within(pipelineSection).queryByRole('button', { name: /Open Issues/i })).not.toBeInTheDocument();
+    expect(within(pipelineSection).getByText('Open Issues (4)')).toBeInTheDocument();
+  });
+
+  it('builds deterministic 24-bucket activity sparkline and renders SwarmActivityPulseBar with SwarmBus handoffs', async () => {
+    const user = userEvent.setup();
+    const nowMs = Date.parse('2026-11-28T12:00:00Z');
+
+    // Empty / invalid timestamps handled safely
+    const emptyBuckets = buildActivitySparklineBuckets(null, undefined, nowMs);
+    expect(emptyBuckets).toHaveLength(24);
+    expect(emptyBuckets.every((b) => b.total === 0)).toBe(true);
+
+    const mixedBuckets = buildActivitySparklineBuckets(
+      [
+        {
+          id: 101,
+          createdAtUtc: '2026-11-28T11:55:00Z',
+          sender: 'codex',
+          recipient: 'claude',
+          topic: 'handoff',
+          body: 'done',
+          priority: 'normal',
+          status: 'unread'
+        },
+        {
+          id: 100,
+          createdAtUtc: 'invalid-date',
+          sender: 'codex',
+          recipient: 'claude',
+          topic: 'broken',
+          body: 'skip',
+          priority: 'normal',
+          status: 'unread'
+        },
+        {
+          id: 99,
+          createdAtUtc: '2026-11-28T05:00:00Z', // >6h ago -> outside window
+          sender: 'codex',
+          recipient: 'claude',
+          topic: 'old',
+          body: 'skip',
+          priority: 'normal',
+          status: 'acked'
+        }
+      ],
+      [
+        {
+          databaseId: 1,
+          repository: 'ahuelsmann/AISwarmX',
+          workflowName: 'CI',
+          displayTitle: 'build',
+          headBranch: 'main',
+          status: 'completed',
+          conclusion: 'success',
+          url: 'https://github.com/ahuelsmann/AISwarmX/actions/runs/1',
+          createdAtUtc: '2026-11-28T06:05:00Z',
+          updatedAtUtc: '2026-11-28T06:05:00Z' // oldest bucket (index 0)
+        }
+      ],
+      nowMs
+    );
+    expect(mixedBuckets[23]).toEqual({ index: 23, busCount: 1, ciCount: 0, total: 1 });
+    expect(mixedBuckets[0]).toEqual({ index: 0, busCount: 0, ciCount: 1, total: 1 });
+    expect(mixedBuckets.reduce((sum, b) => sum + b.total, 0)).toBe(2);
+
+    const snap = createSnapshotFixture();
+    snap.swarmBus = {
+      generatedAtUtc: snap.generatedAtUtc,
+      unreadCount: 2,
+      activeLockCount: 0,
+      activeLocks: [],
+      source: { status: 'ok', updatedAtUtc: snap.generatedAtUtc, fromCache: false },
+      recentMessages: [
+        {
+          id: 404,
+          createdAtUtc: snap.generatedAtUtc,
+          sender: 'antigravity-gemini',
+          recipient: 'codex',
+          topic: 'ui-ready',
+          body: 'v3.17.0 UI ready',
+          priority: 'normal',
+          status: 'unread',
+          workspaceId: 'mobaflow'
+        },
+        {
+          id: 403,
+          createdAtUtc: snap.generatedAtUtc,
+          sender: 'codex',
+          recipient: 'claude',
+          topic: 'review-request',
+          body: 'please review',
+          priority: 'high',
+          status: 'unread',
+          workspaceId: 'default'
+        },
+        {
+          id: 402,
+          createdAtUtc: snap.generatedAtUtc,
+          sender: 'claude',
+          recipient: 'all',
+          topic: 'merge-ok',
+          body: 'merged',
+          priority: 'normal',
+          status: 'acked'
+        },
+        {
+          id: 401,
+          createdAtUtc: snap.generatedAtUtc,
+          sender: 'old-sender',
+          recipient: 'old-recipient',
+          topic: 'hidden-fourth',
+          body: 'should not show in pulse bar',
+          priority: 'normal',
+          status: 'acked'
+        }
+      ]
+    };
+
+    stubDashboardFetch(snap);
+    render(<App />);
+
+    const pulseRegion = await screen.findByRole('region', { name: 'Live Swarm Activity Pulse' });
+    expect(within(pulseRegion).getByText('1/4 working')).toBeInTheDocument();
+    expect(within(pulseRegion).getByText('Polling')).toBeInTheDocument();
+    expect(within(pulseRegion).getByRole('img', { name: /Activity sparkline over last 6 hours/i })).toBeInTheDocument();
+    expect(within(pulseRegion).getByText('#404')).toBeInTheDocument();
+    expect(within(pulseRegion).getByText('mobaflow')).toBeInTheDocument();
+    expect(within(pulseRegion).queryByText('default')).not.toBeInTheDocument();
+    expect(within(pulseRegion).getByText('antigravity-gemini → codex')).toBeInTheDocument();
+    expect(within(pulseRegion).getByText('ui-ready')).toBeInTheDocument();
+    expect(within(pulseRegion).getByText('#403')).toBeInTheDocument();
+    expect(within(pulseRegion).getByText('#402')).toBeInTheDocument();
+    expect(within(pulseRegion).queryByText('#401')).not.toBeInTheDocument();
+
+    await user.click(within(pulseRegion).getByRole('button', { name: /Open Communication/i }));
+    expect(await screen.findByRole('region', { name: 'Swarm Bus Cross-Tool MCP Feed' })).toBeInTheDocument();
+  });
+
+  it('animates steering spoke flow when a steering seat is actively working', async () => {
+    const snap = createSnapshotFixture();
+    snap.monitors.monitors = snap.monitors.monitors.map((m) =>
+      m.id === 'claude-monitor' ? { ...m, state: 'busy' as const } : m
+    );
+    snap.pipeline.activeIssues = [
+      {
+        number: 58,
+        itemKind: 'Issue',
+        title: 'Live steering check',
+        url: 'https://github.com/ahuelsmann/AISwarmX/issues/58',
+        gitHubState: 'OPEN',
+        kanbanStatus: 'In progress',
+        priority: 'P1',
+        area: 'UI',
+        issueType: 'Feature',
+        riskClass: 'M',
+        writer: 'Claude',
+        lockedAreas: [],
+        updatedAtUtc: snap.generatedAtUtc,
+        linkedPullRequests: [],
+        linkedIssues: [],
+        participants: [
+          {
+            agent: 'COO',
+            tool: 'Claude Code',
+            role: 'Chief Operating Officer (COO)',
+            profile: 'P1',
+            model: 'Claude Opus 5.5',
+            status: 'Active',
+            evidenceSource: 'Live'
+          }
+        ],
+        boardDriftReason: null
+      }
+    ];
+    stubDashboardFetch(snap);
+    render(<App />);
+
+    const cooSeat = await screen.findByRole('button', {
+      name: /P1 Chief Operating Officer \(COO\) · Claude Opus 5\.5 · Active · Live working/i
+    });
+    const svg = cooSeat.closest('svg') as SVGSVGElement;
+    const activeLines = svg.querySelectorAll('line.roundtable-flow-active[data-flow-active="true"]');
+    expect(activeLines).toHaveLength(1);
   });
 
   it('renders live CI workflow runs strip across monitored repositories', async () => {

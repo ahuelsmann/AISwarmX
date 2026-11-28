@@ -173,3 +173,18 @@ html[data-theme='dark'] .roundtable-seat:focus-visible {
     opacity: 0;
   }
 }
+
+@keyframes moba-roundtable-flow {
+  from {
+    stroke-dashoffset: 16;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .roundtable-flow-active {
+    animation: moba-roundtable-flow 1.2s linear infinite;
+  }
+}

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 
 namespace AISwarmX.Dashboard.Api.Providers;
 
@@ -8,12 +9,10 @@ namespace AISwarmX.Dashboard.Api.Providers;
 /// </summary>
 public sealed class ProcessCommandRunner : ICommandRunner
 {
-    public async Task<CommandResult> RunAsync(
+    internal static ProcessStartInfo CreateStartInfo(
         string fileName,
         IReadOnlyList<string> arguments,
-        string? workingDirectory,
-        TimeSpan timeout,
-        CancellationToken cancellationToken)
+        string? workingDirectory)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -21,6 +20,8 @@ public sealed class ProcessCommandRunner : ICommandRunner
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
             CreateNoWindow = true
         };
 
@@ -33,6 +34,18 @@ public sealed class ProcessCommandRunner : ICommandRunner
         {
             startInfo.ArgumentList.Add(arg);
         }
+
+        return startInfo;
+    }
+
+    public async Task<CommandResult> RunAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var startInfo = CreateStartInfo(fileName, arguments, workingDirectory);
 
         using var process = new Process { StartInfo = startInfo };
         try

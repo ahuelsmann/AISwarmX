@@ -24,9 +24,10 @@ import { GlossaryTooltip } from './GlossaryTooltip';
 
 const useStyles = makeStyles({
   stack: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '14px'
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
+    gap: '14px',
+    alignItems: 'start'
   },
   card: {
     padding: '14px 16px',

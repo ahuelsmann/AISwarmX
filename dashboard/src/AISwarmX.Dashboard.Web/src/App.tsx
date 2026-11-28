@@ -20,6 +20,7 @@ import { MainLandingTickerCard } from './components/MainLandingTickerCard';
 import { MonitorCards } from './components/MonitorCards';
 import { PipelineCard } from './components/PipelineCard';
 import { StatusHeader, type WarningTarget } from './components/StatusHeader';
+import { SwarmActivityPulseBar } from './components/SwarmActivityPulseBar';
 import { SwarmBusCard } from './components/SwarmBusCard';
 import { mobaDarkTheme, mobaLightTheme } from './theme/mobaFluentTheme';
 import type {
@@ -48,14 +49,10 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: '12px'
   },
-  liveSplit: {
+  hygieneSkeletonGrid: {
     display: 'grid',
-    gridTemplateColumns: 'minmax(0, 7fr) minmax(0, 5fr)',
-    gap: '14px',
-    alignItems: 'start',
-    '@media (max-width: 1099px)': {
-      gridTemplateColumns: 'minmax(0, 1fr)'
-    }
+    gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
+    gap: '14px'
   },
   monitorsRow: {
     display: 'grid',
@@ -340,21 +337,30 @@ export function App() {
                 onOpenMatrix={() => handleOpenMatrixSync(false)}
               />
 
+              <SwarmActivityPulseBar
+                swarmBus={snapshot.swarmBus}
+                workflowRuns={snapshot.pipeline.workflowRuns}
+                monitors={snapshot.monitors.monitors}
+                liveConnectionState={liveConnectionState}
+                nowMs={nowMs}
+                isDark={isDark}
+                onOpenCommunication={() => setActiveTab('communication')}
+              />
+
               <MainLandingTickerCard pipeline={snapshot.pipeline} nowMs={nowMs} />
 
-              <div className={styles.liveSplit}>
-                <PipelineCard
-                  pipeline={snapshot.pipeline}
-                  monitors={snapshot.monitors.monitors}
-                  nowMs={nowMs}
-                  isDark={isDark}
-                />
-                <HygieneAndSyncPanel
-                  governance={snapshot.governance}
-                  hygiene={snapshot.hygiene}
-                  onOpenMatrixSync={handleOpenMatrixSync}
-                />
-              </div>
+              <PipelineCard
+                pipeline={snapshot.pipeline}
+                monitors={snapshot.monitors.monitors}
+                nowMs={nowMs}
+                isDark={isDark}
+              />
+
+              <HygieneAndSyncPanel
+                governance={snapshot.governance}
+                hygiene={snapshot.hygiene}
+                onOpenMatrixSync={handleOpenMatrixSync}
+              />
 
               <div className={styles.liveFooter}>
                 <Link
@@ -427,9 +433,10 @@ function LoadingSkeleton({ styles }: { styles: ReturnType<typeof useStyles> }) {
         <SkeletonItem style={{ height: 112, borderRadius: tokens.borderRadiusMedium }} />
       </div>
       <SkeletonItem style={{ height: 68, borderRadius: tokens.borderRadiusMedium }} />
-      <div className={styles.liveSplit}>
-        <SkeletonItem style={{ height: 280, borderRadius: tokens.borderRadiusMedium }} />
-        <SkeletonItem style={{ height: 280, borderRadius: tokens.borderRadiusMedium }} />
+      <SkeletonItem style={{ height: 280, borderRadius: tokens.borderRadiusMedium }} />
+      <div className={styles.hygieneSkeletonGrid}>
+        <SkeletonItem style={{ height: 180, borderRadius: tokens.borderRadiusMedium }} />
+        <SkeletonItem style={{ height: 180, borderRadius: tokens.borderRadiusMedium }} />
       </div>
     </Skeleton>
   );

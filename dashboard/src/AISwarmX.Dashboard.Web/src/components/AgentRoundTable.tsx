@@ -55,7 +55,7 @@ const useStyles = makeStyles({
   },
   svgContainer: {
     borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground2,
+    backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     padding: '4px 8px'
   },
@@ -110,10 +110,10 @@ interface PositionedSeat {
 }
 
 const SVG_W = 760;
-const CARD_W = 224;
-const CARD_H = 48;
-const R_TABLE = 46;
-const R_ORBIT = 84;
+const CARD_W = 252;
+const CARD_H = 54;
+const R_TABLE = 50;
+const R_ORBIT = 88;
 const R_NODE = 21;
 const TRIM_DIST = R_NODE + 6;
 
@@ -424,7 +424,7 @@ function renderCenterTable(
   centerToneStyles: ToneStylePair
 ) {
   const sub = shortCenterSub(centerSub);
-  const badgeW = Math.min(rTable * 1.56, Math.max(58, centerStatus.length * 5.2 + 12));
+  const badgeW = Math.min(rTable * 1.62, Math.max(64, centerStatus.length * 5.8 + 14));
   return (
     <>
       <circle
@@ -454,10 +454,10 @@ function renderCenterTable(
       />
       <text
         x={cx}
-        y={cy - 11}
+        y={cy - 12}
         textAnchor="middle"
         fill={tokens.colorNeutralForeground1}
-        fontSize={12}
+        fontSize={13.5}
         fontWeight={700}
         fontFamily="var(--fontFamilyMonospace, monospace)"
       >
@@ -465,30 +465,30 @@ function renderCenterTable(
       </text>
       <text
         x={cx}
-        y={cy + 2}
+        y={cy + 3}
         textAnchor="middle"
         fill={tokens.colorNeutralForeground2}
-        fontSize={9.5}
+        fontSize={10.5}
         fontWeight={500}
       >
         {sub}
       </text>
       <rect
         x={cx - badgeW / 2}
-        y={cy + 10}
+        y={cy + 12}
         width={badgeW}
-        height={16}
-        rx={8}
+        height={17}
+        rx={8.5}
         fill={centerToneStyles.bg}
         stroke={centerToneStyles.solid}
         strokeWidth={1}
       />
       <text
         x={cx}
-        y={cy + 21}
+        y={cy + 24}
         textAnchor="middle"
         fill={centerToneStyles.fg}
-        fontSize={9.5}
+        fontSize={10.5}
         fontWeight={600}
       >
         {centerStatus}
@@ -532,9 +532,9 @@ function computeTableLayout(participants: TaskParticipantInfo[]): LayoutConfig {
 
   const count = ordered.length;
   const cx = count === 1 ? 248 : 380;
-  const cy = count === 1 ? 58 : count === 2 ? 94 : 168;
-  const viewHeight = count === 1 ? 116 : count === 2 ? 188 : count === 3 ? 262 : 338;
-  const maxHeight = count === 1 ? 112 : count === 2 ? 166 : count === 3 ? 236 : 304;
+  const cy = count === 1 ? 60 : count === 2 ? 98 : 176;
+  const viewHeight = count === 1 ? 122 : count === 2 ? 196 : count === 3 ? 274 : 358;
+  const maxHeight = count === 1 ? 132 : count === 2 ? 192 : count === 3 ? 270 : 348;
 
   let stepCounter = 0;
 
@@ -563,15 +563,15 @@ function computeTableLayout(participants: TaskParticipantInfo[]): LayoutConfig {
     if (count === 1) {
       cardSide = 'right';
       cardX = 414;
-      cardY = 34;
+      cardY = 33;
     } else if (count === 2) {
       if (Math.cos(rad) < 0) {
         cardSide = 'left';
-        cardX = 34;
+        cardX = 12;
         cardY = cy - CARD_H / 2;
       } else {
         cardSide = 'right';
-        cardX = 502;
+        cardX = 496;
         cardY = cy - CARD_H / 2;
       }
     } else if (Math.sin(rad) < -0.82) {
@@ -687,15 +687,15 @@ export function AgentRoundTable({
 
         <div className={styles.svgContainer}>
           <svg
-            viewBox={`0 0 ${SVG_W} 112`}
-            style={{ width: '100%', height: 'auto', maxHeight: 112, display: 'block' }}
+            viewBox={`0 0 ${SVG_W} 120`}
+            style={{ width: '100%', height: 'auto', maxHeight: 126, display: 'block' }}
             role="img"
             aria-label={`Round table of 0 Agents for ${centerLabel}`}
           >
             <circle
               cx={250}
-              cy={56}
-              r={52}
+              cy={60}
+              r={55}
               fill="none"
               stroke={tokens.colorNeutralStroke2}
               strokeWidth={1}
@@ -703,13 +703,13 @@ export function AgentRoundTable({
               opacity={0.75}
             />
 
-            {renderCenterTable(250, 56, 44, centerLabel, centerSub, centerStatus, centerToneStyles)}
+            {renderCenterTable(250, 60, 48, centerLabel, centerSub, centerStatus, centerToneStyles)}
 
             <line
-              x1={299}
-              y1={56}
+              x1={305}
+              y1={60}
               x2={348}
-              y2={56}
+              y2={60}
               stroke={tokens.colorNeutralStroke1}
               strokeWidth={1.2}
               strokeDasharray="4 4"
@@ -717,9 +717,9 @@ export function AgentRoundTable({
 
             <rect
               x={348}
-              y={32}
-              width={240}
-              height={48}
+              y={33}
+              width={CARD_W}
+              height={CARD_H}
               rx={8}
               fill={tokens.colorNeutralBackground1}
               stroke={tokens.colorNeutralStroke1}
@@ -727,26 +727,26 @@ export function AgentRoundTable({
             />
             <rect
               x={351.5}
-              y={38}
+              y={39}
               width={3.5}
-              height={36}
+              height={CARD_H - 12}
               rx={1.75}
               fill={tokens.colorNeutralStroke1}
             />
             <text
               x={364}
-              y={52}
+              y={53}
               fill={tokens.colorNeutralForeground1}
-              fontSize={11.5}
+              fontSize={12.5}
               fontWeight={600}
             >
               Awaiting Agent Assignment
             </text>
             <text
               x={364}
-              y={68}
+              y={73}
               fill={tokens.colorNeutralForeground2}
-              fontSize={10}
+              fontSize={10.5}
             >
               No agent evidence recorded yet
             </text>
@@ -758,6 +758,12 @@ export function AgentRoundTable({
 
   const { cx, cy, viewHeight, maxHeight, seats } = computeTableLayout(participants);
   const workflowSeats = seats.filter((s) => !s.isSteering);
+  const liveWorkingByKey = new Map<string, boolean>(
+    seats.map((seat) => [
+      seat.key,
+      isParticipantActivelyWorking(seat.participant, monitors, centerStatus, isTerminal)
+    ])
+  );
   const focusKey = hoveredKey ?? selectedKey;
   const focusedSeat = focusKey ? seats.find((s) => s.key === focusKey) : undefined;
   const deltaTheta = 2 * Math.asin(TRIM_DIST / (2 * R_ORBIT));
@@ -863,6 +869,9 @@ export function AgentRoundTable({
             const largeArc = span > Math.PI ? 1 : 0;
 
             const isRelated = !focusKey || focusKey === from.key || focusKey === to.key;
+            const isFlowActive =
+              (liveWorkingByKey.get(from.key) ?? false) ||
+              (liveWorkingByKey.get(to.key) ?? false);
             const edgeToneKey: StatusToneKey =
               to.statusTone === 'red' || to.statusTone === 'gold'
                 ? to.statusTone
@@ -879,12 +888,22 @@ export function AgentRoundTable({
             return (
               <path
                 key={`edge-${from.key}-${to.key}`}
+                className={isFlowActive ? 'roundtable-flow-active' : undefined}
+                data-flow-active={isFlowActive ? 'true' : 'false'}
                 d={`M ${sx.toFixed(1)} ${sy.toFixed(1)} A ${R_ORBIT} ${R_ORBIT} 0 ${largeArc} 1 ${ex.toFixed(1)} ${ey.toFixed(1)}`}
                 fill="none"
                 stroke={strokeColor}
                 strokeWidth={isRelated && focusKey ? 2.4 : 1.8}
                 strokeLinecap="round"
-                strokeDasharray={to.statusDashed ? '4 4' : undefined}
+                strokeDasharray={
+                  isFlowActive
+                    ? to.statusDashed
+                      ? '4 4'
+                      : '5 3'
+                    : to.statusDashed
+                      ? '4 4'
+                      : undefined
+                }
                 markerEnd={`url(#${markerPrefix}-arrow-${edgeToneKey})`}
                 opacity={focusKey ? (isRelated ? 1 : 0.22) : to.statusDashed ? 0.68 : 0.9}
               />
@@ -906,6 +925,7 @@ export function AgentRoundTable({
               const ex = cx - (R_TABLE + 6) * dx;
               const ey = cy - (R_TABLE + 6) * dy;
               const isRelated = !focusKey || focusKey === seat.key;
+              const isFlowActive = liveWorkingByKey.get(seat.key) ?? false;
               const strokeTone: StatusToneKey = seat.statusTone;
               const strokeColor =
                 strokeTone === 'neutral'
@@ -915,13 +935,23 @@ export function AgentRoundTable({
               return (
                 <line
                   key={`spoke-${seat.key}`}
+                  className={isFlowActive ? 'roundtable-flow-active' : undefined}
+                  data-flow-active={isFlowActive ? 'true' : 'false'}
                   x1={sx.toFixed(1)}
                   y1={sy.toFixed(1)}
                   x2={ex.toFixed(1)}
                   y2={ey.toFixed(1)}
                   stroke={strokeColor}
                   strokeWidth={isRelated && focusKey ? 2.1 : 1.5}
-                  strokeDasharray={seat.isSteering ? '4 3' : undefined}
+                  strokeDasharray={
+                    isFlowActive
+                      ? seat.isSteering
+                        ? '4 4'
+                        : '5 3'
+                      : seat.isSteering
+                        ? '4 3'
+                        : undefined
+                  }
                   markerEnd={`url(#${markerPrefix}-arrow-${strokeTone})`}
                   opacity={focusKey ? (isRelated ? 0.95 : 0.2) : 0.82}
                 />
@@ -934,12 +964,7 @@ export function AgentRoundTable({
           {/* Agent Seats (Axis 1 Identity) + Top-Right Status Dot & Framed Visitenkarten */}
           {seats.map((seat) => {
             const isFocused = focusKey === seat.key;
-            const isLiveWorking = isParticipantActivelyWorking(
-              seat.participant,
-              monitors,
-              centerStatus,
-              isTerminal
-            );
+            const isLiveWorking = liveWorkingByKey.get(seat.key) ?? false;
             const statusColors = getToneStyles(seat.statusTone, isDark);
             const profileColors = getToneStyles(seat.identityTone, isDark);
             const statusStroke = seat.statusDashed
@@ -947,9 +972,9 @@ export function AgentRoundTable({
               : statusColors.solid;
 
             const statusText = shortStatusLabel(seat.participant.status);
-            const pillW = Math.max(40, statusText.length * 5.6 + 14);
+            const pillW = Math.max(44, statusText.length * 6.1 + 16);
             const pillX = seat.cardX + CARD_W - 8 - pillW;
-            const pillY = seat.cardY + 24;
+            const pillY = seat.cardY + 28;
             const pillBg = seat.statusDashed ? tokens.colorNeutralBackground3 : statusColors.bg;
 
             const stepX = seat.x - R_NODE * 0.72;
@@ -1136,19 +1161,19 @@ export function AgentRoundTable({
                 {/* Row 1: Role + Tool */}
                 <text
                   x={(seat.cardX + 14).toFixed(1)}
-                  y={(seat.cardY + 18).toFixed(1)}
+                  y={(seat.cardY + 20).toFixed(1)}
                   fill={tokens.colorNeutralForeground1}
-                  fontSize={11.5}
+                  fontSize={12.5}
                   fontWeight={600}
                 >
                   {shortRoleLabel(seat.participant.role)}
                 </text>
                 <text
                   x={(seat.cardX + CARD_W - 10).toFixed(1)}
-                  y={(seat.cardY + 18).toFixed(1)}
+                  y={(seat.cardY + 20).toFixed(1)}
                   textAnchor="end"
                   fill={tokens.colorNeutralForeground3}
-                  fontSize={9.5}
+                  fontSize={10.5}
                   fontWeight={500}
                 >
                   {shortToolLabel(seat.participant.tool)}
@@ -1157,9 +1182,9 @@ export function AgentRoundTable({
                 {/* Row 2: Model + Framed Status Pill (Axis 2 Status) */}
                 <text
                   x={(seat.cardX + 14).toFixed(1)}
-                  y={(seat.cardY + 36).toFixed(1)}
+                  y={(seat.cardY + 40).toFixed(1)}
                   fill={tokens.colorNeutralForeground2}
-                  fontSize={10}
+                  fontSize={11}
                   fontFamily="var(--fontFamilyMonospace, monospace)"
                 >
                   {shortModelLabel(seat.participant.model)}
@@ -1169,8 +1194,8 @@ export function AgentRoundTable({
                   x={pillX.toFixed(1)}
                   y={pillY.toFixed(1)}
                   width={pillW.toFixed(1)}
-                  height={16}
-                  rx={8}
+                  height={17}
+                  rx={8.5}
                   fill={pillBg}
                   stroke={statusStroke}
                   strokeWidth={1}
@@ -1178,10 +1203,10 @@ export function AgentRoundTable({
                 />
                 <text
                   x={(pillX + pillW / 2).toFixed(1)}
-                  y={(pillY + 11.2).toFixed(1)}
+                  y={(pillY + 12).toFixed(1)}
                   textAnchor="middle"
                   fill={seat.statusDashed ? tokens.colorNeutralForeground2 : statusColors.fg}
-                  fontSize={9.5}
+                  fontSize={10.5}
                   fontWeight={600}
                 >
                   {statusText}
