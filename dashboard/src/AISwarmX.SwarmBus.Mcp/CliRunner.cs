@@ -25,6 +25,18 @@ internal static class CliRunner
         {
             var subcommand = (cliArgs.Length > 0 ? cliArgs[0] : "status").Trim().ToLowerInvariant();
             var flags = ParseFlags(cliArgs.Length > 1 ? cliArgs[1..] : []);
+            if (subcommand is "import-legacy" or "import_legacy")
+            {
+                var legacyDb = GetSingle(flags, "legacy-db", "legacy_db") ?? SwarmBusStore.ResolveLegacyDefaultDbPath();
+                var importRes = store.ImportFromLegacyDb(legacyDb);
+                var importJson = JsonSerializer.Serialize(
+                    new { ok = true, legacyDb, targetDb = store.DatabasePath, result = importRes },
+                    SwarmBusToolDispatcher.IndentedJsonOptions);
+                await output.WriteLineAsync(importJson.AsMemory(), cancellationToken).ConfigureAwait(false);
+                await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+                return 0;
+            }
+
             var (toolName, argsObject) = MapSubcommandToTool(subcommand, flags);
 
             using var doc = JsonDocument.Parse(argsObject.ToJsonString());
@@ -155,7 +167,7 @@ internal static class CliRunner
 
             default:
                 throw new ArgumentException(
-                    $"Unknown CLI command '{subcommand}'. Expected: send, inbox, ack, locks, review-claim, queue, status, wait, start-work.");
+                    $"Unknown CLI command '{subcommand}'. Expected: send, inbox, ack, locks, review-claim, queue, status, wait, start-work, import-legacy.");
         }
     }
 

@@ -335,9 +335,12 @@ public sealed class DashboardOptions
             string.IsNullOrEmpty(mobaDevPath)
                 ? string.Empty
                 : Path.Combine(mobaDevPath, "dashboard", "src", "AISwarmX.Dashboard.Web", "dist"));
+        var v2BusDb = Path.Combine(localAppData, "MOBAdev", "swarm-bus-v2.db");
+        var legacyBusDb = Path.Combine(localAppData, "MOBAdev", "swarm-bus.db");
+        var defaultBusDb = File.Exists(v2BusDb) || !File.Exists(legacyBusDb) ? v2BusDb : legacyBusDb;
         var swarmBusDbPath = ResolveOrDefault(
             SwarmBusDbPath,
-            Path.Combine(localAppData, "MOBAdev", "swarm-bus.db"));
+            defaultBusDb);
 
         return new ResolvedDashboardPaths(
             mobaDevPath,

@@ -407,6 +407,51 @@ $rf30OpenInProgress = @($boardItems | Where-Object { $_.Kind -eq "Issue" -and $_
 $busScript = Join-Path $RepoDevRoot "bus\mobai-swarm-bus.mjs"
 $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
 $codexExe = Join-Path $env:USERPROFILE ".codex\.sandbox-bin\codex.exe"
+$mcpPublishedExe = Join-Path $env:LOCALAPPDATA "MOBAdev\bin\AISwarmX.SwarmBus.Mcp\AISwarmX.SwarmBus.Mcp.exe"
+$mcpBuildExe = Join-Path $RepoDevRoot "dashboard\src\AISwarmX.SwarmBus.Mcp\bin\Release\net10.0\AISwarmX.SwarmBus.Mcp.exe"
+$useDotNetBus = [string]::IsNullOrWhiteSpace($env:MOBADEV_SWARM_BUS_DB) -and (
+    (Test-Path -LiteralPath $mcpPublishedExe) -or (Test-Path -LiteralPath $mcpBuildExe)
+)
+$activeMcpExe = if (Test-Path -LiteralPath $mcpPublishedExe) { $mcpPublishedExe } else { $mcpBuildExe }
+$busCliAvailable = $useDotNetBus -or ($nodeCmd -and (Test-Path -LiteralPath $busScript))
+
+function Invoke-SwarmBusCli {
+    param([string[]]$CliArgs)
+
+    if ($useDotNetBus) {
+        return (& $activeMcpExe --cli @CliArgs --workspace-id mobaflow 2>$null)
+    }
+
+    return (& $nodeCmd.Source --no-warnings $busScript --cli @CliArgs 2>$null)
+}
+
+function Get-ObjectPropertyValue {
+    param($Object, [string[]]$Names)
+    if ($null -eq $Object) { return $null }
+    foreach ($name in $Names) {
+        $prop = $Object.PSObject.Properties[$name]
+        if ($null -ne $prop) {
+            return $prop.Value
+        }
+    }
+    return $null
+}
+
+function ConvertTo-NormalizedQueueItem {
+    param($Item)
+    if ($null -eq $Item) { return $null }
+    $issueNumRaw = Get-ObjectPropertyValue -Object $Item -Names @("issue_number", "issueNumber")
+    $riskVal = Get-ObjectPropertyValue -Object $Item -Names @("risk_class", "riskClass")
+    $leaseVal = Get-ObjectPropertyValue -Object $Item -Names @("lease_expires_utc", "leaseExpiresUtc")
+    return [pscustomobject]@{
+        issue_number      = [int]$issueNumRaw
+        title             = Get-ObjectPropertyValue -Object $Item -Names @("title")
+        priority          = Get-ObjectPropertyValue -Object $Item -Names @("priority")
+        risk_class        = $riskVal
+        status            = Get-ObjectPropertyValue -Object $Item -Names @("status")
+        lease_expires_utc = $leaseVal
+    }
+}
 
 $hasPriorityField = $projectFieldNames -contains "Priority"
 $hasRiskField = $projectFieldNames -contains "Risk class"
@@ -461,19 +506,19 @@ $queueSyncResult = [pscustomobject]@{
 }
 
 $queueItemsSnapshot = @()
-if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
+if ($busCliAvailable) {
     if ($effectiveSyncQueue -and $boardReadSucceeded) {
         try {
             if ($openPrsReadSucceeded) {
-                & $nodeCmd.Source --no-warnings $busScript --cli queue --action sync-meta --meta-key "code_wip" --meta-value "$openCodePrCount" 2>$null | Out-Null
+                Invoke-SwarmBusCli -CliArgs @("queue", "--action", "sync-meta", "--meta-key", "code_wip", "--meta-value", "$openCodePrCount") | Out-Null
             }
 
             if ($queueSchemaValid) {
-                $preListJson = & $nodeCmd.Source --no-warnings $busScript --cli queue --action list 2>$null
+                $preListJson = Invoke-SwarmBusCli -CliArgs @("queue", "--action", "list")
                 $existingQueueItems = @()
                 if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($preListJson)) {
                     $preListObj = ($preListJson -join "`n") | ConvertFrom-Json
-                    $existingQueueItems = @($preListObj.items)
+                    $existingQueueItems = @($preListObj.items | ForEach-Object { ConvertTo-NormalizedQueueItem $_ })
                 }
 
                 $readyIssueSet = [System.Collections.Generic.HashSet[int]]::new()
@@ -487,11 +532,11 @@ if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
                         default { 2 }
                     }
                     $riskVal = if ($ri.RiskClass) { "$($ri.RiskClass)".Trim().ToUpperInvariant() } else { "" }
-                    $upsertArgs = @("--no-warnings", $busScript, "--cli", "queue", "--action", "upsert", "--issue-number", "$($ri.Number)", "--title", "$($ri.Title)", "--priority", "$prioInt", "--status", "queued")
+                    $upsertArgs = @("queue", "--action", "upsert", "--issue-number", "$($ri.Number)", "--title", "$($ri.Title)", "--priority", "$prioInt", "--status", "queued")
                     if ($riskVal -in @("H", "M", "L")) {
                         $upsertArgs += @("--risk-class", $riskVal)
                     }
-                    & $nodeCmd.Source @upsertArgs 2>$null | Out-Null
+                    Invoke-SwarmBusCli -CliArgs $upsertArgs | Out-Null
                     if ($LASTEXITCODE -eq 0) { $queueSyncResult.UpsertedCount++ }
                 }
 
@@ -514,18 +559,18 @@ if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
                         }
 
                         if ($hasLinkedOpenPr) {
-                            & $nodeCmd.Source --no-warnings $busScript --cli queue --action done --issue-number "$qNum" 2>$null | Out-Null
+                            Invoke-SwarmBusCli -CliArgs @("queue", "--action", "done", "--issue-number", "$qNum") | Out-Null
                             if ($LASTEXITCODE -eq 0) { $queueSyncResult.DoneCount++ }
                             continue
                         }
 
                         if ($boardMatch) {
                             if ($boardMatch.GitHubState -eq "CLOSED" -or $boardMatch.KanbanStatus -eq "Done") {
-                                & $nodeCmd.Source --no-warnings $busScript --cli queue --action done --issue-number "$qNum" 2>$null | Out-Null
+                                Invoke-SwarmBusCli -CliArgs @("queue", "--action", "done", "--issue-number", "$qNum") | Out-Null
                                 if ($LASTEXITCODE -eq 0) { $queueSyncResult.DoneCount++ }
                             }
                             elseif ($boardMatch.KanbanStatus -in @("Planned", "Inbox")) {
-                                & $nodeCmd.Source --no-warnings $busScript --cli queue --action upsert --issue-number "$qNum" --status "removed" 2>$null | Out-Null
+                                Invoke-SwarmBusCli -CliArgs @("queue", "--action", "upsert", "--issue-number", "$qNum", "--status", "removed") | Out-Null
                                 if ($LASTEXITCODE -eq 0) { $queueSyncResult.RemovedCount++ }
                             }
                             # Otherwise the issue is open (e.g. In progress / In review) with no linked PR yet: preserve lease & WIP reservation.
@@ -567,11 +612,11 @@ if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
                         }
 
                         if ($claimTransition -eq "done") {
-                            & $nodeCmd.Source --no-warnings $busScript --cli queue --action done --issue-number "$qNum" 2>$null | Out-Null
+                            Invoke-SwarmBusCli -CliArgs @("queue", "--action", "done", "--issue-number", "$qNum") | Out-Null
                             if ($LASTEXITCODE -eq 0) { $queueSyncResult.DoneCount++ }
                         }
                         elseif ($claimTransition -eq "removed") {
-                            & $nodeCmd.Source --no-warnings $busScript --cli queue --action upsert --issue-number "$qNum" --status "removed" 2>$null | Out-Null
+                            Invoke-SwarmBusCli -CliArgs @("queue", "--action", "upsert", "--issue-number", "$qNum", "--status", "removed") | Out-Null
                             if ($LASTEXITCODE -eq 0) { $queueSyncResult.RemovedCount++ }
                         }
                         continue
@@ -589,11 +634,11 @@ if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
                     }
 
                     if ($isClosed) {
-                        & $nodeCmd.Source --no-warnings $busScript --cli queue --action done --issue-number "$qNum" 2>$null | Out-Null
+                        Invoke-SwarmBusCli -CliArgs @("queue", "--action", "done", "--issue-number", "$qNum") | Out-Null
                         if ($LASTEXITCODE -eq 0) { $queueSyncResult.DoneCount++ }
                     }
                     else {
-                        & $nodeCmd.Source --no-warnings $busScript --cli queue --action upsert --issue-number "$qNum" --status "removed" 2>$null | Out-Null
+                        Invoke-SwarmBusCli -CliArgs @("queue", "--action", "upsert", "--issue-number", "$qNum", "--status", "removed") | Out-Null
                         if ($LASTEXITCODE -eq 0) { $queueSyncResult.RemovedCount++ }
                     }
                 }
@@ -605,10 +650,10 @@ if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
     }
 
     try {
-        $postListJson = & $nodeCmd.Source --no-warnings $busScript --cli queue --action list 2>$null
+        $postListJson = Invoke-SwarmBusCli -CliArgs @("queue", "--action", "list")
         if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($postListJson)) {
             $postListObj = ($postListJson -join "`n") | ConvertFrom-Json
-            $queueItemsSnapshot = @($postListObj.items)
+            $queueItemsSnapshot = @($postListObj.items | ForEach-Object { ConvertTo-NormalizedQueueItem $_ })
         }
     }
     catch {
@@ -741,7 +786,7 @@ if ($DispatchEvents) {
             }
         }
 
-        if ($nodeCmd -and (Test-Path -LiteralPath $busScript)) {
+        if ($busCliAvailable) {
             try {
                 $busRecipient = if ($ev.BusRecipient) { $ev.BusRecipient } else {
                     switch ($ev.TargetOwner) {
@@ -750,7 +795,7 @@ if ($DispatchEvents) {
                         default { "claude-opus" }
                     }
                 }
-                $sendArgs = @("--no-warnings", $busScript, "--cli", "send", "--from", "watchdog", "--to", $busRecipient, "--topic", $ev.EventType, "--priority", "high", "--body", $ev.Message)
+                $sendArgs = @("send", "--from", "watchdog", "--to", $busRecipient, "--topic", $ev.EventType, "--priority", "high", "--body", $ev.Message)
                 if ($null -ne $ev.PrNumber -and [int]$ev.PrNumber -gt 0) {
                     $sendArgs += @("--pr", "$($ev.PrNumber)")
                 }
@@ -771,7 +816,7 @@ if ($DispatchEvents) {
                     $env:MOBADEV_CODEX_THREAD_ID = $CodexThreadId
                 }
                 try {
-                    & $nodeCmd.Source @sendArgs 2>$null | Out-Null
+                    Invoke-SwarmBusCli -CliArgs $sendArgs | Out-Null
                 }
                 finally {
                     if ($null -eq $prevCodexThreadEnv) {
@@ -832,7 +877,7 @@ elseif ($fastPathCandidates.Count -gt 0) {
     "Prüfe die grünen PR-Kandidaten ($prNums) auf Disjoint main-Sync Fast-Path / Ready-Promotion und Auto-Merge."
 }
 elseif ($readyIntakeAvailable) {
-    "Prüfe die Ready-Spalte im MOBAflow GitHub Kanban Board und starte freie disjunkte Spuren gemäß AGENTS.md, master-coordination.instructions.md und MOBAdev/manifest.md (3-Welten-Parallelbetrieb)."
+    "Prüfe die Ready-Spalte im MOBAflow GitHub Kanban Board und starte freie disjunkte Spuren gemäß AGENTS.md, master-coordination.instructions.md und AISwarmX/manifest.md (N-Welten-Parallelbetrieb)."
 }
 else {
     "Keine Aktion erforderlich — Code WIP ausgelastet oder keine offenen Ready-Issues."

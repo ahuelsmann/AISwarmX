@@ -6,7 +6,8 @@ using AISwarmX.Dashboard.Api.Contracts;
 namespace AISwarmX.Dashboard.Api.Providers;
 
 /// <summary>
-/// Strictly read-only reader for the cross-tool MOBAi Swarm Bus SQLite database (%LOCALAPPDATA%\MOBAdev\swarm-bus.db).
+/// Strictly read-only reader for the cross-tool AISwarmX Swarm Bus SQLite database
+/// (%LOCALAPPDATA%\MOBAdev\swarm-bus-v2.db with fallback to legacy swarm-bus.db).
 /// </summary>
 public class SwarmBusProvider
 {
@@ -44,12 +45,14 @@ public class SwarmBusProvider
                 }
             }
 
+            var hasMsgWorkspace = TableHasColumn(connection, "messages", "workspace_id");
             var messages = new List<SwarmBusMessageInfo>(RecentMessageLimit);
             using (var msgCmd = connection.CreateCommand())
             {
-                msgCmd.CommandText = """
+                var workspaceSelect = hasMsgWorkspace ? ", workspace_id" : string.Empty;
+                msgCmd.CommandText = $"""
                     SELECT id, created_at_utc, sender, recipient, topic, body,
-                           pr_number, issue_number, priority, reply_to_id, status, acked_by
+                           pr_number, issue_number, priority, reply_to_id, status, acked_by{workspaceSelect}
                     FROM messages
                     ORDER BY id DESC
                     LIMIT @limit
@@ -72,15 +75,18 @@ public class SwarmBusProvider
                         Priority: reader.IsDBNull(8) ? "normal" : reader.GetString(8),
                         ReplyToId: reader.IsDBNull(9) ? null : reader.GetInt64(9),
                         Status: reader.IsDBNull(10) ? "unread" : reader.GetString(10),
-                        AckedBy: reader.IsDBNull(11) ? null : reader.GetString(11)));
+                        AckedBy: reader.IsDBNull(11) ? null : reader.GetString(11),
+                        WorkspaceId: hasMsgWorkspace && !reader.IsDBNull(12) ? reader.GetString(12) : null));
                 }
             }
 
+            var hasLockWorkspace = TableHasColumn(connection, "locks", "workspace_id");
             var locks = new List<SwarmBusLockInfo>();
             using (var lockCmd = connection.CreateCommand())
             {
-                lockCmd.CommandText = """
-                    SELECT id, agent, path_pattern, pr_number, claimed_at_utc, expires_at_utc
+                var workspaceSelect = hasLockWorkspace ? ", workspace_id" : string.Empty;
+                lockCmd.CommandText = $"""
+                    SELECT id, agent, path_pattern, pr_number, claimed_at_utc, expires_at_utc{workspaceSelect}
                     FROM locks
                     ORDER BY id ASC
                     """;
@@ -100,7 +106,8 @@ public class SwarmBusProvider
                         PathPattern: reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
                         PrNumber: reader.IsDBNull(3) ? null : reader.GetInt32(3),
                         ClaimedAtUtc: claimedAt,
-                        ExpiresAtUtc: expiresAt));
+                        ExpiresAtUtc: expiresAt,
+                        WorkspaceId: hasLockWorkspace && !reader.IsDBNull(6) ? reader.GetString(6) : null));
                 }
             }
 
@@ -132,6 +139,22 @@ public class SwarmBusProvider
                 ActiveLocks: [],
                 Source: new SourceHealth("degraded", now, $"Swarm bus read failed: {ex.Message}")));
         }
+    }
+
+    private static bool TableHasColumn(SqliteConnection connection, string tableName, string columnName)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"PRAGMA table_info({tableName})";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static DateTimeOffset ParseUtc(string raw, DateTimeOffset fallback)

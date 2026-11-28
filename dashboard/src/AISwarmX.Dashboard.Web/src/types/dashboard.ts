@@ -304,6 +304,7 @@ export interface SwarmBusMessageInfo {
   replyToId?: number | null;
   status: 'unread' | 'acked' | string;
   ackedBy?: string | null;
+  workspaceId?: string | null;
 }
 
 export interface SwarmBusLockInfo {
@@ -313,6 +314,7 @@ export interface SwarmBusLockInfo {
   prNumber?: number | null;
   claimedAtUtc: string;
   expiresAtUtc: string;
+  workspaceId?: string | null;
 }
 
 export interface SwarmBusResponse {

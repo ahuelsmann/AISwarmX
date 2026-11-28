@@ -433,7 +433,8 @@ public sealed record SwarmBusMessageInfo(
     string Priority,
     long? ReplyToId,
     string Status,
-    string? AckedBy);
+    string? AckedBy,
+    string? WorkspaceId = null);
 
 public sealed record SwarmBusLockInfo(
     long Id,
@@ -441,7 +442,8 @@ public sealed record SwarmBusLockInfo(
     string PathPattern,
     int? PrNumber,
     DateTimeOffset ClaimedAtUtc,
-    DateTimeOffset ExpiresAtUtc);
+    DateTimeOffset ExpiresAtUtc,
+    string? WorkspaceId = null);
 
 public sealed record SwarmBusResponse(
     DateTimeOffset GeneratedAtUtc,

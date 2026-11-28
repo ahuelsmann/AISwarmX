@@ -95,5 +95,65 @@ public sealed class SwarmBusProviderTests
         Assert.Equal("antigravity-gemini", result.RecentMessages[1].Sender);
         Assert.Single(result.ActiveLocks);
         Assert.Equal("MOBAdemo/app/src/shell", result.ActiveLocks[0].PathPattern);
+        Assert.Null(result.RecentMessages[0].WorkspaceId);
+    }
+
+    [Fact]
+    public async Task ReadsWorkspaceIdFromV2DatabaseWhenColumnExists()
+    {
+        using var fx = new TempDashboardFixture();
+        var dbPath = Path.Combine(fx.RootPath, "MOBAdev", "swarm-bus-v2.db");
+        var now = DateTimeOffset.UtcNow;
+        var futureIso = now.AddMinutes(30).ToString("O");
+        var createdIso = now.AddMinutes(-1).ToString("O");
+
+        TempDashboardFixture.CreateSqliteDb(dbPath, $"""
+            CREATE TABLE messages (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              workspace_id TEXT NOT NULL DEFAULT 'default',
+              created_at_utc TEXT NOT NULL,
+              sender TEXT NOT NULL,
+              recipient TEXT NOT NULL,
+              topic TEXT NOT NULL,
+              body TEXT NOT NULL,
+              pr_number INTEGER,
+              issue_number INTEGER,
+              priority TEXT NOT NULL DEFAULT 'normal',
+              reply_to_id INTEGER,
+              status TEXT NOT NULL DEFAULT 'unread',
+              acked_by TEXT,
+              acked_at_utc TEXT
+            );
+            CREATE TABLE locks (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              workspace_id TEXT NOT NULL DEFAULT 'default',
+              agent TEXT NOT NULL,
+              path_pattern TEXT NOT NULL,
+              pr_number INTEGER,
+              claimed_at_utc TEXT NOT NULL,
+              expires_at_utc TEXT NOT NULL
+            );
+            INSERT INTO messages (workspace_id, created_at_utc, sender, recipient, topic, body, status)
+            VALUES ('sentix', '{createdIso}', 'antigravity-gemini', 'codex', 'p2-sentix', 'SentiX msg', 'unread');
+            INSERT INTO locks (workspace_id, agent, path_pattern, pr_number, claimed_at_utc, expires_at_utc)
+            VALUES ('aiswarmx', 'codex', 'dashboard/src', 58, '{createdIso}', '{futureIso}');
+            """);
+
+        var paths = new ResolvedDashboardPaths(
+            fx.MobaDevPath,
+            fx.MobaFlowPath,
+            fx.ClaudeHomePath,
+            fx.CodexHomePath,
+            fx.AntigravityHomePath,
+            fx.GeminiConfigPath,
+            string.Empty,
+            dbPath);
+
+        var provider = new SwarmBusProvider();
+        var result = await provider.GetSwarmBusAsync(paths, CancellationToken.None);
+
+        Assert.Equal("ok", result.Source.Status);
+        Assert.Equal("sentix", Assert.Single(result.RecentMessages).WorkspaceId);
+        Assert.Equal("aiswarmx", Assert.Single(result.ActiveLocks).WorkspaceId);
     }
 }

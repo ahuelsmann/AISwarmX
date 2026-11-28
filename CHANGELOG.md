@@ -5,6 +5,18 @@ All notable changes to **AISwarmX** (formerly **MOBAdev**) and the local **AISwa
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.16.0] - 2026-11-28
+
+### Added & Changed
+- **Live `.NET 10` SwarmBus v2 Cutover & N-World `workspace_id` Isolation (`AISwarmX.SwarmBus.Mcp`, `DashboardOptions`, `SwarmBusProvider`, `SwarmBusCard.tsx`, `claude-swarm-bus-hook.mjs`, `Invoke-SwarmWatchdog.ps1`):**
+  - Added `--cli import-legacy [--legacy-db <path>]` to `AISwarmX.SwarmBus.Mcp` and added [scripts/Publish-SwarmBusMcp.ps1](scripts/Publish-SwarmBusMcp.ps1) to publish the live stdio MCP binary outside `bin/Release` (`%LOCALAPPDATA%\MOBAdev\bin\AISwarmX.SwarmBus.Mcp\AISwarmX.SwarmBus.Mcp.exe`).
+  - Switched default read/write bus resolution to `swarm-bus-v2.db` (preserving read-only compatibility with legacy `swarm-bus.db`), surfaced `workspaceId` badges on cross-repo messages and locks in `SwarmBusCard.tsx`, added `sentix` to `presets/mobaflow.swarm.json`, and updated `claude-swarm-bus-hook.mjs` + `Invoke-SwarmWatchdog.ps1` for `cwd`/`.git`-inferred `workspace_id` filtering across `N` repositories.
+- **N-World Governance, Pre-Flight Edge-Case Gate & Mandatory `bus_start_work` (`manifest.md`, `agents/`, `docs/delivery-workflow.md`):**
+  - Evolved orchestration terminology and rules from 3-world to **N-World Parallel Track Distribution** across arbitrary `N` workspaces.
+  - Added a 5-point **Pre-Flight Edge-Case Gate** (path boundaries/reparse fail-closed, locale-independent Windows errors, null/empty payload safety, `AggregateException`-safe rollbacks, UI focus/`AutomationPeer`) and mandatory `bus_start_work`/`bus_locks` (`workspace_id`) before concurrent multi-writer edits.
+
+---
+
 ## [3.15.1] - 2026-11-28
 
 ### Fixed

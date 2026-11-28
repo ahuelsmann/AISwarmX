@@ -219,6 +219,11 @@ export function SwarmBusCard({ swarmBus, nowMs, liveConnectionState = 'polling' 
               <span key={lock.id} className={styles.lockChip}>
                 <LockClosed16Regular aria-hidden="true" />
                 <strong>{lock.agent}</strong>
+                {lock.workspaceId && lock.workspaceId !== 'default' ? (
+                  <Badge appearance="outline" color="subtle" size="small">
+                    {lock.workspaceId}
+                  </Badge>
+                ) : null}
                 <span>{lock.pathPattern}</span>
                 {lock.prNumber ? <span>PR #{lock.prNumber}</span> : null}
                 <span>(exp {formatRemainingUtc(lock.expiresAtUtc, nowMs)})</span>
@@ -269,6 +274,11 @@ export function SwarmBusCard({ swarmBus, nowMs, liveConnectionState = 'polling' 
                     <span>
                       #{msg.id} · {msg.sender} → {msg.recipient}
                     </span>
+                    {msg.workspaceId && msg.workspaceId !== 'default' ? (
+                      <Badge appearance="outline" color="subtle">
+                        {msg.workspaceId}
+                      </Badge>
+                    ) : null}
                     <Badge appearance="outline" color="informative">
                       {msg.topic}
                     </Badge>

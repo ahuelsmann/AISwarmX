@@ -29,13 +29,18 @@ function resolveLocalAppDir() {
 }
 
 function resolveDbPath() {
-  for (const envName of ['MOBADEV_SWARM_BUS_HOOK_DB', 'MOBADEV_SWARM_BUS_DB']) {
+  for (const envName of ['MOBADEV_SWARM_BUS_HOOK_DB', 'MOBADEV_SWARM_BUS_V2_DB', 'MOBADEV_SWARM_BUS_DB']) {
     const candidate = process.env[envName];
     if (candidate && candidate.trim()) {
       return path.resolve(candidate.trim());
     }
   }
-  return path.join(resolveLocalAppDir(), 'swarm-bus.db');
+  const localApp = resolveLocalAppDir();
+  const v2Path = path.join(localApp, 'swarm-bus-v2.db');
+  if (fs.existsSync(v2Path)) {
+    return v2Path;
+  }
+  return path.join(localApp, 'swarm-bus.db');
 }
 
 function resolveStateDbPath() {
@@ -48,7 +53,7 @@ function resolveStateDbPath() {
 }
 
 function readHookInput() {
-  const fallback = { hookEventName: 'UserPromptSubmit', stopHookActive: false, sessionId: 'default' };
+  const fallback = { hookEventName: 'UserPromptSubmit', stopHookActive: false, sessionId: 'default', cwd: null };
   try {
     if (process.stdin.isTTY) {
       return fallback;
@@ -64,13 +69,52 @@ function readHookInput() {
     const sessionId = typeof parsed?.session_id === 'string' && parsed.session_id.trim()
       ? parsed.session_id.trim()
       : 'default';
+    const cwd = typeof parsed?.cwd === 'string' && parsed.cwd.trim()
+      ? parsed.cwd.trim()
+      : null;
     return {
       hookEventName: ev,
       stopHookActive: parsed?.stop_hook_active === true,
-      sessionId
+      sessionId,
+      cwd
     };
   } catch {
     return fallback;
+  }
+}
+
+function inferWorkspaceAliases(cwd, envWorkspaceId) {
+  const explicit = typeof envWorkspaceId === 'string' ? envWorkspaceId.trim().toLowerCase() : '';
+  if (explicit) {
+    if (explicit === '*') return null;
+    if (explicit === 'mobadev' || explicit === 'aiswarmx') {
+      return ['aiswarmx', 'mobadev', 'default', '*'];
+    }
+    return [explicit, 'default', '*'];
+  }
+
+  const normalized = String(cwd ?? '').replace(/\\/g, '/').toLowerCase();
+  const segments = normalized.split('/').filter(Boolean);
+  if (segments.includes('mobaflow')) return ['mobaflow', 'default', '*'];
+  if (segments.includes('mobadev') || segments.includes('aiswarmx')) return ['aiswarmx', 'mobadev', 'default', '*'];
+  if (segments.includes('sentix')) return ['sentix', 'default', '*'];
+
+  // N-World generic fallback: any arbitrary git checkout infers its repository leaf folder as workspace_id.
+  if (cwd && fs.existsSync(path.join(cwd, '.git'))) {
+    const leaf = path.basename(path.resolve(cwd)).toLowerCase();
+    if (leaf) {
+      return [leaf, 'default', '*'];
+    }
+  }
+  return null;
+}
+
+function tableHasColumn(db, tableName, columnName) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(${tableName})`).all();
+    return cols.some((c) => String(c.name).toLowerCase() === columnName.toLowerCase());
+  } catch {
+    return false;
   }
 }
 
@@ -187,6 +231,7 @@ function truncateText(value, maxLen = 220) {
 function formatMessageLines(messages) {
   return messages.map((msg) => {
     const refParts = [];
+    if (msg.workspace_id && msg.workspace_id !== 'default') refParts.push(msg.workspace_id);
     if (msg.pr_number) refParts.push(`PR #${msg.pr_number}`);
     if (msg.issue_number) refParts.push(`Issue #${msg.issue_number}`);
     const refText = refParts.length > 0 ? ` (${refParts.join(', ')})` : '';
@@ -194,38 +239,51 @@ function formatMessageLines(messages) {
   });
 }
 
-function queryUnreadAscending(db, minExclusiveId) {
+function buildWorkspaceFilter(hasWorkspaceColumn, aliases) {
+  if (!hasWorkspaceColumn || !Array.isArray(aliases) || aliases.length === 0) {
+    return { clause: '', params: [] };
+  }
+  const placeholders = aliases.map(() => '?').join(', ');
+  return { clause: ` AND lower(workspace_id) IN (${placeholders})`, params: aliases };
+}
+
+function queryUnreadAscending(db, minExclusiveId, hasWorkspaceColumn, workspaceAliases) {
+  const wsSelect = hasWorkspaceColumn ? ', workspace_id' : '';
+  const filter = buildWorkspaceFilter(hasWorkspaceColumn, workspaceAliases);
   return db.prepare(`
-    SELECT id, sender, recipient, topic, body, pr_number, issue_number, priority
+    SELECT id, sender, recipient, topic, body, pr_number, issue_number, priority${wsSelect}
     FROM messages
     WHERE status = 'unread'
       AND id > ?
-      AND lower(recipient) IN ('claude-opus', 'claude', 'all')
+      AND lower(recipient) IN ('claude-opus', 'claude', 'all')${filter.clause}
     ORDER BY id ASC
     LIMIT ?
-  `).all(minExclusiveId, PAGE_LIMIT + 1);
+  `).all(minExclusiveId, ...filter.params, PAGE_LIMIT + 1);
 }
 
-function queryUnreadRecent(db) {
+function queryUnreadRecent(db, hasWorkspaceColumn, workspaceAliases) {
+  const wsSelect = hasWorkspaceColumn ? ', workspace_id' : '';
+  const filter = buildWorkspaceFilter(hasWorkspaceColumn, workspaceAliases);
   return db.prepare(`
-    SELECT id, sender, recipient, topic, body, pr_number, issue_number, priority
+    SELECT id, sender, recipient, topic, body, pr_number, issue_number, priority${wsSelect}
     FROM messages
     WHERE status = 'unread'
-      AND lower(recipient) IN ('claude-opus', 'claude', 'all')
+      AND lower(recipient) IN ('claude-opus', 'claude', 'all')${filter.clause}
     ORDER BY id DESC
     LIMIT ?
-  `).all(PAGE_LIMIT + 1);
+  `).all(...filter.params, PAGE_LIMIT + 1);
 }
 
-function queryForeignLocks(db, nowIso) {
+function queryForeignLocks(db, nowIso, hasWorkspaceColumn, workspaceAliases) {
+  const filter = buildWorkspaceFilter(hasWorkspaceColumn, workspaceAliases);
   return db.prepare(`
     SELECT agent, path_pattern, pr_number, expires_at_utc
     FROM locks
     WHERE expires_at_utc > ?
-      AND lower(agent) NOT IN ('claude-opus', 'claude')
+      AND lower(agent) NOT IN ('claude-opus', 'claude')${filter.clause}
     ORDER BY id ASC
     LIMIT 12
-  `).all(nowIso);
+  `).all(nowIso, ...filter.params);
 }
 
 function main() {
@@ -234,12 +292,14 @@ function main() {
     return;
   }
 
-  const { hookEventName, stopHookActive, sessionId } = readHookInput();
+  const { hookEventName, stopHookActive, sessionId, cwd } = readHookInput();
   if (hookEventName === 'Stop' && stopHookActive) {
     return;
   }
 
-  const sessionHash = crypto.createHash('sha256').update(`${dbPath}::${sessionId}`).digest('hex').slice(0, 24);
+  const workspaceAliases = inferWorkspaceAliases(cwd, process.env.MOBADEV_WORKSPACE_ID);
+  const workspaceScopeKey = workspaceAliases ? workspaceAliases.join(',') : '*';
+  const sessionHash = crypto.createHash('sha256').update(`${dbPath}::${workspaceScopeKey}::${sessionId}`).digest('hex').slice(0, 24);
   const stateDbPath = resolveStateDbPath();
   const watermark = loadWatermark(stateDbPath, sessionHash);
   const nowIso = new Date().toISOString();
@@ -247,10 +307,12 @@ function main() {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     db.exec('PRAGMA busy_timeout = 1000;');
+    const hasMsgWorkspace = tableHasColumn(db, 'messages', 'workspace_id');
+    const hasLockWorkspace = tableHasColumn(db, 'locks', 'workspace_id');
 
     if (hookEventName === 'Stop') {
       const stopFloor = Math.max(watermark.lastStopBlockedId, 0);
-      const rows = queryUnreadAscending(db, stopFloor);
+      const rows = queryUnreadAscending(db, stopFloor, hasMsgWorkspace, workspaceAliases);
       if (rows.length === 0) {
         return;
       }
@@ -271,7 +333,7 @@ function main() {
     }
 
     if (hookEventName === 'PreToolUse' || hookEventName === 'PostToolUse') {
-      const rows = queryUnreadAscending(db, watermark.lastSurfacedId);
+      const rows = queryUnreadAscending(db, watermark.lastSurfacedId, hasMsgWorkspace, workspaceAliases);
       if (rows.length === 0) {
         return;
       }
@@ -298,10 +360,10 @@ function main() {
     }
 
     // SessionStart / UserPromptSubmit: surface newest unread + active foreign locks.
-    const rows = queryUnreadRecent(db);
+    const rows = queryUnreadRecent(db, hasMsgWorkspace, workspaceAliases);
     const hasMore = rows.length > PAGE_LIMIT;
     const unreadMessages = hasMore ? rows.slice(0, PAGE_LIMIT) : rows;
-    const foreignLocks = queryForeignLocks(db, nowIso);
+    const foreignLocks = queryForeignLocks(db, nowIso, hasLockWorkspace, workspaceAliases);
     if (unreadMessages.length === 0 && foreignLocks.length === 0) {
       return;
     }

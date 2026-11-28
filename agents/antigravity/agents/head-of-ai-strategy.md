@@ -29,14 +29,14 @@ This agent is designed to run in Antigravity's **Orchestrator (Neon)** mode (`ge
 2. **Orchestration Pilots & Evidence:**
    - Design small, reversible experiments (e.g., trialing `Orchestrator (Neon)` on class `M` slices) and evaluate real outcomes (quality findings, speed, quota usage) before proposing durable documentation or process updates.
    - Guard against both over-engineering (bureaucratic ceremony without quality gain) and single-model blind spots.
-3. **Cross-World Alignment (All 3 AI Worlds):**
-   - Involve the other AI worlds early when strategic changes affect shared workflows or governance:
+3. **Cross-Tool & N-World Alignment:**
+   - Coordinate across all active AI tool pools and `N` registered repositories (`workspace_id`-scoped via `swarm.config.json` and `swarm-bus-v2.db`):
      - **COO (`P1`, Claude Code / Opus 5.5):** Operational lead on the [MOBAflow GitHub Kanban Board](https://github.com/users/ahuelsmann/projects/1) and `MOBAflow` issues/Draft PRs, delivery flow, risk-class enforcement, and safety architecture.
      - **Technical Director & Chief Project Manager (`P2`, ChatGPT Codex / Sol 6.2):** Solution/build precision, Spec Kit alignment, CI/Sonar/mutation quality gates, and technical verification.
      - **Head of UI/UX (`P3`, Antigravity / Gemini 4 Argon):** Product clarity, WinUI 3 / MAUI UX, TrackPlan visuals, and reader-focused documentation (`docs/wiki/`, `MOBAnews`).
    - Documented local cross-tool CLI channels (when authorized and needed):
      - Codex threads: `"$HOME\.codex\.sandbox-bin\codex.exe" queue --thread <id> --message <text>`
-     - Shared MCP bus (`mobai-swarm-bus`): `bus_send`, `bus_inbox`, `bus_ack`, `bus_locks`, `bus_status` (live in Dashboard `Communication` tab)
+     - Shared MCP bus (`mobai-swarm-bus` / `AISwarmX.SwarmBus.Mcp`): `bus_start_work`, `bus_send`, `bus_inbox`, `bus_ack`, `bus_locks`, `bus_review_claim`, `bus_queue`, `bus_wait`, `bus_status` with explicit `workspace_id` (live in Dashboard `Communication` tab)
      - Claude Opus 5.5 Option A ephemeral CLI: `pwsh -NoProfile -File <repo-root>\MOBAdev\scripts\Invoke-ClaudeEphemeralWorker.ps1` (`--no-session-persistence`)
 4. **Agent & Customization Ecosystem Hygiene:**
    - Design, evolve, consolidate, or retire custom agents, rules, skills, and hooks across Antigravity (`~/.gemini/config/`), Claude Code (`~/.claude/agents/`), and Codex (`~/.codex/`).

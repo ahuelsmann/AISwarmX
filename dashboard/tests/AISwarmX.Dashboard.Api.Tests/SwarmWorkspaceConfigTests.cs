@@ -23,7 +23,9 @@ public sealed partial class SwarmWorkspaceConfigTests
         Assert.Equal("mobaflow", config.DefaultWorkspaceId);
         Assert.Equal(repoRoot, config.BaseDirectory);
 
-        Assert.Equal(2, config.Workspaces.Count);
+        Assert.Equal(3, config.Workspaces.Count);
+        var sentiX = config.GetWorkspace("sentix");
+        Assert.Equal("ahuelsmann/SentiX", sentiX.GitHubRepository);
 
         var mobaFlow = config.GetWorkspace();
         Assert.Equal("mobaflow", mobaFlow.Id);
@@ -159,7 +161,7 @@ public sealed partial class SwarmWorkspaceConfigTests
         var mobaDev = config.GetWorkspace("mobadev");
         Assert.Equal(Path.GetFullPath($"{rootFake}/MOBAflow"), mobaFlow.RepoPath);
         Assert.Equal(Path.GetFullPath($"{rootFake}/MOBAdev"), mobaDev.RepoPath);
-        Assert.Equal(Path.GetFullPath($"{localAppFake}/MOBAdev/swarm-bus.db"), config.Bus.DbPath);
+        Assert.Equal(Path.GetFullPath($"{localAppFake}/MOBAdev/swarm-bus-v2.db"), config.Bus.DbPath);
 
         var codex = config.StandingAgents.Single(a => a.Id == "codex");
         Assert.Equal("thread-test-123", codex.WakeAdapter.ThreadIdOrEnv);
@@ -249,7 +251,7 @@ public sealed partial class SwarmWorkspaceConfigTests
     [InlineData("\"Opus 5.5\"", "\"Claude Fable 5.2\"")]
     [InlineData("\"claude-fable-5-2\"", "\"claude-other-model\"")]
     [InlineData("\"repoPath\": \"${SWARM_REPOS_ROOT}/MOBAdev\"", "\"repoPath\": \"../escape/MOBAdev\"")]
-    [InlineData("\"dbPath\": \"${LOCALAPPDATA}/MOBAdev/swarm-bus.db\"", "\"dbPath\": \"sub/../../swarm-bus.db\"")]
+    [InlineData("\"dbPath\": \"${LOCALAPPDATA}/MOBAdev/swarm-bus-v2.db\"", "\"dbPath\": \"sub/../../swarm-bus.db\"")]
     [InlineData("\"staticWebRootPath\": \"dashboard/src/AISwarmX.Dashboard.Web/dist\"", "\"staticWebRootPath\": \"../outside/dist\"")]
     [InlineData("\"hygiene\": \"scripts/Invoke-RepoHygiene.ps1\"", "\"hygiene\": \"../../evil.ps1\"")]
     [InlineData("\"threadIdOrEnv\": \"${MOBADEV_CODEX_THREAD_ID}\"", "\"threadIdOrEnv\": \"\"")]
@@ -312,7 +314,7 @@ public sealed partial class SwarmWorkspaceConfigTests
         Assert.Equal("ahuelsmann/MOBAdev", resolvedFromEnv.GitHubRepository);
         Assert.Equal(Path.GetFullPath($"{syntheticRepos}/MOBAdev"), resolvedFromEnv.MobaFlowRepoPath);
         Assert.Equal(repoRoot, resolvedFromEnv.MobaDevRepoPath);
-        Assert.Equal(Path.GetFullPath($"{syntheticAppData}/MOBAdev/swarm-bus.db"), resolvedFromEnv.SwarmBusDbPath);
+        Assert.Equal(Path.GetFullPath($"{syntheticAppData}/MOBAdev/swarm-bus-v2.db"), resolvedFromEnv.SwarmBusDbPath);
 
         // Explicit caller overrides must be preserved even when SwarmConfigPath is active
         var withOverrides = new DashboardOptions

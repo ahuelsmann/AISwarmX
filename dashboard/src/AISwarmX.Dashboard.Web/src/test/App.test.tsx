@@ -1262,7 +1262,8 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
             body: 'P3 UI/UX PASS on PR #541',
             prNumber: 541,
             priority: 'high',
-            status: 'unread'
+            status: 'unread',
+            workspaceId: 'sentix'
           },
           {
             id: 6,
@@ -1292,12 +1293,14 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     expect(within(busCard).getByText('MOBAdemo/app/src/shell')).toBeInTheDocument();
     expect(within(busCard).getByText(/^\(exp in (?:1h|59m)\)$/)).toBeInTheDocument();
     expect(within(busCard).getByText('P3 UI/UX PASS on PR #541')).toBeInTheDocument();
+    expect(within(busCard).getByText('sentix')).toBeInTheDocument();
     expect(within(busCard).getByText('Acked earlier Sonar pointer')).toBeInTheDocument();
     expect(within(busCard).getByText('confirmed')).toBeInTheDocument();
     expect(within(busCard).getByRole('button', { name: /Confirmed \(1\)/i })).toBeInTheDocument();
 
     await user.click(within(busCard).getByRole('button', { name: /Unread \(1\)/i }));
     expect(within(busCard).getByText('P3 UI/UX PASS on PR #541')).toBeInTheDocument();
+    expect(within(busCard).getByText('sentix')).toBeInTheDocument();
     expect(within(busCard).queryByText('Acked earlier Sonar pointer')).not.toBeInTheDocument();
   });
 

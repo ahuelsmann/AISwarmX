@@ -501,6 +501,53 @@ public sealed class McpServerProcessTests
         Assert.Contains("Unknown CLI command", invalidOut.StdErr);
     }
 
+    [Fact]
+    public async Task CliImportLegacyImportsMessagesIntoV2DatabaseZeroDataLoss()
+    {
+        using var fx = new TempBusFixture();
+        var legacyDbPath = Path.Combine(fx.RootPath, "legacy-swarm-bus.db");
+        var v2DbPath = Path.Combine(fx.RootPath, "swarm-bus-v2.db");
+
+        TempBusFixture.ExecuteRawSql(legacyDbPath, """
+            CREATE TABLE messages (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              created_at_utc TEXT NOT NULL,
+              sender TEXT NOT NULL,
+              recipient TEXT NOT NULL,
+              topic TEXT NOT NULL,
+              body TEXT NOT NULL,
+              pr_number INTEGER,
+              issue_number INTEGER,
+              priority TEXT NOT NULL DEFAULT 'normal',
+              reply_to_id INTEGER,
+              status TEXT NOT NULL DEFAULT 'unread',
+              acked_by TEXT,
+              acked_at_utc TEXT
+            );
+            CREATE TABLE locks (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              agent TEXT NOT NULL,
+              path_pattern TEXT NOT NULL UNIQUE,
+              pr_number INTEGER,
+              claimed_at_utc TEXT NOT NULL,
+              expires_at_utc TEXT NOT NULL
+            );
+            INSERT INTO messages (created_at_utc, sender, recipient, topic, body, status)
+            VALUES ('2026-11-28T05:00:00.000Z', 'antigravity-gemini', 'codex', 'legacy-handoff', 'Migrated message', 'acked');
+            """);
+
+        var importOut = await RunCliAsync(v2DbPath, "--cli", "import-legacy", "--legacy-db", legacyDbPath);
+        Assert.Equal(0, importOut.ExitCode);
+        using var importDoc = JsonDocument.Parse(importOut.StdOut);
+        Assert.True(importDoc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal(1, importDoc.RootElement.GetProperty("result").GetProperty("messagesImported").GetInt32());
+
+        var statusOut = await RunCliAsync(v2DbPath, "--cli", "status", "--workspace-id", "*");
+        Assert.Equal(0, statusOut.ExitCode);
+        using var statusDoc = JsonDocument.Parse(statusOut.StdOut);
+        Assert.Single(statusDoc.RootElement.GetProperty("recentMessages").EnumerateArray());
+    }
+
     private static Process StartMcpProcess(string v2DbPath, params string[] args)
     {
         var startInfo = CreateMcpStartInfo(v2DbPath, args);

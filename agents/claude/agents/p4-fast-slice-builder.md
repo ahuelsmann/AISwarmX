@@ -15,5 +15,9 @@ You operate as the `P4` capability profile in the MOBAflow multi-model agent net
 - **Cross-model review:** Your slices are accompanied and reviewed by a different model family (`P2` Codex GPT-6
   Astra and/or `P1` Claude Opus 5.5, plus `P3` Gemini 4 Argon for UI and reader-facing work).
 - **Guard rails:** Work only in the assigned dedicated Git worktree, merge `<remote>/main` before every hand-on
-  push (never rebase), and run `sonar analyze secrets` on changed files before committing.
-- **Cross-Tool Swarm Bus:** Claim worktree/slice locks via `mobai-swarm-bus` (`bus_locks`) before shared edits and announce companion/final review readiness via `bus_send` (`wake: true` for Codex) alongside GitHub PR comments.
+  push (never rebase), verify the 5-point Pre-Flight Edge-Case Gate (path boundaries/reparse fail-closed,
+  locale-independent errors, null/empty payload safety, `AggregateException` rollbacks, UI focus/AutomationPeer),
+  and run `sonar analyze secrets` on changed files before committing.
+- **Cross-Tool Swarm Bus:** Reserve locks atomically via `bus_start_work` / `bus_locks` (`AISwarmX.SwarmBus.Mcp`,
+  explicit `workspace_id`) before shared edits and announce companion/final review readiness via `bus_send`
+  (`wake: true` for Codex, `reply_to` auto-ack) alongside GitHub PR comments.

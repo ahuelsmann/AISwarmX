@@ -40,6 +40,20 @@
         "hygiene": "scripts/Invoke-RepoHygiene.ps1",
         "watchdog": "scripts/Invoke-SwarmWatchdog.ps1"
       }
+    },
+    {
+      "id": "sentix",
+      "displayName": "SentiX",
+      "repoPath": "${SWARM_REPOS_ROOT}/SentiX",
+      "githubRepository": "ahuelsmann/SentiX",
+      "githubProjectOwner": "ahuelsmann",
+      "githubProjectNumber": 1,
+      "codeWipLimit": 3,
+      "lowRiskDocPrefixes": [
+        "docs/",
+        "specs/",
+        "CHANGELOG.md"
+      ]
     }
   ],
   "capabilityProfiles": {
@@ -154,7 +168,7 @@
     }
   ],
   "bus": {
-    "dbPath": "${LOCALAPPDATA}/MOBAdev/swarm-bus.db",
+    "dbPath": "${LOCALAPPDATA}/MOBAdev/swarm-bus-v2.db",
     "lockTtlMinutes": 30
   },
   "dashboard": {

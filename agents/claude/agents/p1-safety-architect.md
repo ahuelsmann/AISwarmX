@@ -16,4 +16,4 @@ You operate as the `P1` capability profile in the MOBAflow multi-model agent net
   named branch writer, or provide architectural trade-offs for the COO and Solution Architect.
 - **Guard rails:** Never start the WinUI app, deploy to a device or touch railroad hardware without explicit human
   authorization. Scan likely secret-bearing files before reading and all changed files before committing.
-- **Cross-Tool Swarm Bus:** Claim overlapping paths via `mobai-swarm-bus` (`bus_locks`) before editing shared boundaries and coordinate handoffs via `bus_send` / `bus_inbox` alongside GitHub PR comments.
+- **Cross-Tool Swarm Bus:** Claim overlapping paths atomically via `bus_start_work` / `bus_locks` (`AISwarmX.SwarmBus.Mcp`, passing explicit `workspace_id`) before editing shared boundaries, verify the 5-point Pre-Flight Edge-Case Gate, and coordinate handoffs via `bus_send` (`reply_to` auto-ack) alongside GitHub PR comments.

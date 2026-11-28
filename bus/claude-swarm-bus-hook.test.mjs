@@ -162,7 +162,7 @@ test('Competing cold-start and same-session hooks preserve all watermarks and at
     const sdb1 = new DatabaseSync(statePath, { readOnly: true });
     try {
       for (const [idx, sid] of coldSessions.entries()) {
-        const key = crypto.createHash('sha256').update(`${dbPath}::${sid}`).digest('hex').slice(0, 24);
+        const key = crypto.createHash('sha256').update(`${dbPath}::*::${sid}`).digest('hex').slice(0, 24);
         const row = sdb1.prepare('SELECT last_surfaced_id, last_stop_blocked_id FROM hook_watermarks WHERE session_key = ?').get(key);
         assert.ok(row, `Expected watermark row for ${sid}`);
         assert.equal(row.last_surfaced_id, 1);
@@ -181,7 +181,7 @@ test('Competing cold-start and same-session hooks preserve all watermarks and at
 
     const sdb2 = new DatabaseSync(statePath, { readOnly: true });
     try {
-      const key4 = crypto.createHash('sha256').update(`${dbPath}::cold-4`).digest('hex').slice(0, 24);
+      const key4 = crypto.createHash('sha256').update(`${dbPath}::*::cold-4`).digest('hex').slice(0, 24);
       const row4 = sdb2.prepare('SELECT last_surfaced_id, last_stop_blocked_id FROM hook_watermarks WHERE session_key = ?').get(key4);
       assert.equal(row4.last_surfaced_id, 2);
       assert.equal(row4.last_stop_blocked_id, 1);
@@ -233,6 +233,89 @@ test('Per-session isolation, Stop loop guard, and MOBADEV_SWARM_BUS_HOOK_DB over
     });
     assert.equal(viaHookDb.status, 0);
     assert.match(JSON.parse(viaHookDb.stdout.trim()).hookSpecificOutput.additionalContext, /follow-up/);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('N-world v2 database filters unread messages and locks by cwd workspace_id including generic git repos', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiswarmx-hook-nworld-'));
+  const dbPath = path.join(dir, 'swarm-bus-v2.db');
+  const statePath = path.join(dir, 'claude-hook-state.db');
+  const customRepoDir = path.join(dir, 'NewWorldRepo');
+  fs.mkdirSync(path.join(customRepoDir, '.git'), { recursive: true });
+
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec(`
+      CREATE TABLE messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        workspace_id TEXT NOT NULL DEFAULT 'default',
+        created_at_utc TEXT NOT NULL,
+        sender TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        topic TEXT NOT NULL,
+        body TEXT NOT NULL,
+        pr_number INTEGER,
+        issue_number INTEGER,
+        priority TEXT NOT NULL DEFAULT 'normal',
+        reply_to_id INTEGER,
+        status TEXT NOT NULL DEFAULT 'unread',
+        acked_by TEXT,
+        acked_at_utc TEXT
+      );
+      CREATE TABLE locks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        workspace_id TEXT NOT NULL DEFAULT 'default',
+        agent TEXT NOT NULL,
+        path_pattern TEXT NOT NULL,
+        pr_number INTEGER,
+        claimed_at_utc TEXT NOT NULL,
+        expires_at_utc TEXT NOT NULL
+      );
+    `);
+
+    const nowIso = new Date().toISOString();
+    const futureIso = new Date(Date.now() + 3600_000).toISOString();
+    const insertMsg = db.prepare(`
+      INSERT INTO messages (workspace_id, created_at_utc, sender, recipient, topic, body, status)
+      VALUES (?, ?, 'codex', 'claude-opus', ?, ?, 'unread')
+    `);
+    insertMsg.run('mobaflow', nowIso, 'mobaflow-topic', 'MOBAflow note');
+    insertMsg.run('sentix', nowIso, 'sentix-topic', 'SentiX note');
+    insertMsg.run('newworldrepo', nowIso, 'nworld-topic', 'NewWorld note');
+    insertMsg.run('default', nowIso, 'shared-topic', 'Shared default note');
+
+    db.prepare(`
+      INSERT INTO locks (workspace_id, agent, path_pattern, pr_number, claimed_at_utc, expires_at_utc)
+      VALUES ('sentix', 'codex', 'src/dotnet/SentiX.Risk', 10, ?, ?)
+    `).run(nowIso, futureIso);
+
+    // MOBAflow session only sees mobaflow + default (NOT sentix or newworldrepo, and NO sentix lock).
+    const mfOut = runHook(dbPath, statePath, {
+      hook_event_name: 'SessionStart',
+      session_id: 'mf-sess',
+      cwd: 'C:\\Repo\\ahuelsmann\\MOBAflow'
+    }, { MOBADEV_SWARM_BUS_V2_DB: dbPath });
+    assert.equal(mfOut.status, 0);
+    const mfCtx = JSON.parse(mfOut.stdout.trim()).hookSpecificOutput.additionalContext;
+    assert.match(mfCtx, /mobaflow-topic/);
+    assert.match(mfCtx, /shared-topic/);
+    assert.doesNotMatch(mfCtx, /sentix-topic/);
+    assert.doesNotMatch(mfCtx, /nworld-topic/);
+    assert.doesNotMatch(mfCtx, /SentiX\.Risk/);
+
+    // Arbitrary Nth git repo infers leaf folder ('newworldrepo') automatically.
+    const nwOut = runHook(dbPath, statePath, {
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'nw-sess',
+      cwd: customRepoDir
+    }, { MOBADEV_SWARM_BUS_V2_DB: dbPath });
+    assert.equal(nwOut.status, 0);
+    const nwCtx = JSON.parse(nwOut.stdout.trim()).hookSpecificOutput.additionalContext;
+    assert.match(nwCtx, /nworld-topic/);
+    assert.doesNotMatch(nwCtx, /mobaflow-topic/);
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });
