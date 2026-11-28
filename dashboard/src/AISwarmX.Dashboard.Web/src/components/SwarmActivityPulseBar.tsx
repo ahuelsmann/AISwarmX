@@ -117,7 +117,7 @@ const useStyles = makeStyles({
     gap: '8px'
   },
   sparklineCaption: {
-    fontSize: tokens.fontSizeBase100,
+    fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
     whiteSpace: 'nowrap'
   },
@@ -159,7 +159,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1
   },
   handoffTime: {
-    fontSize: tokens.fontSizeBase100,
+    fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2
   },
   emptyText: {
@@ -266,10 +266,10 @@ export function SwarmActivityPulseBar({
           ? `Recent activity sparkline over 6 hours: ${totalEvents} sampled events across 24 buckets (incomplete sample: SwarmBus feed unavailable, up to 12 CI)`
           : `Recent activity sparkline over 6 hours: ${totalEvents} sampled events across 24 buckets (bounded window: up to 20 bus, 12 CI)`;
 
-  const svgWidth = 120;
-  const svgHeight = 24;
+  const svgWidth = 168;
+  const svgHeight = 26;
   const barStep = svgWidth / buckets.length;
-  const barWidth = 3.5;
+  const barWidth = 5;
 
   return (
     <section aria-label="Live Swarm Activity Pulse">
@@ -356,7 +356,7 @@ export function SwarmActivityPulseBar({
                   <span className={styles.handoffRoute}>
                     {msg.sender} → {msg.recipient}
                   </span>
-                  <Badge appearance="outline" color="informative" size="small">
+                  <Badge appearance="outline" color="subtle" size="small">
                     {msg.topic}
                   </Badge>
                   <span className={`${styles.handoffTime} tabular`}>

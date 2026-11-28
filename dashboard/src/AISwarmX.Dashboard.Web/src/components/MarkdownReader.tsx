@@ -62,11 +62,13 @@ const useStyles = makeStyles({
   },
   paragraph: {
     margin: 0,
+    maxWidth: '88ch',
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground1
   },
   list: {
     margin: 0,
+    maxWidth: '88ch',
     paddingLeft: '22px',
     display: 'flex',
     flexDirection: 'column',
@@ -75,6 +77,7 @@ const useStyles = makeStyles({
   },
   blockquote: {
     margin: 0,
+    maxWidth: '88ch',
     padding: '8px 12px',
     borderLeft: `3px solid ${tokens.colorBrandStroke1}`,
     backgroundColor: tokens.colorNeutralBackground2,

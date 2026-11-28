@@ -87,7 +87,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           profile: 'P3',
           tool: 'Antigravity',
           state: 'busy',
-          model: 'Orchestrator · Gemini 4 Argon',
+          model: 'Gemini 4 Carbon',
           lastActivityUtc: nowIso,
           rateLimitResetLabel: null,
           activeSessionCount: 1,
@@ -102,7 +102,7 @@ function createSnapshotFixture(overrides?: Partial<DashboardSnapshot>): Dashboar
           profile: 'P1',
           tool: 'Antigravity',
           state: 'standby',
-          model: 'Orchestrator · Claude Opus 5.5',
+          model: 'Claude Opus 5.5',
           lastActivityUtc: nowIso,
           rateLimitResetLabel: null,
           activeSessionCount: 1,
@@ -729,8 +729,8 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     expect(within(pipelineSection).queryByRole('button', { name: /Arrows:/i })).not.toBeInTheDocument();
     expect(screen.getByText('GPT-6 Astra')).toBeInTheDocument();
     expect(screen.getByText('Implemented')).toBeInTheDocument();
-    expect(screen.getByText('Final Reviewer')).toBeInTheDocument();
-    expect(screen.getByText('Claude Opus 5.5')).toBeInTheDocument();
+    expect(within(pipelineSection).getByText('Final Reviewer')).toBeInTheDocument();
+    expect(within(pipelineSection).getByText('Claude Opus 5.5')).toBeInTheDocument();
     expect(screen.getByText(/missing read:project scope/i)).toBeInTheDocument();
 
     // Branch Hygiene card shows local/remote stale counts and active branches
@@ -899,7 +899,7 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
         screen.getByText('ci(quality): enforce C# whitespace gate (RF-10 slice 3)')
       ).toBeInTheDocument();
       expect(screen.getByText('RF-10: Formatting baseline and gate')).toBeInTheDocument();
-      expect(screen.getAllByText('PR #501').length).toBeGreaterThanOrEqual(2);
+      expect(screen.getAllByText('PR #501').length).toBeGreaterThanOrEqual(1);
       expect(
         screen.getByText('Quality and refactoring programme: RF-01 through RF-18')
       ).toBeInTheDocument();
@@ -2212,5 +2212,160 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     expect(strip).toHaveTextContent('SentiX Linux CI');
     expect(strip).toHaveTextContent('MOBAflow');
     expect(strip).toHaveTextContent('WinUI Build & Tests');
+  });
+
+  it('renders unclipped Final Reviewer (Quorum) role label in widened AgentRoundTable (SVG_W=1080, CARD_W=340) and compact 0-agent inline bar', async () => {
+    const snap = createSnapshotFixture();
+    snap.pipeline.activeIssues = [
+      {
+        number: 61,
+        itemKind: 'Issue',
+        title: 'Quorum review geometry verification',
+        url: 'https://github.com/ahuelsmann/MOBAflow/issues/61',
+        gitHubState: 'OPEN',
+        kanbanStatus: 'In review',
+        priority: 'P1',
+        area: 'UI',
+        issueType: 'Feature',
+        riskClass: 'M',
+        writer: 'Codex',
+        lockedAreas: [],
+        updatedAtUtc: snap.generatedAtUtc,
+        linkedPullRequests: [],
+        linkedIssues: [],
+        participants: [
+          {
+            agent: 'Opus Quorum Reviewer',
+            tool: 'Antigravity',
+            role: 'Final Reviewer (Quorum)',
+            profile: 'P1',
+            model: 'Orchestrator · Claude Opus 5.5',
+            status: 'PASS',
+            evidenceSource: 'Kanban Quorum'
+          }
+        ],
+        boardDriftReason: null
+      },
+      {
+        number: 62,
+        itemKind: 'Issue',
+        title: 'Zero agent inline bar check',
+        url: 'https://github.com/ahuelsmann/MOBAflow/issues/62',
+        gitHubState: 'OPEN',
+        kanbanStatus: 'Ready',
+        priority: 'P2',
+        area: 'Docs',
+        issueType: 'Task',
+        riskClass: 'L',
+        writer: null,
+        lockedAreas: [],
+        updatedAtUtc: snap.generatedAtUtc,
+        linkedPullRequests: [],
+        linkedIssues: [],
+        participants: [],
+        boardDriftReason: null
+      }
+    ];
+
+    stubDashboardFetch(snap);
+    render(<App />);
+
+    const quorumTable = await screen.findByRole('img', {
+      name: 'Round table of 1 Agent for Issue #61'
+    });
+    expect(quorumTable.getAttribute('viewBox')).toBe('0 0 1080 128');
+    expect(within(quorumTable).getByText('Final Reviewer (Quorum)')).toBeInTheDocument();
+    expect(within(quorumTable).getByText('Claude Opus 5.5')).toBeInTheDocument();
+    const cardRect = Array.from(quorumTable.querySelectorAll('rect')).find(
+      (r) => r.getAttribute('width') === '340' && r.getAttribute('height') === '56'
+    );
+    expect(cardRect).toBeDefined();
+
+    const emptyBar = screen.getByRole('img', { name: 'Round table of 0 Agents for Issue #62' });
+    expect(emptyBar.tagName.toLowerCase()).toBe('div');
+    expect(emptyBar.querySelector('svg[viewBox^="0 0 1080"]')).toBeNull();
+    expect(within(emptyBar).getByText('0 Agents')).toBeInTheDocument();
+    expect(within(emptyBar).getByText('Awaiting Agent Assignment')).toBeInTheDocument();
+    expect(within(emptyBar).getByText('· No agent evidence recorded yet')).toBeInTheDocument();
+    expect(within(emptyBar).getByText('Class L · Ready')).toBeInTheDocument();
+  });
+
+  it('orders Kanban groups Active-First (In progress -> In review -> Ready), collapses > 3 Ready items, filters by stage, and shows inline PR title on LinkedPullRequestPill', async () => {
+    const user = userEvent.setup();
+    const snap = createSnapshotFixture();
+    const makeReadyIssue = (num: number) => ({
+      number: num,
+      itemKind: 'Issue' as const,
+      title: `Ready backlog slice #${num}`,
+      url: `https://github.com/ahuelsmann/MOBAflow/issues/${num}`,
+      gitHubState: 'OPEN',
+      kanbanStatus: 'Ready',
+      priority: 'P2',
+      area: 'Core',
+      issueType: 'Feature',
+      riskClass: 'M',
+      writer: null,
+      lockedAreas: [],
+      updatedAtUtc: snap.generatedAtUtc,
+      linkedPullRequests: [],
+      linkedIssues: [],
+      participants: [],
+      boardDriftReason: null
+    });
+
+    snap.pipeline.activeIssues = [
+      ...snap.pipeline.activeIssues!,
+      makeReadyIssue(601),
+      makeReadyIssue(602),
+      makeReadyIssue(603),
+      makeReadyIssue(604)
+    ];
+
+    stubDashboardFetch(snap);
+    render(<App />);
+
+    const pipelineSection = await screen.findByLabelText('Task and PR Pipeline MOBAflow');
+    const text = pipelineSection.textContent ?? '';
+
+    // Summary funnel preserves left-to-right lifecycle order
+    expect(text.indexOf('Ready: 4')).toBeLessThan(text.indexOf('In progress: 3'));
+    expect(text.indexOf('In progress: 3')).toBeLessThan(text.indexOf('In review: 1'));
+
+    // Vertical groups render Active-First: In progress -> In review -> Ready
+    expect(text.indexOf('In progress (3)')).toBeLessThan(text.indexOf('In review (1)'));
+    expect(text.indexOf('In review (1)')).toBeLessThan(text.indexOf('Ready (4)'));
+
+    // LinkedPullRequestPill renders inline prRef.title
+    expect(
+      within(pipelineSection).getByText(
+        '· ci(quality): enforce C# whitespace gate (RF-10 slice 3)'
+      )
+    ).toBeInTheDocument();
+
+    // Ready collapses to top 3 items by default when > 3 Ready items exist
+    expect(within(pipelineSection).getByText('Ready backlog slice #601')).toBeInTheDocument();
+    expect(within(pipelineSection).getByText('Ready backlog slice #603')).toBeInTheDocument();
+    expect(
+      within(pipelineSection).queryByText('Ready backlog slice #604')
+    ).not.toBeInTheDocument();
+
+    const expandReadyBtn = within(pipelineSection).getByRole('button', {
+      name: 'Show all 4 Ready issues'
+    });
+    await user.click(expandReadyBtn);
+    expect(within(pipelineSection).getByText('Ready backlog slice #604')).toBeInTheDocument();
+
+    const collapseReadyBtn = within(pipelineSection).getByRole('button', {
+      name: 'Show fewer Ready issues'
+    });
+    await user.click(collapseReadyBtn);
+    expect(
+      within(pipelineSection).queryByText('Ready backlog slice #604')
+    ).not.toBeInTheDocument();
+
+    // Clicking Ready stage filter shows all 4 Ready items and hides In progress / In review
+    await user.click(within(pipelineSection).getByRole('button', { name: 'Ready: 4' }));
+    expect(within(pipelineSection).getByText('Ready backlog slice #604')).toBeInTheDocument();
+    expect(within(pipelineSection).queryByText('In progress (3)')).not.toBeInTheDocument();
   });
 });

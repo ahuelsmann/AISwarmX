@@ -1,7 +1,9 @@
 import { useState, type Ref } from 'react';
-import { Badge, Button, Card, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { Badge, Card, Text, ToggleButton, makeStyles, tokens } from '@fluentui/react-components';
 import { Chat16Regular, LockClosed16Regular } from '@fluentui/react-icons';
+import { formatAbsoluteEn, formatRelativeTimeEn } from '../api/dashboardClient';
 import type { SwarmBusResponse } from '../types/dashboard';
+import { ContextChip } from './shared/ContextChip';
 
 interface SwarmBusCardProps {
   swarmBus?: SwarmBusResponse | null;
@@ -114,12 +116,14 @@ const useStyles = makeStyles({
     display: 'inline-flex',
     alignItems: 'center',
     gap: '6px',
-    fontSize: tokens.fontSizeBase100,
+    fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2
   },
   body: {
     fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground2,
+    color: tokens.colorNeutralForeground1,
+    lineHeight: tokens.lineHeightBase300,
+    whiteSpace: 'pre-wrap',
     wordBreak: 'break-word'
   },
   empty: {
@@ -127,17 +131,6 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3
   }
 });
-
-function formatRelativeUtc(iso: string, nowMs: number): string {
-  const ms = Date.parse(iso);
-  if (Number.isNaN(ms)) return '';
-  const diffSec = Math.max(0, Math.floor((nowMs - ms) / 1000));
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHours = Math.floor(diffMin / 60);
-  return `${diffHours}h ago`;
-}
 
 function formatRemainingUtc(iso: string, nowMs: number): string {
   const ms = Date.parse(iso);
@@ -187,9 +180,7 @@ export function SwarmBusCard({
           <div className={styles.titleGroup}>
             <Chat16Regular aria-hidden="true" />
             <h2 className={styles.title}>Swarm Bus · Cross-Tool MCP</h2>
-            <Badge appearance="tint" color="informative">
-              Read-Only Feed
-            </Badge>
+            <ContextChip appearance="tint">Read-Only Feed</ContextChip>
             <Badge
               appearance="tint"
               color={
@@ -216,7 +207,7 @@ export function SwarmBusCard({
             </Badge>
             <Badge
               appearance="tint"
-              color={swarmBus.activeLockCount > 0 ? 'informative' : 'subtle'}
+              color={swarmBus.activeLockCount > 0 ? 'warning' : 'subtle'}
             >
               {swarmBus.activeLockCount} Locks
             </Badge>
@@ -246,27 +237,30 @@ export function SwarmBusCard({
 
         <div className={styles.filterBar}>
           <div className={styles.filterButtons} role="group" aria-label="Filter Swarm Bus messages">
-            <Button
+            <ToggleButton
               size="small"
               appearance={statusFilter === 'all' ? 'primary' : 'subtle'}
+              checked={statusFilter === 'all'}
               onClick={() => setStatusFilter('all')}
             >
               All ({swarmBus.recentMessages.length})
-            </Button>
-            <Button
+            </ToggleButton>
+            <ToggleButton
               size="small"
               appearance={statusFilter === 'unread' ? 'primary' : 'subtle'}
+              checked={statusFilter === 'unread'}
               onClick={() => setStatusFilter('unread')}
             >
               {hasOlderUnread ? `Unread (${unreadInFeed} / ${unreadTotal})` : `Unread (${unreadInFeed})`}
-            </Button>
-            <Button
+            </ToggleButton>
+            <ToggleButton
               size="small"
               appearance={statusFilter === 'acked' ? 'primary' : 'subtle'}
+              checked={statusFilter === 'acked'}
               onClick={() => setStatusFilter('acked')}
             >
               Confirmed ({confirmedTotal})
-            </Button>
+            </ToggleButton>
           </div>
           <Text className={styles.empty}>
             Shared SQLite MCP channel across Claude Code, ChatGPT Codex &amp; Antigravity
@@ -291,7 +285,7 @@ export function SwarmBusCard({
                         {msg.workspaceId}
                       </Badge>
                     ) : null}
-                    <Badge appearance="outline" color="informative">
+                    <Badge appearance="outline" color="subtle">
                       {msg.topic}
                     </Badge>
                     {msg.priority === 'high' || msg.priority === 'urgent' ? (
@@ -317,7 +311,9 @@ export function SwarmBusCard({
                     >
                       {msg.status === 'acked' ? 'confirmed' : msg.status}
                     </Badge>
-                    <span>{formatRelativeUtc(msg.createdAtUtc, nowMs)}</span>
+                    <span className="tabular" title={formatAbsoluteEn(msg.createdAtUtc)}>
+                      {formatRelativeTimeEn(msg.createdAtUtc, nowMs)}
+                    </span>
                   </span>
                 </div>
                 <Text className={styles.body}>{msg.body}</Text>

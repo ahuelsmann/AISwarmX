@@ -5,6 +5,20 @@ All notable changes to **AISwarmX** (formerly **MOBAdev**) and the local **AISwa
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.18.0] - 2026-11-28
+
+### Added & Changed
+- **Direct Model Names Without `Orchestrator ·` Prefix (`AntigravityMonitorProvider.cs`, `ArchitectureDiagramsView.tsx`, `GlossaryTooltip.tsx`, `AgentRoundTable.tsx`, `agents/`, `docs/allowed-models.md`):**
+  - Removed the redundant `Orchestrator · ` prefix from Antigravity Root Head model labels (`Claude Opus 5.5` and `Gemini 4 Carbon`), retired unused `DecisionTriadCard.tsx`, and updated P2/P3 glossary & governance references to canonical model names (`GPT-6.2 Sol / GPT-6.2 Astra`, `Gemini 4 Carbon`).
+- **Non-Blocking `/api/health` Endpoint (`DashboardSnapshotService.cs`, `ApiEndpointsIntegrationTests.cs`):**
+  - Decoupled `/api/health` from `_pipelineLock` / `_localLock` once cached snapshot state is populated, returning cached health status immediately (`< 500ms`) with a best-effort background refresh trigger when TTL expires, plus a bounded `1500ms` cold-start timeout fallback (`status: "starting"`).
+- **Full-Width UX, Unclipped Round Table Geometry & Active-First Kanban (`AgentRoundTable.tsx`, `PipelineCard.tsx`, `ArchitectureDiagramsView.tsx`, `MainLandingTickerCard.tsx`, `SwarmActivityPulseBar.tsx`, `SwarmBusCard.tsx`, `HygieneAndSyncPanel.tsx`, `MonitorCards.tsx`, `GovernanceMatrixView.tsx`, `ConfigDocsView.tsx`, `MarkdownReader.tsx`, `colorSystem.test.ts`):**
+  - Widened `AgentRoundTable` (`SVG_W=1080`, `CARD_W=340`, `CARD_H=56`, `R_TABLE=58`, `R_ORBIT=98`, `R_NODE=22`, raised role/model/center caps and SVG font sizes) so qualified roles like `Final Reviewer (Quorum)` and full model names render without clipping, and replaced the tall `0 Agents` SVG box with a compact single-row inline bar.
+  - Reordered `PipelineCard` Kanban sections to **Active-First** (`In progress` → `In review` → `Via Open PR` → `Ready`) with framed stage banners, interactive stage filtering, default top-3 `Ready` collapsing (`Show all N Ready issues`), widened issue/CI titles, and inline PR titles on `LinkedPullRequestPill`.
+  - Widened Architecture SVG diagrams (`viewBox` `920` → `1160`), `MainLandingTickerCard`, `SwarmActivityPulseBar` sparkline, sticky desktop `ConfigDocsView` sidebar + `88ch` `MarkdownReader` measure, proportional `GovernanceMatrixView` columns, and enforced zero static `<Badge color="informative">` across all components via `colorSystem.test.ts`.
+
+---
+
 ## [3.17.0] - 2026-11-28
 
 ### Added & Changed

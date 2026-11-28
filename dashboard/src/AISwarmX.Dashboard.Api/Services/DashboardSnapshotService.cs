@@ -63,26 +63,98 @@ public sealed partial class DashboardSnapshotService
 
     public async Task<HealthResponse> GetHealthAsync(CancellationToken cancellationToken)
     {
-        var snapshot = await GetSnapshotAsync(forceRefresh: false, cancellationToken).ConfigureAwait(false);
-        var sources = new Dictionary<string, SourceHealth>(StringComparer.OrdinalIgnoreCase)
+        var monitors = Volatile.Read(ref _cachedMonitors);
+        var governance = Volatile.Read(ref _cachedGovernance);
+        var pipeline = Volatile.Read(ref _cachedPipeline);
+        var hygiene = Volatile.Read(ref _cachedHygiene);
+        var swarmBus = Volatile.Read(ref _cachedSwarmBus);
+
+        if (monitors is not null && governance is not null && pipeline is not null && hygiene is not null)
         {
-            ["monitors"] = snapshot.Monitors.Source,
-            ["governance"] = snapshot.Governance.Source,
-            ["pipeline"] = snapshot.Pipeline.Source,
-            ["hygiene"] = snapshot.Hygiene.Source
-        };
-        if (snapshot.SwarmBus is not null)
-        {
-            sources["swarmBus"] = snapshot.SwarmBus.Source;
+            var now = DateTimeOffset.UtcNow;
+            if ((now >= _pipelineCacheExpiresAt || now >= _localCacheExpiresAt) &&
+                _pipelineLock.CurrentCount > 0)
+            {
+                _ = RefreshInBackgroundSafeAsync();
+            }
+
+            var (overallStatus, _) = ComputeOverallStatus(monitors, governance, pipeline, hygiene);
+            var cachedSources = new Dictionary<string, SourceHealth>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["monitors"] = monitors.Source,
+                ["governance"] = governance.Source,
+                ["pipeline"] = pipeline.Source,
+                ["hygiene"] = hygiene.Source
+            };
+            if (swarmBus is not null)
+            {
+                cachedSources["swarmBus"] = swarmBus.Source;
+            }
+
+            return new HealthResponse(
+                Status: overallStatus,
+                DotNetVersion: RuntimeInformation.FrameworkDescription,
+                ReadOnly: true,
+                BindAddress: _optionsMonitor.CurrentValue.BindUrl,
+                GeneratedAtUtc: now,
+                Sources: cachedSources);
         }
 
-        return new HealthResponse(
-            Status: snapshot.OverallStatus,
-            DotNetVersion: RuntimeInformation.FrameworkDescription,
-            ReadOnly: true,
-            BindAddress: snapshot.BindAddress,
-            GeneratedAtUtc: snapshot.GeneratedAtUtc,
-            Sources: sources);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        linkedCts.CancelAfter(TimeSpan.FromMilliseconds(1500));
+        try
+        {
+            var snapshot = await GetSnapshotAsync(forceRefresh: false, linkedCts.Token).ConfigureAwait(false);
+            var sources = new Dictionary<string, SourceHealth>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["monitors"] = snapshot.Monitors.Source,
+                ["governance"] = snapshot.Governance.Source,
+                ["pipeline"] = snapshot.Pipeline.Source,
+                ["hygiene"] = snapshot.Hygiene.Source
+            };
+            if (snapshot.SwarmBus is not null)
+            {
+                sources["swarmBus"] = snapshot.SwarmBus.Source;
+            }
+
+            return new HealthResponse(
+                Status: snapshot.OverallStatus,
+                DotNetVersion: RuntimeInformation.FrameworkDescription,
+                ReadOnly: true,
+                BindAddress: snapshot.BindAddress,
+                GeneratedAtUtc: snapshot.GeneratedAtUtc,
+                Sources: sources);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            _ = RefreshInBackgroundSafeAsync();
+            return new HealthResponse(
+                Status: "starting",
+                DotNetVersion: RuntimeInformation.FrameworkDescription,
+                ReadOnly: true,
+                BindAddress: _optionsMonitor.CurrentValue.BindUrl,
+                GeneratedAtUtc: DateTimeOffset.UtcNow,
+                Sources: new Dictionary<string, SourceHealth>(StringComparer.OrdinalIgnoreCase));
+        }
+    }
+
+    internal void ExpireCachesForTesting()
+    {
+        _pipelineCacheExpiresAt = DateTimeOffset.MinValue;
+        _localCacheExpiresAt = DateTimeOffset.MinValue;
+    }
+
+    private async Task RefreshInBackgroundSafeAsync()
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+            await GetSnapshotAsync(forceRefresh: false, cts.Token).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Ignore background refresh exceptions so fire-and-forget health triggers never fault.
+        }
     }
 
     public async Task<MonitorsResponse> GetMonitorsAsync(bool forceRefresh, CancellationToken cancellationToken)

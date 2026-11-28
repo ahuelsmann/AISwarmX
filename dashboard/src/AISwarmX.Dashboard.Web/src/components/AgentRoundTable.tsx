@@ -59,6 +59,17 @@ const useStyles = makeStyles({
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     padding: '4px 8px'
   },
+  emptyBar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px',
+    padding: '6px 10px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px dashed ${tokens.colorNeutralStroke2}`
+  },
   inspectorFooter: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -109,12 +120,12 @@ interface PositionedSeat {
   iconKey: RoleIconKey;
 }
 
-const SVG_W = 760;
-const CARD_W = 252;
-const CARD_H = 54;
-const R_TABLE = 50;
-const R_ORBIT = 88;
-const R_NODE = 21;
+const SVG_W = 1080;
+const CARD_W = 340;
+const CARD_H = 56;
+const R_TABLE = 58;
+const R_ORBIT = 98;
+const R_NODE = 22;
 const TRIM_DIST = R_NODE + 6;
 
 function roleSortWeight(participant: TaskParticipantInfo): {
@@ -311,13 +322,19 @@ export function isParticipantActivelyWorking(
 }
 
 function shortRoleLabel(role: string): string {
-  const lower = role.toLowerCase();
-  if (lower.startsWith('coo')) return 'COO (Steering)';
-  if (lower.includes('companion')) return 'Companion Review';
-  if (lower.includes('cross-family') || lower.includes('verifier')) return 'Cross-Family';
-  if (lower.includes('ui/ux') || lower.includes('product experience')) return 'Head of UI/UX';
-  if (role.length > 20) return `${role.slice(0, 18).trimEnd()}…`;
-  return role;
+  const trimmed = role.trim();
+  const lower = trimmed.toLowerCase();
+  const hasQualifier = /\([^)]+\)/.test(trimmed);
+  if (!hasQualifier) {
+    if (lower.startsWith('coo') || lower.startsWith('chief operating')) return 'COO (Steering)';
+    if (lower.includes('companion')) return 'Companion Review';
+    if (lower.includes('cross-family') || lower.includes('verifier')) return 'Cross-Family';
+    if (lower.includes('ui/ux') || lower.includes('product experience')) return 'Head of UI/UX';
+  } else if (lower === 'chief operating officer (coo)') {
+    return 'COO (Steering)';
+  }
+  if (trimmed.length > 36) return `${trimmed.slice(0, 35).trimEnd()}…`;
+  return trimmed;
 }
 
 function shortToolLabel(tool: string): string {
@@ -328,8 +345,11 @@ function shortToolLabel(tool: string): string {
 }
 
 function shortModelLabel(model: string): string {
-  const cleaned = model.replace(/\s*\(Codex\)\s*/gi, '').trim();
-  if (cleaned.length > 20) return `${cleaned.slice(0, 19).trimEnd()}…`;
+  const cleaned = model
+    .replace(/^Orchestrator\s*·\s*/i, '')
+    .replace(/\s*\(Codex\)\s*/gi, '')
+    .trim();
+  if (cleaned.length > 32) return `${cleaned.slice(0, 31).trimEnd()}…`;
   return cleaned;
 }
 
@@ -339,7 +359,7 @@ function shortStatusLabel(status: string): string {
 }
 
 function shortCenterSub(sub: string): string {
-  if (sub.length > 17) return `${sub.slice(0, 15).trimEnd()}…`;
+  if (sub.length > 24) return `${sub.slice(0, 23).trimEnd()}…`;
   return sub;
 }
 
@@ -424,7 +444,7 @@ function renderCenterTable(
   centerToneStyles: ToneStylePair
 ) {
   const sub = shortCenterSub(centerSub);
-  const badgeW = Math.min(rTable * 1.62, Math.max(64, centerStatus.length * 5.8 + 14));
+  const badgeW = Math.min(rTable * 1.68, Math.max(68, centerStatus.length * 6.2 + 16));
   return (
     <>
       <circle
@@ -468,7 +488,7 @@ function renderCenterTable(
         y={cy + 3}
         textAnchor="middle"
         fill={tokens.colorNeutralForeground2}
-        fontSize={10.5}
+        fontSize={11.5}
         fontWeight={500}
       >
         {sub}
@@ -477,18 +497,18 @@ function renderCenterTable(
         x={cx - badgeW / 2}
         y={cy + 12}
         width={badgeW}
-        height={17}
-        rx={8.5}
+        height={18}
+        rx={9}
         fill={centerToneStyles.bg}
         stroke={centerToneStyles.solid}
         strokeWidth={1}
       />
       <text
         x={cx}
-        y={cy + 24}
+        y={cy + 25}
         textAnchor="middle"
         fill={centerToneStyles.fg}
-        fontSize={10.5}
+        fontSize={11.5}
         fontWeight={600}
       >
         {centerStatus}
@@ -531,10 +551,10 @@ function computeTableLayout(participants: TaskParticipantInfo[]): LayoutConfig {
     .sort((a, b) => a.meta.weight - b.meta.weight || a.origIndex - b.origIndex);
 
   const count = ordered.length;
-  const cx = count === 1 ? 248 : 380;
-  const cy = count === 1 ? 60 : count === 2 ? 98 : 176;
-  const viewHeight = count === 1 ? 122 : count === 2 ? 196 : count === 3 ? 274 : 358;
-  const maxHeight = count === 1 ? 132 : count === 2 ? 192 : count === 3 ? 270 : 348;
+  const cx = count === 1 ? 330 : 540;
+  const cy = count === 1 ? 64 : count === 2 ? 104 : 192;
+  const viewHeight = count === 1 ? 128 : count === 2 ? 208 : count === 3 ? 286 : 384;
+  const maxHeight = count === 1 ? 136 : count === 2 ? 204 : count === 3 ? 282 : 372;
 
   let stepCounter = 0;
 
@@ -548,7 +568,7 @@ function computeTableLayout(participants: TaskParticipantInfo[]): LayoutConfig {
             : 360
           : -90 + (360 * idx) / count;
     const rad = (angleDeg * Math.PI) / 180;
-    const x = count === 1 ? 376 : cx + R_ORBIT * Math.cos(rad);
+    const x = count === 1 ? 470 : cx + R_ORBIT * Math.cos(rad);
     const y = count === 1 ? cy : cy + R_ORBIT * Math.sin(rad);
 
     const { tone, dashed } = resolveParticipantStatusTone(entry.participant.status);
@@ -562,33 +582,33 @@ function computeTableLayout(participants: TaskParticipantInfo[]): LayoutConfig {
 
     if (count === 1) {
       cardSide = 'right';
-      cardX = 414;
-      cardY = 33;
+      cardX = 516;
+      cardY = cy - CARD_H / 2;
     } else if (count === 2) {
       if (Math.cos(rad) < 0) {
         cardSide = 'left';
-        cardX = 12;
+        cardX = 56;
         cardY = cy - CARD_H / 2;
       } else {
         cardSide = 'right';
-        cardX = 496;
+        cardX = 684;
         cardY = cy - CARD_H / 2;
       }
     } else if (Math.sin(rad) < -0.82) {
       cardSide = 'top';
-      cardX = x - CARD_W / 2;
+      cardX = Math.max(16, Math.min(SVG_W - CARD_W - 16, x - CARD_W / 2));
       cardY = Math.max(5, y - R_NODE - 10 - CARD_H);
     } else if (count >= 4 && Math.sin(rad) > 0.82) {
       cardSide = 'bottom';
-      cardX = x - CARD_W / 2;
+      cardX = Math.max(16, Math.min(SVG_W - CARD_W - 16, x - CARD_W / 2));
       cardY = Math.min(viewHeight - CARD_H - 5, y + R_NODE + 10);
     } else if (Math.cos(rad) >= 0) {
       cardSide = 'right';
-      cardX = Math.max(x + R_NODE + 14, cx + R_ORBIT + 16);
+      cardX = Math.max(x + R_NODE + 18, cx + R_ORBIT + 24);
       cardY = y - CARD_H / 2;
     } else {
       cardSide = 'left';
-      cardX = Math.min(x - R_NODE - 14, cx - R_ORBIT - 16) - CARD_W;
+      cardX = Math.min(x - R_NODE - 18, cx - R_ORBIT - 24) - CARD_W;
       cardY = y - CARD_H / 2;
     }
 
@@ -674,84 +694,26 @@ export function AgentRoundTable({
 
   if (participants.length === 0) {
     return (
-      <div className={styles.root}>
-        <div className={styles.headerStrip}>
-          <span className={styles.leftMeta}>
-            <Bot16Regular aria-hidden="true" />
-            <span>Participating Agents</span>
-            <Badge appearance="tint" color="subtle" shape="rounded" size="small" className="tabular">
-              0 Agents
-            </Badge>
-          </span>
-        </div>
-
-        <div className={styles.svgContainer}>
-          <svg
-            viewBox={`0 0 ${SVG_W} 120`}
-            style={{ width: '100%', height: 'auto', maxHeight: 126, display: 'block' }}
-            role="img"
-            aria-label={`Round table of 0 Agents for ${centerLabel}`}
-          >
-            <circle
-              cx={250}
-              cy={60}
-              r={55}
-              fill="none"
-              stroke={tokens.colorNeutralStroke2}
-              strokeWidth={1}
-              strokeDasharray="4 4"
-              opacity={0.75}
-            />
-
-            {renderCenterTable(250, 60, 48, centerLabel, centerSub, centerStatus, centerToneStyles)}
-
-            <line
-              x1={305}
-              y1={60}
-              x2={348}
-              y2={60}
-              stroke={tokens.colorNeutralStroke1}
-              strokeWidth={1.2}
-              strokeDasharray="4 4"
-            />
-
-            <rect
-              x={348}
-              y={33}
-              width={CARD_W}
-              height={CARD_H}
-              rx={8}
-              fill={tokens.colorNeutralBackground1}
-              stroke={tokens.colorNeutralStroke1}
-              strokeWidth={1}
-            />
-            <rect
-              x={351.5}
-              y={39}
-              width={3.5}
-              height={CARD_H - 12}
-              rx={1.75}
-              fill={tokens.colorNeutralStroke1}
-            />
-            <text
-              x={364}
-              y={53}
-              fill={tokens.colorNeutralForeground1}
-              fontSize={12.5}
-              fontWeight={600}
-            >
-              Awaiting Agent Assignment
-            </text>
-            <text
-              x={364}
-              y={73}
-              fill={tokens.colorNeutralForeground2}
-              fontSize={10.5}
-            >
-              No agent evidence recorded yet
-            </text>
-          </svg>
-        </div>
+      <div
+        className={styles.emptyBar}
+        role="img"
+        aria-label={`Round table of 0 Agents for ${centerLabel}`}
+      >
+        <span className={styles.leftMeta}>
+          <Bot16Regular aria-hidden="true" />
+          <Badge appearance="tint" color="subtle" shape="rounded" size="small" className="tabular">
+            0 Agents
+          </Badge>
+          <Text size={200} weight="semibold" style={{ color: tokens.colorNeutralForeground1 }}>
+            Awaiting Agent Assignment
+          </Text>
+          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+            · No agent evidence recorded yet
+          </Text>
+        </span>
+        <Text size={200} className="tabular" style={{ color: tokens.colorNeutralForeground2 }}>
+          {centerSub} · {centerStatus}
+        </Text>
       </div>
     );
   }
@@ -972,9 +934,9 @@ export function AgentRoundTable({
               : statusColors.solid;
 
             const statusText = shortStatusLabel(seat.participant.status);
-            const pillW = Math.max(44, statusText.length * 6.1 + 16);
+            const pillW = Math.max(48, statusText.length * 6.5 + 16);
             const pillX = seat.cardX + CARD_W - 8 - pillW;
-            const pillY = seat.cardY + 28;
+            const pillY = seat.cardY + 29;
             const pillBg = seat.statusDashed ? tokens.colorNeutralBackground3 : statusColors.bg;
 
             const stepX = seat.x - R_NODE * 0.72;
@@ -1070,10 +1032,10 @@ export function AgentRoundTable({
 
                 <text
                   x={seat.x.toFixed(1)}
-                  y={(seat.y + 13.5).toFixed(1)}
+                  y={(seat.y + 14).toFixed(1)}
                   textAnchor="middle"
                   fill={profileColors.fg}
-                  fontSize={10}
+                  fontSize={10.5}
                   fontWeight={700}
                   fontFamily="var(--fontFamilyMonospace, monospace)"
                 >
@@ -1086,17 +1048,17 @@ export function AgentRoundTable({
                     <circle
                       cx={stepX.toFixed(1)}
                       cy={stepY.toFixed(1)}
-                      r={8}
+                      r={8.5}
                       fill={tokens.colorNeutralBackground1}
                       stroke={profileColors.fg}
                       strokeWidth={1.5}
                     />
                     <text
                       x={stepX.toFixed(1)}
-                      y={(stepY + 3.2).toFixed(1)}
+                      y={(stepY + 3.5).toFixed(1)}
                       textAnchor="middle"
                       fill={profileColors.fg}
-                      fontSize={9}
+                      fontSize={10}
                       fontWeight={700}
                     >
                       {seat.workflowStep}
@@ -1162,19 +1124,19 @@ export function AgentRoundTable({
                 {/* Row 1: Role + Tool */}
                 <text
                   x={(seat.cardX + 14).toFixed(1)}
-                  y={(seat.cardY + 20).toFixed(1)}
+                  y={(seat.cardY + 21).toFixed(1)}
                   fill={tokens.colorNeutralForeground1}
-                  fontSize={12.5}
+                  fontSize={13}
                   fontWeight={600}
                 >
                   {shortRoleLabel(seat.participant.role)}
                 </text>
                 <text
                   x={(seat.cardX + CARD_W - 10).toFixed(1)}
-                  y={(seat.cardY + 20).toFixed(1)}
+                  y={(seat.cardY + 21).toFixed(1)}
                   textAnchor="end"
                   fill={tokens.colorNeutralForeground3}
-                  fontSize={10.5}
+                  fontSize={11.5}
                   fontWeight={500}
                 >
                   {shortToolLabel(seat.participant.tool)}
@@ -1183,9 +1145,9 @@ export function AgentRoundTable({
                 {/* Row 2: Model + Framed Status Pill (Axis 2 Status) */}
                 <text
                   x={(seat.cardX + 14).toFixed(1)}
-                  y={(seat.cardY + 40).toFixed(1)}
+                  y={(seat.cardY + 42).toFixed(1)}
                   fill={tokens.colorNeutralForeground2}
-                  fontSize={11}
+                  fontSize={11.5}
                   fontFamily="var(--fontFamilyMonospace, monospace)"
                 >
                   {shortModelLabel(seat.participant.model)}
@@ -1195,8 +1157,8 @@ export function AgentRoundTable({
                   x={pillX.toFixed(1)}
                   y={pillY.toFixed(1)}
                   width={pillW.toFixed(1)}
-                  height={17}
-                  rx={8.5}
+                  height={18}
+                  rx={9}
                   fill={pillBg}
                   stroke={statusStroke}
                   strokeWidth={1}
@@ -1204,10 +1166,10 @@ export function AgentRoundTable({
                 />
                 <text
                   x={(pillX + pillW / 2).toFixed(1)}
-                  y={(pillY + 12).toFixed(1)}
+                  y={(pillY + 12.5).toFixed(1)}
                   textAnchor="middle"
                   fill={seat.statusDashed ? tokens.colorNeutralForeground2 : statusColors.fg}
-                  fontSize={10.5}
+                  fontSize={11.5}
                   fontWeight={600}
                 >
                   {statusText}

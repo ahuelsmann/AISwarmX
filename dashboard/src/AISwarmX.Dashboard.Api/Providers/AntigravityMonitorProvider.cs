@@ -24,7 +24,7 @@ public sealed partial class AntigravityMonitorProvider
     private const string MobaAltPrefix = "MOBA ";
     private const string ArgonRole = "Head of AI Strategy";
     private const string ArgonProfile = "P3";
-    private const string DefaultArgonModel = "Orchestrator · Gemini 4 Argon";
+    private const string DefaultArgonModel = "Gemini 4 Carbon";
     private const string LegacyDesktopModel = "Orchestrator (Neon)";
 
     private const string OpusMonitorId = "antigravity-opus-head";
@@ -33,7 +33,7 @@ public sealed partial class AntigravityMonitorProvider
     private const string LegacyOpusHeadName = "Opus Head";
     private const string OpusRole = "Acting COO & Opus Orchestrator";
     private const string OpusProfile = "P1";
-    private const string DefaultOpusModel = "Orchestrator · Claude Opus 5.5";
+    private const string DefaultOpusModel = "Claude Opus 5.5";
 
     private const string Tool = "Antigravity";
     private readonly TimeProvider _timeProvider;
@@ -346,7 +346,11 @@ public sealed partial class AntigravityMonitorProvider
                 defaultModel: DefaultOpusModel);
         }
 
-        var model = InspectConversationModel(context.AntigravityHomePath, opusSelected.Id, DefaultOpusModel);
+        var model = InspectConversationModel(
+            context.AntigravityHomePath,
+            opusSelected.Id,
+            DefaultOpusModel,
+            claudeFamilyOnly: true);
         var lastActivityUtc = ParseLastActivityUtc(opusSelected.LastModifiedRaw);
         var rateLimitResetLabel = DetectAntigravityRateLimit(
             context.AntigravityHomePath,
@@ -703,7 +707,11 @@ public sealed partial class AntigravityMonitorProvider
         return ids;
     }
 
-    internal static string InspectConversationModel(string antigravityHomePath, string conversationId, string fallbackModel)
+    internal static string InspectConversationModel(
+        string antigravityHomePath,
+        string conversationId,
+        string fallbackModel,
+        bool claudeFamilyOnly = false)
     {
         var tail = ReadTranscriptTailText(antigravityHomePath, conversationId);
         if (string.IsNullOrEmpty(tail))
@@ -721,9 +729,16 @@ public sealed partial class AntigravityMonitorProvider
                 continue;
             }
 
+            if (claudeFamilyOnly &&
+                !candidate.Contains("opus", StringComparison.OrdinalIgnoreCase) &&
+                !candidate.Contains("sonnet", StringComparison.OrdinalIgnoreCase) &&
+                !candidate.Contains("claude", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             lastAnyModel = candidate;
-            // Antigravity Orchestrator runs planning turns on the chosen Head model (e.g. Carbon/Argon or Opus)
-            // and inner execution steps on gemini-4-hydrogen-xhigh; prefer the primary Head model.
+            // Prefer the primary Head model over inner Gemini Hydrogen execution helper turns.
             if (!candidate.Contains("hydrogen", StringComparison.OrdinalIgnoreCase))
             {
                 primaryModel = candidate;
@@ -836,32 +851,32 @@ public sealed partial class AntigravityMonitorProvider
 
         if (normalized.Contains("opus", StringComparison.Ordinal))
         {
-            return "Orchestrator · Claude Opus 5.5";
+            return "Claude Opus 5.5";
         }
 
         if (normalized.Contains("sonnet", StringComparison.Ordinal))
         {
-            return "Orchestrator · Claude Sonnet 5.5";
+            return "Claude Sonnet 5.5";
         }
 
         if (normalized.Contains("carbon", StringComparison.Ordinal))
         {
-            return "Orchestrator · Gemini 4 Carbon";
+            return "Gemini 4 Carbon";
         }
 
         if (normalized.Contains("argon", StringComparison.Ordinal))
         {
-            return "Orchestrator · Gemini 4 Argon";
+            return "Gemini 4 Argon";
         }
 
         if (normalized.Contains("hydrogen", StringComparison.Ordinal))
         {
-            return "Orchestrator · Gemini 4 Hydrogen";
+            return "Gemini 4 Hydrogen";
         }
 
         if (normalized.Contains("neon", StringComparison.Ordinal))
         {
-            return LegacyDesktopModel;
+            return "Gemini 4 Neon";
         }
 
         return string.IsNullOrWhiteSpace(rawModel) ? fallbackModel : rawModel;

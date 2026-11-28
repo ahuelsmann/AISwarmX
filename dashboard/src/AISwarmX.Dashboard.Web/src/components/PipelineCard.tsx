@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react';
 import {
   Badge,
+  Button,
   Card,
   Link,
   MessageBar,
@@ -31,7 +32,7 @@ import {
   WifiOff20Regular
 } from '@fluentui/react-icons';
 import { formatAbsoluteEn, formatRelativeTimeEn } from '../api/dashboardClient';
-import { getStatusStyles, type AccentTone } from '../theme/mobaFluentTheme';
+import { getStatusStyles, type AccentTone, type StatusKey } from '../theme/mobaFluentTheme';
 import type {
   ActiveIssueInfo,
   LinkedIssueInfo,
@@ -187,6 +188,20 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: '6px'
   },
+  stagePillButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: 0,
+    margin: 0,
+    backgroundColor: 'transparent',
+    border: 'none',
+    borderRadius: tokens.borderRadiusMedium,
+    cursor: 'pointer'
+  },
+  stagePillButtonActive: {
+    outline: `2px solid ${tokens.colorBrandStroke1}`,
+    outlineOffset: '2px'
+  },
   chevronSep: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
@@ -204,18 +219,26 @@ const useStyles = makeStyles({
   },
   kanbanGroupHeader: {
     display: 'flex',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: '8px',
-    marginTop: '2px',
-    marginBottom: '6px',
-    paddingTop: '6px',
-    borderTop: `1px solid ${tokens.colorNeutralStroke2}`
+    padding: '8px 12px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    marginBottom: '8px'
+  },
+  kanbanGroupLeft: {
+    display: 'inline-flex',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    gap: '8px'
   },
   kanbanGroupTitle: {
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground2,
+    color: tokens.colorNeutralForeground1,
     textTransform: 'uppercase',
     letterSpacing: '0.03em'
   },
@@ -258,12 +281,14 @@ const useStyles = makeStyles({
     flex: '1 1 260px'
   },
   workflowRunTitle: {
+    flex: '1 1 280px',
+    minWidth: 0,
+    maxWidth: 'min(860px, 100%)',
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground1,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    maxWidth: 'min(340px, 100%)',
     display: 'inline-flex',
     alignItems: 'center',
     gap: '4px'
@@ -278,12 +303,24 @@ interface PipelineCardProps {
 }
 
 type PipelineViewMode = 'open' | 'issues';
+type KanbanStageFilter = 'all' | 'ready' | 'in progress' | 'in review';
 
 const KANBAN_GROUPS = ['Ready', 'In progress', 'In review', 'Via Open PR'] as const;
+const MAX_COLLAPSED_READY_ITEMS = 3;
+
+interface KanbanColumnGroup {
+  key: 'in progress' | 'in review' | 'other' | 'ready';
+  label: string;
+  tone: StatusKey;
+  subtitle: string;
+  items: ActiveIssueInfo[];
+}
 
 export function PipelineCard({ pipeline, monitors, nowMs, isDark }: PipelineCardProps) {
   const styles = useStyles();
   const [viewMode, setViewMode] = useState<PipelineViewMode>('issues');
+  const [stageFilter, setStageFilter] = useState<KanbanStageFilter>('all');
+  const [showAllReady, setShowAllReady] = useState(false);
 
   const allKanbanItems = pipeline.activeIssues ?? [];
   const inReviewItems = allKanbanItems.filter((i) => i.kanbanStatus.toLowerCase() === 'in review');
@@ -293,12 +330,42 @@ export function PipelineCard({ pipeline, monitors, nowMs, isDark }: PipelineCard
     (i) => !['in review', 'in progress', 'ready'].includes(i.kanbanStatus.toLowerCase())
   );
 
-  const columnGroups: { label: string; items: ActiveIssueInfo[] }[] = [
-    { label: 'Ready', items: readyItems },
-    { label: 'In progress', items: inProgressItems },
-    { label: 'In review', items: inReviewItems },
-    ...(fallbackItems.length > 0 ? [{ label: 'Via Open PR', items: fallbackItems }] : [])
-  ].filter((g) => g.items.length > 0);
+  const columnGroups: KanbanColumnGroup[] = (
+    [
+      {
+        key: 'in progress' as const,
+        label: 'In progress',
+        tone: 'warn' as StatusKey,
+        subtitle: 'Active implementation in isolated worktrees & sub-agent swarms',
+        items: inProgressItems
+      },
+      {
+        key: 'in review' as const,
+        label: 'In review',
+        tone: 'warn' as StatusKey,
+        subtitle: 'Automated CI, SonarCloud & Cross-Family gates running',
+        items: inReviewItems
+      },
+      ...(fallbackItems.length > 0
+        ? [
+            {
+              key: 'other' as const,
+              label: 'Via Open PR',
+              tone: 'neutral' as StatusKey,
+              subtitle: 'Tracked via open pull request',
+              items: fallbackItems
+            }
+          ]
+        : []),
+      {
+        key: 'ready' as const,
+        label: 'Ready',
+        tone: 'ok' as StatusKey,
+        subtitle: 'Maintainer-authorized queue — awaiting next free WIP slot',
+        items: readyItems
+      }
+    ] satisfies KanbanColumnGroup[]
+  ).filter((g) => g.items.length > 0 && (stageFilter === 'all' || g.key === stageFilter));
 
   const activePrList = pipeline.pullRequests;
   const hasPullRequests = activePrList.length > 0;
@@ -398,22 +465,58 @@ export function PipelineCard({ pipeline, monitors, nowMs, isDark }: PipelineCard
       {pipeline.source.status !== 'unavailable' && effectiveViewMode === 'issues' && (
         <>
           <div className={styles.kanbanSummaryStrip}>
-            <div className={styles.kanbanCountsGroup}>
-              <StatusBadge tone="ok" className="tabular">
-                Ready: {readyItems.length}
-              </StatusBadge>
+            <div className={styles.kanbanCountsGroup} role="group" aria-label="Filter Kanban stage">
+              <ToggleButton
+                size="small"
+                appearance={stageFilter === 'all' ? 'primary' : 'subtle'}
+                checked={stageFilter === 'all'}
+                onClick={() => setStageFilter('all')}
+              >
+                <span className="tabular">All: {allKanbanItems.length}</span>
+              </ToggleButton>
+              <button
+                type="button"
+                className={`${styles.stagePillButton}${stageFilter === 'ready' ? ` ${styles.stagePillButtonActive}` : ''}`}
+                aria-pressed={stageFilter === 'ready'}
+                onClick={() => setStageFilter((prev) => (prev === 'ready' ? 'all' : 'ready'))}
+              >
+                <StatusBadge tone="ok" className="tabular">
+                  Ready: {readyItems.length}
+                </StatusBadge>
+              </button>
               <span className={styles.chevronSep} aria-hidden="true">
                 ›
               </span>
-              <StatusBadge tone="warn" className="tabular">
-                In progress: {inProgressItems.length}
-              </StatusBadge>
+              <button
+                type="button"
+                className={`${styles.stagePillButton}${stageFilter === 'in progress' ? ` ${styles.stagePillButtonActive}` : ''}`}
+                aria-pressed={stageFilter === 'in progress'}
+                onClick={() =>
+                  setStageFilter((prev) => (prev === 'in progress' ? 'all' : 'in progress'))
+                }
+              >
+                <StatusBadge tone="warn" className="tabular">
+                  In progress: {inProgressItems.length}
+                </StatusBadge>
+              </button>
               <span className={styles.chevronSep} aria-hidden="true">
                 ›
               </span>
-              <Badge appearance="tint" color="informative" shape="rounded" className="tabular">
-                In review: {inReviewItems.length}
-              </Badge>
+              <button
+                type="button"
+                className={`${styles.stagePillButton}${stageFilter === 'in review' ? ` ${styles.stagePillButtonActive}` : ''}`}
+                aria-pressed={stageFilter === 'in review'}
+                onClick={() =>
+                  setStageFilter((prev) => (prev === 'in review' ? 'all' : 'in review'))
+                }
+              >
+                <StatusBadge
+                  tone={inReviewItems.length > 0 ? 'warn' : 'neutral'}
+                  className="tabular"
+                >
+                  In review: {inReviewItems.length}
+                </StatusBadge>
+              </button>
             </div>
 
             {pipeline.projectBoardUrl && (
@@ -476,28 +579,68 @@ export function PipelineCard({ pipeline, monitors, nowMs, isDark }: PipelineCard
                 Issues and PRs in Ready, In progress, or In review appear here 1:1 with GitHub Kanban.
               </Text>
             </div>
+          ) : columnGroups.length === 0 ? (
+            <div className={styles.emptyState}>
+              <CheckmarkCircle16Regular style={{ width: 22, height: 22 }} aria-hidden="true" />
+              <Text weight="semibold">No items in selected Kanban stage</Text>
+              <Button size="small" appearance="subtle" onClick={() => setStageFilter('all')}>
+                Show all stages
+              </Button>
+            </div>
           ) : (
-            columnGroups.map((group) => (
-              <div key={group.label}>
-                <div className={styles.kanbanGroupHeader}>
-                  <span className={styles.kanbanGroupTitle}>
-                    {group.label} ({group.items.length})
-                  </span>
+            columnGroups.map((group) => {
+              const canCollapseReady =
+                group.key === 'ready' &&
+                group.items.length > MAX_COLLAPSED_READY_ITEMS &&
+                stageFilter === 'all';
+              const visibleGroupItems =
+                canCollapseReady && !showAllReady
+                  ? group.items.slice(0, MAX_COLLAPSED_READY_ITEMS)
+                  : group.items;
+
+              return (
+                <div key={group.label}>
+                  <div
+                    className={styles.kanbanGroupHeader}
+                    style={{
+                      borderLeft: `3px solid ${getStatusStyles(group.tone, isDark).solid}`
+                    }}
+                  >
+                    <div className={styles.kanbanGroupLeft}>
+                      <span className={styles.kanbanGroupTitle}>
+                        {group.label} ({group.items.length})
+                      </span>
+                      <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                        {group.subtitle}
+                      </Text>
+                    </div>
+                    {canCollapseReady && (
+                      <Button
+                        size="small"
+                        appearance="subtle"
+                        onClick={() => setShowAllReady((prev) => !prev)}
+                      >
+                        {showAllReady
+                          ? 'Show fewer Ready issues'
+                          : `Show all ${group.items.length} Ready issues`}
+                      </Button>
+                    )}
+                  </div>
+                  <div className={styles.prList}>
+                    {visibleGroupItems.map((item) => (
+                      <KanbanItemRow
+                        key={`${item.itemKind ?? 'Issue'}-${item.number}`}
+                        issue={item}
+                        monitors={monitors}
+                        nowMs={nowMs}
+                        isDark={isDark}
+                        styles={styles}
+                      />
+                    ))}
+                  </div>
                 </div>
-                <div className={styles.prList}>
-                  {group.items.map((item) => (
-                    <KanbanItemRow
-                      key={`${item.itemKind ?? 'Issue'}-${item.number}`}
-                      issue={item}
-                      monitors={monitors}
-                      nowMs={nowMs}
-                      isDark={isDark}
-                      styles={styles}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </>
       )}
@@ -848,7 +991,7 @@ function LinkedIssuePill({ issue, className }: { issue: LinkedIssueInfo; classNa
         <span
           style={{
             color: tokens.colorNeutralForeground1,
-            maxWidth: 340,
+            maxWidth: 'min(780px, 72vw)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap'
@@ -870,17 +1013,15 @@ function LinkedIssuePill({ issue, className }: { issue: LinkedIssueInfo; classNa
 function PrStateBadge({ stateLabel, isMerged }: { stateLabel: string; isMerged: boolean }) {
   if (isMerged || stateLabel === 'Merged') {
     return (
-      <Badge appearance="tint" color="informative" shape="rounded" icon={<Merge16Regular />}>
+      <StatusBadge tone="ok" icon={<Merge16Regular />}>
         Merged
-      </Badge>
+      </StatusBadge>
     );
   }
   if (stateLabel === 'Auto-Merge') {
     return (
       <GlossaryTooltip term="Auto-Merge">
-        <Badge appearance="tint" color="informative" shape="rounded">
-          Auto-Merge
-        </Badge>
+        <StatusBadge tone="ok">Auto-Merge</StatusBadge>
       </GlossaryTooltip>
     );
   }
@@ -1250,11 +1391,7 @@ function KanbanItemRow({
 function KanbanStatusBadge({ status }: { status: string }) {
   switch (status.toLowerCase()) {
     case 'in review':
-      return (
-        <Badge appearance="tint" color="informative" shape="rounded">
-          {status}
-        </Badge>
-      );
+      return <StatusBadge tone="warn">{status}</StatusBadge>;
     case 'in progress':
       return (
         <Badge appearance="tint" color="warning" shape="rounded">
@@ -1310,6 +1447,19 @@ function LinkedPullRequestPill({
       <span className="mono" style={{ fontWeight: tokens.fontWeightSemibold }}>
         PR #{prRef.number}
       </span>
+      {prRef.title && (
+        <span
+          style={{
+            color: tokens.colorNeutralForeground1,
+            maxWidth: 'min(720px, 68vw)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          · {prRef.title}
+        </span>
+      )}
       <Badge
         appearance="tint"
         color={prRef.isMerged ? 'success' : 'subtle'}

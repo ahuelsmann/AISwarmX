@@ -2,6 +2,7 @@ import { Badge, Card, Link, Text, makeStyles, tokens } from '@fluentui/react-com
 import { CheckmarkCircle16Regular, Merge16Regular, Open16Regular } from '@fluentui/react-icons';
 import { formatRelativeTimeEn } from '../api/dashboardClient';
 import type { PipelineResponse, PullRequestInfo } from '../types/dashboard';
+import { ContextChip } from './shared/ContextChip';
 
 interface MainLandingTickerCardProps {
   pipeline: PipelineResponse;
@@ -13,7 +14,7 @@ export interface RankedLandingPr {
   pr: PullRequestInfo;
   tier: 1 | 2 | 3 | 4 | 5 | 6;
   stageLabel: string;
-  badgeColor: 'success' | 'informative' | 'subtle' | 'danger';
+  badgeColor: 'success' | 'warning' | 'subtle' | 'danger';
   detailNote: string;
 }
 
@@ -26,7 +27,7 @@ export function rankPullRequestsForMain(pullRequests: PullRequestInfo[]): Ranked
 
     let tier: 1 | 2 | 3 | 4 | 5 | 6;
     let stageLabel: string;
-    let badgeColor: 'success' | 'informative' | 'subtle' | 'danger';
+    let badgeColor: 'success' | 'warning' | 'subtle' | 'danger';
 
     if (pr.autoMergeEnabled && ciPass && sonarPassOrPending && pr.mergeState === 'CLEAN') {
       tier = 1;
@@ -35,7 +36,7 @@ export function rankPullRequestsForMain(pullRequests: PullRequestInfo[]): Ranked
     } else if (pr.autoMergeEnabled && !hasFailure) {
       tier = 2;
       stageLabel = 'Auto-Merge · Running';
-      badgeColor = 'informative';
+      badgeColor = 'warning';
     } else if (!pr.isDraft && ciPass && sonarPassOrPending && !hasFailure) {
       tier = 3;
       stageLabel = 'Ready · Checks Green';
@@ -43,7 +44,7 @@ export function rankPullRequestsForMain(pullRequests: PullRequestInfo[]): Ranked
     } else if (pr.isDraft && ciPass && sonarPassOrPending && !hasFailure) {
       tier = 4;
       stageLabel = 'Draft · Checks Green';
-      badgeColor = 'informative';
+      badgeColor = 'subtle';
     } else if (!hasFailure) {
       tier = 5;
       stageLabel = 'CI / Review Running';
@@ -159,12 +160,14 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200
   },
   rowTitle: {
+    flex: '1 1 260px',
+    minWidth: 0,
+    maxWidth: 'min(840px, 100%)',
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground1,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    maxWidth: '520px'
+    whiteSpace: 'nowrap'
   },
   rowRight: {
     display: 'flex',
@@ -173,7 +176,7 @@ const useStyles = makeStyles({
     flexWrap: 'wrap'
   },
   detailText: {
-    fontSize: tokens.fontSizeBase100,
+    fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2
   },
   empty: {
@@ -205,6 +208,12 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     fontSize: tokens.fontSizeBase200
+  },
+  landedChipTitle: {
+    maxWidth: 'min(420px, 65vw)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
   }
 });
 
@@ -219,12 +228,10 @@ export function MainLandingTickerCard({ pipeline, nowMs }: MainLandingTickerCard
         <div className={styles.titleGroup}>
           <Merge16Regular aria-hidden="true" />
           <h3 className={styles.title}>Main Landing Queue</h3>
-          <Badge appearance="tint" color="informative">
-            Arrival Order
-          </Badge>
+          <ContextChip appearance="tint">Arrival Order</ContextChip>
         </div>
         <div className={styles.badges}>
-          <Badge appearance="tint" color={ranked.length > 0 ? 'informative' : 'success'}>
+          <Badge appearance="tint" color={ranked.length > 0 ? 'warning' : 'success'}>
             {ranked.length} Approaching main
           </Badge>
           <Badge appearance="tint" color="success">
@@ -286,7 +293,7 @@ export function MainLandingTickerCard({ pipeline, nowMs }: MainLandingTickerCard
               title={merged.title}
             >
               <strong>PR #{merged.number}</strong>
-              <span>{merged.title}</span>
+              <span className={styles.landedChipTitle}>{merged.title}</span>
               <span className="tabular">
                 ({formatRelativeTimeEn(merged.mergedAtUtc ?? merged.updatedAtUtc, nowMs)})
               </span>

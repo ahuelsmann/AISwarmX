@@ -104,7 +104,7 @@ const useStyles = makeStyles({
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-    gridTemplateRows: 'repeat(2, minmax(108px, auto))',
+    gridTemplateRows: 'auto',
     gap: '12px',
     '@media (max-width: 799px)': {
       gridTemplateColumns: 'minmax(0, 1fr)',
@@ -127,9 +127,7 @@ const useStyles = makeStyles({
     cursor: 'pointer'
   },
   slotIdleEmpty: {
-    '@media (max-width: 799px)': {
-      minHeight: '0'
-    }
+    minHeight: '0'
   },
   card: {
     flex: '1 1 auto',
@@ -643,7 +641,7 @@ export function MonitorCards({
             <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
               {movingSlotIndex !== null
                 ? 'Select a target slot (2×3 grid) to place or swap the tile, or click the move icon again to cancel.'
-                : 'Selection Council · 2×3 grid (drag or grip to arrange, saved in cookie)'}
+                : '4 Root Orchestrators · Drag or use grip to customize layout'}
             </Text>
           </div>
 

@@ -203,13 +203,13 @@ export function ArchitectureDiagramsView({
       body: 'Master/Root Claude Code session acting as Chief Operating Officer (COO) & Kanban single-writer. Spawns fresh P1 sub-agents for deep architectural implementation and clean-context Final Reviews.'
     },
     'antigravity-opus-head': {
-      title: `AiSwarmX Antigravity Opus · P1 (${opusMon?.model ?? 'Orchestrator · Claude Opus 5.5'})`,
+      title: `AiSwarmX Antigravity Opus · P1 (${opusMon?.model ?? 'Claude Opus 5.5'})`,
       badge: `${stateLabelShort(opusMon?.state ?? 'offline')} · Sub-agents: ${opusMon?.activeSubAgentCount ?? 0}`,
       tone: stateToStatusKey(opusMon?.state ?? 'offline'),
       body: 'Master/Root Antigravity Orchestrator running Claude Opus under Google AI Ultra. Acts as P1 Acting COO / Architecture Lead & Fresh P1 Final Reviewer with full sub-agent swarm spawning.'
     },
     'antigravity-monitor': {
-      title: `AiSwarmX Antigravity Gemini · P3 (${agMon?.model ?? 'Orchestrator · Gemini 4 Argon'})`,
+      title: `AiSwarmX Antigravity Gemini · P3 (${agMon?.model ?? 'Gemini 4 Carbon'})`,
       badge: `${stateLabelShort(agMon?.state ?? 'offline')} · Sub-agents: ${agMon?.activeSubAgentCount ?? 0}`,
       tone: stateToStatusKey(agMon?.state ?? 'offline'),
       body: 'Master/Root Antigravity Orchestrator running Gemini (Carbon/Neon/Argon). Acts as Head of AI Strategy, UI/UX Architecture Lead (WinUI 3, MAUI, AISwarmX cockpit), and multi-model sub-agent swarm coordinator.'
@@ -285,8 +285,8 @@ export function ArchitectureDiagramsView({
   }> = [
     {
       id: 'codex-monitor',
-      x: 22,
-      cx: 124,
+      x: 24,
+      cx: 154,
       title: 'AiSwarmX ChatGPT Codex',
       subtitle: 'Technical Director & CPM',
       profile: 'P2 · ChatGPT Codex',
@@ -295,8 +295,8 @@ export function ArchitectureDiagramsView({
     },
     {
       id: 'claude-monitor',
-      x: 246,
-      cx: 348,
+      x: 308,
+      cx: 438,
       title: 'AiSwarmX Claude Opus',
       subtitle: 'Chief Operating Officer',
       profile: 'P1 · Claude Code',
@@ -305,8 +305,8 @@ export function ArchitectureDiagramsView({
     },
     {
       id: 'antigravity-opus-head',
-      x: 470,
-      cx: 572,
+      x: 592,
+      cx: 722,
       title: 'AiSwarmX Antigravity Opus',
       subtitle: 'Acting COO · Opus Root',
       profile: 'P1 · Antigravity Opus',
@@ -315,8 +315,8 @@ export function ArchitectureDiagramsView({
     },
     {
       id: 'antigravity-monitor',
-      x: 694,
-      cx: 796,
+      x: 876,
+      cx: 1006,
       title: 'AiSwarmX Antigravity Gemini',
       subtitle: 'AI Strategy & UI/UX',
       profile: 'P3 · Antigravity Gemini',
@@ -343,7 +343,7 @@ export function ArchitectureDiagramsView({
     },
     {
       id: 'ready',
-      x: 200,
+      x: 249,
       label: '2. Ready',
       sublabel: 'Maintainer Trigger',
       count: `${readyCount} ready`,
@@ -351,7 +351,7 @@ export function ArchitectureDiagramsView({
     },
     {
       id: 'in-progress',
-      x: 380,
+      x: 478,
       label: '3. In progress',
       sublabel: 'Worktree + Sub-Agents',
       count: `${inProgressCount} active`,
@@ -359,7 +359,7 @@ export function ArchitectureDiagramsView({
     },
     {
       id: 'in-review',
-      x: 560,
+      x: 707,
       label: '4. In review',
       sublabel: 'CI + Sonar + P1 + X-Fam',
       count: `${openPrCount} open PR(s)`,
@@ -367,7 +367,7 @@ export function ArchitectureDiagramsView({
     },
     {
       id: 'done',
-      x: 740,
+      x: 936,
       label: '5. Done',
       sublabel: 'Auto-Merge + Hygiene',
       count: `${mergedCount} merged`,
@@ -420,7 +420,7 @@ export function ArchitectureDiagramsView({
           </h2>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <ContextChip appearance="tint">
-              Heads: GPT (P2) → Claude (P1) → Opus (P1) → Argon (P3)
+              Heads: GPT (P2) → Claude (P1) → Opus (P1) → Carbon (P3)
             </ContextChip>
             <StatusBadge
               tone={summary.activeSubAgentsTotal > 0 ? 'warn' : 'neutral'}
@@ -433,50 +433,50 @@ export function ArchitectureDiagramsView({
 
         <div className={styles.svgWrap}>
           <svg
-            viewBox="0 0 920 310"
+            viewBox="0 0 1160 316"
             width="100%"
-            style={{ minWidth: 680, maxWidth: '100%', height: 'auto', display: 'block' }}
+            style={{ minWidth: 760, maxWidth: '100%', height: 'auto', display: 'block' }}
             role="group"
             aria-label="Interactive Swarm Topology Diagram connecting Maintainer, Triad, 4 Master/Root Heads, Ephemeral Sub-Agents, and Repositories"
           >
             <defs>
               <clipPath id="topo-clip-triad">
-                <rect x="170" y="64" width="580" height="36" rx="6" />
+                <rect x="220" y="64" width="720" height="36" rx="6" />
               </clipPath>
               {monitorBoxes.map((box) => (
                 <clipPath key={`clip-${box.id}`} id={`topo-clip-${box.id}`}>
-                  <rect x={box.x} y="120" width="204" height="68" rx="6" />
+                  <rect x={box.x} y="120" width="260" height="70" rx="6" />
                 </clipPath>
               ))}
               <clipPath id="topo-clip-subagents">
-                <rect x="22" y="206" width="876" height="46" rx="6" />
+                <rect x="24" y="208" width="1112" height="48" rx="6" />
               </clipPath>
             </defs>
 
             {/* Layer 1 -> Layer 2 trunk */}
             <line
-              x1="460"
+              x1="580"
               y1="44"
-              x2="460"
+              x2="580"
               y2="58"
               stroke={tokens.colorNeutralStroke1}
               strokeWidth="1.5"
             />
-            <polygon points="456,57 464,57 460,63" fill={tokens.colorNeutralStroke1} />
+            <polygon points="576,57 584,57 580,63" fill={tokens.colorNeutralStroke1} />
 
             {/* Triad orthogonal bus connecting the 4 Root Heads */}
             <line
-              x1="460"
+              x1="580"
               y1="100"
-              x2="460"
+              x2="580"
               y2="110"
               stroke={triadColors.solid}
               strokeWidth="1.5"
             />
             <line
-              x1="124"
+              x1="154"
               y1="110"
-              x2="796"
+              x2="1006"
               y2="110"
               stroke={triadColors.solid}
               strokeWidth="1.5"
@@ -498,14 +498,14 @@ export function ArchitectureDiagramsView({
               <g key={`down-${box.id}`}>
                 <line
                   x1={box.cx}
-                  y1="188"
+                  y1="190"
                   x2={box.cx}
-                  y2="200"
+                  y2="202"
                   stroke={box.identityColors.solid}
                   strokeWidth="1.5"
                 />
                 <polygon
-                  points={`${box.cx - 4},199 ${box.cx + 4},199 ${box.cx},205`}
+                  points={`${box.cx - 4},201 ${box.cx + 4},201 ${box.cx},207`}
                   fill={box.identityColors.solid}
                 />
               </g>
@@ -513,14 +513,14 @@ export function ArchitectureDiagramsView({
 
             {/* Arrow down from Sub-Agents to Repositories */}
             <line
-              x1="460"
-              y1="252"
-              x2="460"
-              y2="264"
+              x1="580"
+              y1="256"
+              x2="580"
+              y2="268"
               stroke={tokens.colorNeutralStroke1}
               strokeWidth="1.5"
             />
-            <polygon points="456,263 464,263 460,269" fill={tokens.colorNeutralStroke1} />
+            <polygon points="576,267 584,267 580,273" fill={tokens.colorNeutralStroke1} />
 
             {/* Layer 1: Maintainer */}
             <g
@@ -539,9 +539,9 @@ export function ArchitectureDiagramsView({
               }}
             >
               <rect
-                x="230"
+                x="310"
                 y="8"
-                width="460"
+                width="540"
                 height="36"
                 rx="6"
                 fill={tokens.colorNeutralBackground2}
@@ -553,21 +553,21 @@ export function ArchitectureDiagramsView({
                 strokeWidth={selectedTopology === 'maintainer' ? 2 : 1}
               />
               <text
-                x="460"
+                x="580"
                 y="24"
                 textAnchor="middle"
                 fill={tokens.colorNeutralForeground1}
-                fontSize="12.5"
+                fontSize="13"
                 fontWeight="700"
               >
                 Human Maintainer (Andreas)
               </text>
               <text
-                x="460"
+                x="580"
                 y="38"
                 textAnchor="middle"
                 fill={tokens.colorNeutralForeground2}
-                fontSize="10.5"
+                fontSize="11.5"
               >
                 Product Goals · Ready Trigger · Escalations
               </text>
@@ -590,9 +590,9 @@ export function ArchitectureDiagramsView({
               }}
             >
               <rect
-                x="170"
+                x="220"
                 y="64"
-                width="580"
+                width="720"
                 height="36"
                 rx="6"
                 fill={triadColors.bg}
@@ -602,34 +602,34 @@ export function ArchitectureDiagramsView({
                 strokeWidth={selectedTopology === 'triad' ? 2 : 1}
               />
               <rect
-                x="170"
+                x="220"
                 y="64"
-                width="580"
+                width="720"
                 height="3"
                 fill={triadColors.solid}
                 clipPath="url(#topo-clip-triad)"
               />
               <text
-                x="184"
+                x="238"
                 y="86"
                 fill={triadColors.fg}
-                fontSize="12.5"
+                fontSize="13"
                 fontWeight="700"
               >
                 Decision &amp; Steering Triad
               </text>
               <text
-                x="358"
+                x="436"
                 y="86"
                 fill={tokens.colorNeutralForeground2}
-                fontSize="10.5"
+                fontSize="11.5"
               >
                 Risk L / M / H · Slice Scope · Area Locks
               </text>
               <rect
-                x="634"
+                x="808"
                 y="72"
-                width="104"
+                width="116"
                 height="20"
                 rx="10"
                 fill={openPrCount > 3 ? dangerColors.bg : triadColors.bg}
@@ -637,11 +637,11 @@ export function ArchitectureDiagramsView({
                 strokeWidth="1"
               />
               <text
-                x="686"
+                x="866"
                 y="86"
                 textAnchor="middle"
                 fill={openPrCount > 3 ? dangerColors.fg : triadColors.fg}
-                fontSize="10.5"
+                fontSize="11.5"
                 fontWeight="600"
               >
                 Code WIP {openPrCount}/3
@@ -675,8 +675,8 @@ export function ArchitectureDiagramsView({
                   <rect
                     x={box.x}
                     y="120"
-                    width="204"
-                    height="68"
+                    width="260"
+                    height="70"
                     rx="6"
                     fill={box.identityColors.bg}
                     stroke={isSelected ? tokens.colorBrandForeground1 : box.identityColors.border}
@@ -685,46 +685,46 @@ export function ArchitectureDiagramsView({
                   <rect
                     x={box.x}
                     y="120"
-                    width="204"
+                    width="260"
                     height="3"
                     fill={box.identityColors.solid}
                     clipPath={`url(#topo-clip-${box.id})`}
                   />
                   <text
-                    x={box.x + 10}
-                    y="136"
+                    x={box.x + 12}
+                    y="138"
                     fill={box.identityColors.fg}
-                    fontSize="11"
+                    fontSize="12"
                     fontWeight="700"
                   >
                     {box.title}
                   </text>
                   <text
-                    x={box.x + 10}
-                    y="151"
+                    x={box.x + 12}
+                    y="154"
                     fill={tokens.colorNeutralForeground2}
-                    fontSize="9.5"
+                    fontSize="11"
                   >
                     {box.profile.split(' · ')[0]} · {box.subtitle}
                   </text>
 
                   {/* Status Pill inside Root Head Card */}
                   <rect
-                    x={box.x + 10}
-                    y="162"
-                    width="88"
-                    height="18"
-                    rx="9"
+                    x={box.x + 12}
+                    y="163"
+                    width="108"
+                    height="20"
+                    rx="10"
                     fill={stColors.bg}
                     stroke={stColors.border}
                     strokeWidth="1"
                   />
-                  <circle cx={box.x + 19} cy="171" r="3" fill={stColors.solid} />
+                  <circle cx={box.x + 22} cy="173" r="3.5" fill={stColors.solid} />
                   <text
-                    x={box.x + 26}
-                    y="174.5"
+                    x={box.x + 30}
+                    y="177"
                     fill={stColors.fg}
-                    fontSize="9"
+                    fontSize="11"
                     fontWeight="600"
                   >
                     {stateLabelShort(box.monitor?.state ?? 'offline')}
@@ -733,21 +733,21 @@ export function ArchitectureDiagramsView({
                   {/* Sub-agent Counter Pill inside Root Head Card */}
                   <g opacity={subCount > 0 ? 1 : 0.48}>
                     <rect
-                      x={box.x + 104}
-                      y="162"
-                      width="90"
-                      height="18"
-                      rx="9"
+                      x={box.x + 128}
+                      y="163"
+                      width="120"
+                      height="20"
+                      rx="10"
                       fill={box.identityColors.bg}
                       stroke={box.identityColors.border}
                       strokeWidth="1"
                     />
                     <text
-                      x={box.x + 149}
-                      y="174.5"
+                      x={box.x + 188}
+                      y="177"
                       textAnchor="middle"
                       fill={box.identityColors.fg}
-                      fontSize="9"
+                      fontSize="11"
                       fontWeight="600"
                     >
                       Sub-agents: {subCount}
@@ -774,10 +774,10 @@ export function ArchitectureDiagramsView({
               }}
             >
               <rect
-                x="22"
-                y="206"
-                width="876"
-                height="46"
+                x="24"
+                y="208"
+                width="1112"
+                height="48"
                 rx="6"
                 fill={summary.activeSubAgentsTotal > 0 ? warnColors.bg : tokens.colorNeutralBackground2}
                 stroke={
@@ -790,76 +790,76 @@ export function ArchitectureDiagramsView({
                 strokeWidth={selectedTopology === 'subagents' ? 2 : 1}
               />
               <rect
-                x="22"
-                y="206"
+                x="24"
+                y="208"
                 width="3"
-                height="46"
+                height="48"
                 fill={summary.activeSubAgentsTotal > 0 ? warnColors.solid : p4Colors.solid}
                 clipPath="url(#topo-clip-subagents)"
               />
               <text
-                x="40"
-                y="224"
+                x="42"
+                y="227"
                 fill={tokens.colorNeutralForeground1}
-                fontSize="12.5"
+                fontSize="13"
                 fontWeight="700"
               >
                 Ephemeral Task &amp; PR Sub-Agents (Isolated Worktrees)
               </text>
               <rect
-                x="622"
-                y="210"
-                width="126"
-                height="20"
-                rx="10"
+                x="836"
+                y="212"
+                width="140"
+                height="21"
+                rx="10.5"
                 fill={summary.activeSubAgentsTotal > 0 ? warnColors.bg : neutralColors.bg}
                 stroke={summary.activeSubAgentsTotal > 0 ? warnColors.border : neutralColors.border}
                 strokeWidth="1"
               />
               <text
-                x="685"
-                y="224"
+                x="906"
+                y="226.5"
                 textAnchor="middle"
                 fill={summary.activeSubAgentsTotal > 0 ? warnColors.fg : neutralColors.fg}
-                fontSize="10.5"
+                fontSize="11.5"
                 fontWeight="600"
               >
                 Live/Recent: {summary.activeSubAgentsTotal}
               </text>
               <rect
-                x="756"
-                y="210"
-                width="126"
-                height="20"
-                rx="10"
+                x="984"
+                y="212"
+                width="140"
+                height="21"
+                rx="10.5"
                 fill={neutralColors.bg}
                 stroke={neutralColors.border}
                 strokeWidth="1"
               />
               <text
-                x="819"
-                y="224"
+                x="1054"
+                y="226.5"
                 textAnchor="middle"
                 fill={neutralColors.fg}
-                fontSize="10.5"
+                fontSize="11.5"
                 fontWeight="600"
               >
                 Pipeline Seats: {participantSeatCount}
               </text>
               <text
-                x="40"
-                y="241"
+                x="42"
+                y="246"
                 fill={tokens.colorNeutralForeground2}
-                fontSize="10.5"
+                fontSize="11.5"
               >
                 Writer / Companion · Fresh P1 Final (Opus 5.5 Failover) · X-Family (Codex / GPT-OSS) · UI/UX ·
               </text>
-              <circle cx="545" cy="237.5" r="4" fill={p4Colors.solid} />
+              <circle cx="600" cy="242" r="4" fill={p4Colors.solid} />
               <text
-                x="553"
-                y="241"
+                x="609"
+                y="246"
                 fill={p4Colors.fg}
-                fontSize="10.5"
+                fontSize="11.5"
                 fontWeight="600"
               >
                 P4 Fast Delivery (Sonnet 5.5 / Hydrogen)
@@ -883,10 +883,10 @@ export function ArchitectureDiagramsView({
               }}
             >
               <rect
-                x="26"
-                y="270"
-                width="868"
-                height="32"
+                x="24"
+                y="274"
+                width="1112"
+                height="34"
                 rx="6"
                 fill={tokens.colorNeutralBackground3}
                 stroke={
@@ -897,11 +897,11 @@ export function ArchitectureDiagramsView({
                 strokeWidth={selectedTopology === 'delivery' ? 2 : 1}
               />
               <text
-                x="460"
-                y="290"
+                x="580"
+                y="295"
                 textAnchor="middle"
                 fill={tokens.colorNeutralForeground1}
-                fontSize="11.5"
+                fontSize="12"
                 fontWeight="600"
               >
                 Live Source of Truth: MOBAflow ({snapshot.hygiene.worktrees.length} Worktrees) · AISwarmX (Rules &amp; Dashboard) · GitHub Project Kanban
@@ -943,9 +943,9 @@ export function ArchitectureDiagramsView({
 
         <div className={styles.svgWrap}>
           <svg
-            viewBox="0 0 920 120"
+            viewBox="0 0 1160 124"
             width="100%"
-            style={{ minWidth: 680, maxWidth: '100%', height: 'auto', display: 'block' }}
+            style={{ minWidth: 760, maxWidth: '100%', height: 'auto', display: 'block' }}
             role="group"
             aria-label="Task Lifecycle Diagram from Planned to Ready, In progress, In review, and Done"
           >
@@ -971,34 +971,34 @@ export function ArchitectureDiagramsView({
                     <rect
                       x={node.x}
                       y="12"
-                      width="158"
-                      height="92"
+                      width="204"
+                      height="94"
                       rx="8"
                       fill={node.colors.bg}
                       stroke={isSelected ? tokens.colorBrandForeground1 : node.colors.solid}
                       strokeWidth={isSelected ? 2.5 : 1.5}
                     />
                     <text
-                      x={node.x + 12}
+                      x={node.x + 14}
                       y="36"
                       fill={node.colors.fg}
-                      fontSize="12.5"
+                      fontSize="13"
                       fontWeight="700"
                     >
                       {node.label}
                     </text>
                     <text
-                      x={node.x + 12}
+                      x={node.x + 14}
                       y="56"
                       fill={tokens.colorNeutralForeground1}
-                      fontSize="11"
+                      fontSize="11.5"
                     >
                       {node.sublabel}
                     </text>
                     <rect
-                      x={node.x + 12}
+                      x={node.x + 14}
                       y="70"
-                      width="134"
+                      width="176"
                       height="22"
                       rx="11"
                       fill={tokens.colorNeutralBackground1}
@@ -1006,11 +1006,11 @@ export function ArchitectureDiagramsView({
                       strokeWidth="1"
                     />
                     <text
-                      x={node.x + 79}
+                      x={node.x + 102}
                       y="85"
                       textAnchor="middle"
                       fill={node.colors.fg}
-                      fontSize="11"
+                      fontSize="11.5"
                       fontWeight="600"
                     >
                       {node.count}
@@ -1020,15 +1020,15 @@ export function ArchitectureDiagramsView({
                   {idx < lifecycleNodes.length - 1 && (
                     <g>
                       <line
-                        x1={node.x + 158}
-                        y1="58"
-                        x2={node.x + 174}
-                        y2="58"
+                        x1={node.x + 204}
+                        y1="59"
+                        x2={node.x + 222}
+                        y2="59"
                         stroke={tokens.colorNeutralStroke1}
                         strokeWidth="2"
                       />
                       <polygon
-                        points={`${node.x + 172},53 ${node.x + 172},63 ${node.x + 180},58`}
+                        points={`${node.x + 220},54 ${node.x + 220},64 ${node.x + 228},59`}
                         fill={tokens.colorNeutralStroke1}
                       />
                     </g>
@@ -1189,7 +1189,7 @@ export function ArchitectureDiagramsView({
           </div>
 
           <svg
-            viewBox="0 0 430 175"
+            viewBox="0 0 460 180"
             width="100%"
             style={{ height: 'auto', display: 'block' }}
             role="img"
@@ -1199,113 +1199,113 @@ export function ArchitectureDiagramsView({
             <rect
               x="6"
               y="12"
-              width="128"
-              height="150"
+              width="140"
+              height="154"
               rx="8"
               fill={tokens.colorNeutralBackground2}
               stroke={tokens.colorNeutralStroke2}
             />
             <text
-              x="70"
+              x="76"
               y="32"
               textAnchor="middle"
               fill={tokens.colorNeutralForeground1}
-              fontSize="11.5"
+              fontSize="12"
               fontWeight="700"
             >
               Live Sources
             </text>
-            <text x="16" y="54" fill={p2Colors.fg} fontSize="10.5" fontWeight="600">
+            <text x="16" y="54" fill={p2Colors.fg} fontSize="11" fontWeight="600">
               Codex SQLite (ro)
             </text>
-            <text x="16" y="74" fill={p1Colors.fg} fontSize="10.5" fontWeight="600">
+            <text x="16" y="74" fill={p1Colors.fg} fontSize="11" fontWeight="600">
               Claude Metadata
             </text>
-            <text x="16" y="94" fill={p3Colors.fg} fontSize="10.5" fontWeight="600">
+            <text x="16" y="94" fill={p3Colors.fg} fontSize="11" fontWeight="600">
               Antigravity DB (ro)
             </text>
-            <text x="16" y="114" fill={neutralColors.fg} fontSize="10.5">
+            <text x="16" y="114" fill={neutralColors.fg} fontSize="11">
               git + gh CLI
             </text>
-            <text x="16" y="138" fill={dangerColors.fg} fontSize="10" fontWeight="600">
+            <text x="16" y="138" fill={dangerColors.fg} fontSize="11" fontWeight="600">
               Blocked: credentials,
             </text>
-            <text x="16" y="151" fill={dangerColors.fg} fontSize="10" fontWeight="600">
+            <text x="16" y="153" fill={dangerColors.fg} fontSize="11" fontWeight="600">
               .env, keys, chat text
             </text>
 
             {/* Arrow 1 -> 2 */}
-            <line x1="134" y1="86" x2="154" y2="86" stroke={okColors.solid} strokeWidth="2" />
-            <polygon points="152,81 152,91 160,86" fill={okColors.solid} />
+            <line x1="146" y1="88" x2="166" y2="88" stroke={okColors.solid} strokeWidth="2" />
+            <polygon points="164,83 164,93 172,88" fill={okColors.solid} />
 
             {/* Column 2: API Guard */}
             <rect
-              x="160"
+              x="172"
               y="12"
-              width="132"
-              height="150"
+              width="144"
+              height="154"
               rx="8"
               fill={okColors.bg}
               stroke={okColors.solid}
               strokeWidth="1.5"
             />
             <text
-              x="226"
+              x="244"
               y="32"
               textAnchor="middle"
               fill={okColors.fg}
-              fontSize="11.5"
+              fontSize="12"
               fontWeight="700"
             >
               ASP.NET Core API
             </text>
-            <text x="170" y="58" fill={tokens.colorNeutralForeground1} fontSize="10.5">
+            <text x="182" y="58" fill={tokens.colorNeutralForeground1} fontSize="11">
               127.0.0.1 Loopback
             </text>
-            <text x="170" y="78" fill={tokens.colorNeutralForeground1} fontSize="10.5">
+            <text x="182" y="78" fill={tokens.colorNeutralForeground1} fontSize="11">
               GET-Only (POST 403)
             </text>
-            <text x="170" y="98" fill={tokens.colorNeutralForeground1} fontSize="10.5">
+            <text x="182" y="98" fill={tokens.colorNeutralForeground1} fontSize="11">
               PathWhitelistGuard
             </text>
-            <text x="170" y="118" fill={tokens.colorNeutralForeground1} fontSize="10.5">
+            <text x="182" y="118" fill={tokens.colorNeutralForeground1} fontSize="11">
               Zero Duplication
             </text>
 
             {/* Arrow 2 -> 3 */}
-            <line x1="292" y1="86" x2="312" y2="86" stroke={okColors.solid} strokeWidth="2" />
-            <polygon points="310,81 310,91 318,86" fill={okColors.solid} />
+            <line x1="316" y1="88" x2="336" y2="88" stroke={okColors.solid} strokeWidth="2" />
+            <polygon points="334,83 334,93 342,88" fill={okColors.solid} />
 
             {/* Column 3: Browser UI */}
             <rect
-              x="318"
+              x="342"
               y="12"
-              width="106"
-              height="150"
+              width="112"
+              height="154"
               rx="8"
               fill={tokens.colorNeutralBackground2}
               stroke={tokens.colorNeutralStroke2}
             />
             <text
-              x="371"
+              x="398"
               y="32"
               textAnchor="middle"
               fill={tokens.colorNeutralForeground1}
-              fontSize="11.5"
+              fontSize="12"
               fontWeight="700"
             >
               React UI
             </text>
-            <text x="328" y="60" fill={tokens.colorNeutralForeground2} fontSize="10.5">
+            <text x="352" y="60" fill={tokens.colorNeutralForeground2} fontSize="11">
               Fluent UI 2
             </text>
-            <text x="328" y="80" fill={tokens.colorNeutralForeground2} fontSize="10.5">
+            <text x="352" y="80" fill={tokens.colorNeutralForeground2} fontSize="11">
               Light &amp; Dark AA
             </text>
-            <text x="328" y="100" fill={tokens.colorNeutralForeground2} fontSize="10.5">
+            <text x="352" y="100" fill={tokens.colorNeutralForeground2} fontSize="11">
               15s Live Poll
             </text>
-            <text x="328" y="120" fill={tokens.colorNeutralForeground2} fontSize="10.5">
+            <text x="352" y="120" fill={tokens.colorNeutralForeground2} fontSize="11">
               Zero Write UI
             </text>
           </svg>

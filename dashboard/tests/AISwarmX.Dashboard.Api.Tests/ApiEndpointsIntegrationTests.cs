@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -7,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using AISwarmX.Dashboard.Api.Contracts;
 using AISwarmX.Dashboard.Api.Providers;
+using AISwarmX.Dashboard.Api.Services;
 using Xunit;
 
 namespace AISwarmX.Dashboard.Api.Tests;
@@ -206,6 +208,117 @@ public sealed class ApiEndpointsIntegrationTests
         Assert.Equal("ahuelsmann/MOBAdev", pipeline.Repository);
         Assert.Equal("ok", pipeline.Source.Status);
         Assert.Empty(pipeline.PullRequests);
+    }
+
+    [Fact]
+    public async Task HealthEndpoint_ReturnsImmediatelyFromCacheWhenTtlExpiredAndConcurrentGhCommandBlocks()
+    {
+        using var fx = new TempDashboardFixture();
+        await File.WriteAllTextAsync(Path.Combine(fx.MobaDevPath, "manifest.md"), "# MOBAdev\n");
+
+        var blockGhCommands = false;
+        var ghEnteredTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseGhTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var runner = new AsyncDelegateCommandRunner(async (fileName, args, ct) =>
+        {
+            if (fileName == "gh")
+            {
+                if (Volatile.Read(ref blockGhCommands))
+                {
+                    ghEnteredTcs.TrySetResult();
+                    await releaseGhTcs.Task.WaitAsync(ct);
+                }
+
+                if (args.Contains("pr") || args.Contains("issue") || args.Contains("run"))
+                {
+                    return new CommandResult(0, "[]", string.Empty);
+                }
+
+                return new CommandResult(1, string.Empty, "missing scope");
+            }
+
+            if (fileName == "git" && args.Contains("worktree"))
+            {
+                return new CommandResult(
+                    0,
+                    $"worktree {fx.MobaFlowPath.Replace('\\', '/')}\nHEAD abcdef123456\nbranch refs/heads/main\n",
+                    string.Empty);
+            }
+
+            return new CommandResult(0, string.Empty, string.Empty);
+        });
+
+        await using var factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Testing");
+                builder.ConfigureAppConfiguration((_, config) =>
+                {
+                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Dashboard:BindUrl"] = "http://127.0.0.1:5179",
+                        ["Dashboard:MobaDevRepoPath"] = fx.MobaDevPath,
+                        ["Dashboard:MobaFlowRepoPath"] = fx.MobaFlowPath,
+                        ["Dashboard:ClaudeHomePath"] = fx.ClaudeHomePath,
+                        ["Dashboard:CodexHomePath"] = fx.CodexHomePath,
+                        ["Dashboard:AntigravityHomePath"] = fx.AntigravityHomePath,
+                        ["Dashboard:GeminiConfigPath"] = fx.GeminiConfigPath
+                    });
+                });
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<ICommandRunner>();
+                    services.AddSingleton<ICommandRunner>(runner);
+                });
+            });
+
+        using var client = factory.CreateClient();
+
+        // 1. Warm the snapshot cache
+        var warmRes = await client.GetAsync("/api/snapshot");
+        Assert.Equal(HttpStatusCode.OK, warmRes.StatusCode);
+
+        // 2. Expire TTLs and block subsequent gh CLI invocations
+        var snapshotService = factory.Services.GetRequiredService<DashboardSnapshotService>();
+        snapshotService.ExpireCachesForTesting();
+        Volatile.Write(ref blockGhCommands, true);
+
+        // Start a concurrent /api/pipeline request so _pipelineLock is held by a slow gh subprocess
+        var blockedPipelineTask = client.GetAsync("/api/pipeline");
+        await ghEnteredTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        try
+        {
+            // 3. /api/health must return 200 OK in < 500ms without waiting on _pipelineLock
+            var sw = Stopwatch.StartNew();
+            var healthRes = await client.GetAsync("/api/health");
+            sw.Stop();
+
+            Assert.Equal(HttpStatusCode.OK, healthRes.StatusCode);
+            Assert.True(sw.ElapsedMilliseconds < 500, $"Expected /api/health < 500ms, actual {sw.ElapsedMilliseconds}ms.");
+            var health = await healthRes.Content.ReadFromJsonAsync<HealthResponse>();
+            Assert.NotNull(health);
+            Assert.Contains("pipeline", health.Sources.Keys);
+            Assert.Contains("monitors", health.Sources.Keys);
+        }
+        finally
+        {
+            releaseGhTcs.TrySetResult();
+            await blockedPipelineTask;
+        }
+    }
+
+    private sealed class AsyncDelegateCommandRunner(
+        Func<string, IReadOnlyList<string>, CancellationToken, Task<CommandResult>> handler) : ICommandRunner
+    {
+        public Task<CommandResult> RunAsync(
+            string fileName,
+            IReadOnlyList<string> arguments,
+            string? workingDirectory,
+            TimeSpan timeout,
+            CancellationToken cancellationToken) =>
+            handler(fileName, arguments, cancellationToken);
     }
 
     private static string FindWorktreeRoot()

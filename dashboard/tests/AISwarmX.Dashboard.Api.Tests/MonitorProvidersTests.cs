@@ -253,7 +253,7 @@ public sealed class MonitorProvidersTests
         Assert.Equal("AiSwarmX Claude Opus", claude.DisplayName);
         Assert.Equal(2, antigravityHeads.Count);
         Assert.Equal("AiSwarmX Antigravity Gemini", antigravityHeads[0].DisplayName);
-        Assert.Equal("Orchestrator · Gemini 4 Argon", antigravityHeads[0].Model);
+        Assert.Equal("Gemini 4 Argon", antigravityHeads[0].Model);
         Assert.Equal("busy", antigravityHeads[0].State);
         Assert.Equal(1, antigravityHeads[0].ActiveSessionCount);
         Assert.Equal(1, antigravityHeads[0].ActiveSubAgentCount);
@@ -262,7 +262,7 @@ public sealed class MonitorProvidersTests
         Assert.Null(antigravityHeads[0].Source.Notice);
 
         Assert.Equal("AiSwarmX Antigravity Opus", antigravityHeads[1].DisplayName);
-        Assert.Equal("Orchestrator · Claude Opus 5.5", antigravityHeads[1].Model);
+        Assert.Equal("Claude Opus 5.5", antigravityHeads[1].Model);
         Assert.Equal("standby", antigravityHeads[1].State);
         Assert.Equal(1, antigravityHeads[1].ActiveSessionCount);
         Assert.Equal(0, antigravityHeads[1].ActiveSubAgentCount);
@@ -400,7 +400,7 @@ public sealed class MonitorProvidersTests
 
         Assert.Equal(2, antigravityHeads.Count);
         Assert.Equal("AiSwarmX Antigravity Gemini", antigravityHeads[0].DisplayName);
-        Assert.Equal("Orchestrator · Gemini 4 Carbon", antigravityHeads[0].Model);
+        Assert.Equal("Gemini 4 Carbon", antigravityHeads[0].Model);
         Assert.Equal(1, antigravityHeads[0].ActiveSessionCount);
         Assert.Equal(0, antigravityHeads[0].ActiveSubAgentCount);
         Assert.Null(antigravityHeads[0].Source.Notice);
@@ -455,7 +455,7 @@ public sealed class MonitorProvidersTests
 
         Assert.Equal(2, heads.Count);
         Assert.Equal("AiSwarmX Antigravity Gemini", heads[0].DisplayName);
-        Assert.Equal("Orchestrator · Gemini 4 Carbon", heads[0].Model);
+        Assert.Equal("Gemini 4 Carbon", heads[0].Model);
         Assert.Equal(2, heads[0].ActiveSubAgentCount);
         Assert.NotNull(heads[0].ActiveSubAgentsByModel);
         Assert.Equal(1, heads[0].ActiveSubAgentsByModel!["Claude Opus 5.5"]);
@@ -863,7 +863,7 @@ public sealed class MonitorProvidersTests
         Directory.CreateDirectory(gemLogs);
         Directory.CreateDirectory(opusLogs);
         await File.WriteAllTextAsync(Path.Combine(gemLogs, "transcript.jsonl"), "{\"model\":\"gemini-4-carbon-medium\"}\n");
-        await File.WriteAllTextAsync(Path.Combine(opusLogs, "transcript.jsonl"), "{\"model\":\"claude-opus-5-5-medium\"}\n");
+        await File.WriteAllTextAsync(Path.Combine(opusLogs, "transcript.jsonl"), "{\"model\":\"claude-opus-5-5-medium\"}\n{\"model\":\"gemini-4-neon-high\"}\n");
 
         var codex = await new CodexMonitorProvider().GetMonitorAsync(paths, CancellationToken.None);
         Assert.Equal("AiSwarmX ChatGPT Codex", codex.DisplayName);
@@ -879,10 +879,10 @@ public sealed class MonitorProvidersTests
         var agHeads = await new AntigravityMonitorProvider().GetMonitorsAsync(paths, CancellationToken.None);
         Assert.Equal(2, agHeads.Count);
         Assert.Equal("AiSwarmX Antigravity Gemini", agHeads[0].DisplayName);
-        Assert.Equal("Orchestrator · Gemini 4 Carbon", agHeads[0].Model);
+        Assert.Equal("Gemini 4 Carbon", agHeads[0].Model);
         Assert.Equal("idle", agHeads[0].State);
         Assert.Equal("AiSwarmX Antigravity Opus", agHeads[1].DisplayName);
-        Assert.Equal("Orchestrator · Claude Opus 5.5", agHeads[1].Model);
+        Assert.Equal("Claude Opus 5.5", agHeads[1].Model);
         Assert.Equal("standby", agHeads[1].State);
     }
 

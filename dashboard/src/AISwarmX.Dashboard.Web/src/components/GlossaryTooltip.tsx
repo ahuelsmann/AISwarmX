@@ -4,8 +4,8 @@ import { QuestionCircle16Regular } from '@fluentui/react-icons';
 
 const GLOSSARY_ENTRIES: Record<string, string> = {
   P1: 'Profile P1 (Depth, Architecture & Safety): Claude Opus 5.5 for deep architecture, Z21 protocol safety, and mandatory independent final review.',
-  P2: 'Profile P2 (Repo, Build & Fact Precision): Sol 6.2 (Codex Monitor) / GPT-6 Astra for solution build graph (Moba.slnx), CI/Sonar checks, and technical cross-verification.',
-  P3: 'Profile P3 (System Context, Product & UI/UX): Orchestrator (Neon) (Antigravity Monitor) / Gemini 4 Argon for large multi-file context, WinUI/MAUI UI design, and clear documentation.',
+  P2: 'Profile P2 (Repo, Build & Fact Precision): GPT-6.2 Sol / GPT-6.2 Astra for solution build graph (Moba.slnx), CI/Sonar checks, and technical cross-verification.',
+  P3: 'Profile P3 (System Context, Product & UI/UX): Gemini 4 Carbon (AiSwarmX Antigravity Gemini) for large multi-file context, WinUI/MAUI UI design, and clear documentation.',
   P4: 'Profile P4 (Cadence & Fast Delivery — Magenta-Orchid): Fast models (Claude Sonnet 5.5 / Gemini 4 Hydrogen; Claude Fable 5.2 prohibited) for routine slices, documentation, and quick triage.',
   H: 'Risk Class H (High): Safety-critical areas (Backend, Z21, ESP32). Requires design Go and independent review across two model families (P1 + P2).',
   M: 'Risk Class M (Medium): Product features, UI, audio, or MOBAnews. Requires companion review plus P3 UI/UX check for user-facing slices.',

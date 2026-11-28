@@ -440,11 +440,11 @@ export function GovernanceMatrixView({
             <Table size="small" aria-label="Agent and rule sync table">
               <TableHeader>
                 <TableRow>
-                  <TableHeaderCell>Name &amp; File</TableHeaderCell>
-                  <TableHeaderCell>Tool / Type</TableHeaderCell>
-                  <TableHeaderCell>Profile</TableHeaderCell>
-                  <TableHeaderCell>Sync Status</TableHeaderCell>
-                  <TableHeaderCell>Hashes (Actual / Target)</TableHeaderCell>
+                  <TableHeaderCell style={{ width: '34%' }}>Name &amp; File</TableHeaderCell>
+                  <TableHeaderCell style={{ width: '14%' }}>Tool / Type</TableHeaderCell>
+                  <TableHeaderCell style={{ width: '10%' }}>Profile</TableHeaderCell>
+                  <TableHeaderCell style={{ width: '22%' }}>Sync Status</TableHeaderCell>
+                  <TableHeaderCell style={{ width: '20%' }}>Hashes (Actual / Target)</TableHeaderCell>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -559,10 +559,10 @@ export function GovernanceMatrixView({
           <Table size="small" aria-label="Capability profiles table">
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>Profile</TableHeaderCell>
-                <TableHeaderCell>Name</TableHeaderCell>
-                <TableHeaderCell>Active Models &amp; Clients</TableHeaderCell>
-                <TableHeaderCell>Strengths &amp; Typical Assignments</TableHeaderCell>
+                <TableHeaderCell style={{ width: '10%' }}>Profile</TableHeaderCell>
+                <TableHeaderCell style={{ width: '22%' }}>Name</TableHeaderCell>
+                <TableHeaderCell style={{ width: '30%' }}>Active Models &amp; Clients</TableHeaderCell>
+                <TableHeaderCell style={{ width: '38%' }}>Strengths &amp; Typical Assignments</TableHeaderCell>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -598,9 +598,9 @@ export function GovernanceMatrixView({
             <Table size="small" aria-label="Roles matrix table">
               <TableHeader>
                 <TableRow>
-                  <TableHeaderCell>Role</TableHeaderCell>
-                  <TableHeaderCell>Profile</TableHeaderCell>
-                  <TableHeaderCell>Responsibility</TableHeaderCell>
+                  <TableHeaderCell style={{ width: '26%' }}>Role</TableHeaderCell>
+                  <TableHeaderCell style={{ width: '22%' }}>Profile</TableHeaderCell>
+                  <TableHeaderCell style={{ width: '52%' }}>Responsibility</TableHeaderCell>
                 </TableRow>
               </TableHeader>
               <TableBody>

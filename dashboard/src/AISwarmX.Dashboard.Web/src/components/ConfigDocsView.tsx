@@ -36,7 +36,7 @@ import { RoleBadge } from './RoleAndModelIcons';
 const useStyles = makeStyles({
   layout: {
     display: 'grid',
-    gridTemplateColumns: 'minmax(240px, 310px) minmax(0, 1fr)',
+    gridTemplateColumns: 'minmax(270px, 350px) minmax(0, 1fr)',
     gap: '14px',
     alignItems: 'start',
     '@media (max-width: 959px)': {
@@ -49,7 +49,11 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     maxHeight: '78vh',
-    overflowY: 'auto'
+    overflowY: 'auto',
+    '@media (min-width: 960px)': {
+      position: 'sticky',
+      top: '96px'
+    }
   },
   contentCard: {
     padding: '16px',
@@ -311,9 +315,10 @@ export function ConfigDocsView({
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: 6,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap'
+                        minWidth: 0,
+                        whiteSpace: 'normal',
+                        overflowWrap: 'anywhere',
+                        textAlign: 'left'
                       }}
                     >
                       {item.group.includes('Agent') ? (

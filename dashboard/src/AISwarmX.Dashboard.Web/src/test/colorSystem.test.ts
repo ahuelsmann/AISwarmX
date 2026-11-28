@@ -173,6 +173,9 @@ describe('AISwarmX 2-Axis Color System & Accessibility Gates', () => {
       if (/['"]brand['"]/.test(source)) {
         violations.push(`${filePath}: contains static 'brand' badge color literal`);
       }
+      if (/<Badge[^>]*color=['"]informative['"]/.test(source)) {
+        violations.push(`${filePath}: contains static <Badge color="informative">`);
+      }
     }
 
     expect(violations).toEqual([]);

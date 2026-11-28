@@ -35,6 +35,7 @@ const useStyles = makeStyles({
   card: {
     padding: '14px 16px',
     gap: '12px',
+    scrollMarginTop: '96px',
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`
   },
@@ -106,9 +107,8 @@ const useStyles = makeStyles({
   },
   rowTitle: {
     display: 'block',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap'
+    whiteSpace: 'normal',
+    overflowWrap: 'anywhere'
   },
   rowSub: {
     display: 'block',
@@ -356,7 +356,7 @@ export function HygieneAndSyncPanel({
               </div>
 
               {wt.status === 'stale' && wt.isDirty && (
-                <Badge appearance="tint" color="informative" shape="rounded">
+                <Badge appearance="tint" color="warning" shape="rounded">
                   Dirty · Preserved
                 </Badge>
               )}
@@ -366,7 +366,7 @@ export function HygieneAndSyncPanel({
                 </Badge>
               )}
               {wt.status === 'active' && (
-                <Badge appearance="tint" color="warning" shape="rounded">
+                <Badge appearance="outline" color="subtle" shape="rounded">
                   <span className="tabular">
                     Active{wt.linkedPrNumber ? ` (#${wt.linkedPrNumber})` : ''}
                   </span>
@@ -490,7 +490,7 @@ export function HygieneAndSyncPanel({
                     Stale
                   </Badge>
                 ) : (
-                  <Badge appearance="tint" color="warning" shape="rounded">
+                  <Badge appearance="outline" color="subtle" shape="rounded">
                     <span className="tabular">
                       Active{branch.linkedPrNumber ? ` (#${branch.linkedPrNumber})` : ''}
                     </span>
