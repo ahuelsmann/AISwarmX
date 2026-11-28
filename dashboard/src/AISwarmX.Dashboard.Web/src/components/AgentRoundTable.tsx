@@ -9,7 +9,6 @@ import {
   type ToneStylePair
 } from '../theme/mobaFluentTheme';
 import type { MonitorInfo, TaskParticipantInfo } from '../types/dashboard';
-import { GlossaryTooltip } from './GlossaryTooltip';
 import { resolveProfileTone, resolveToolTone } from './RoleAndModelIcons';
 
 const useStyles = makeStyles({
@@ -69,17 +68,6 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px dashed ${tokens.colorNeutralStroke2}`
-  },
-  inspectorFooter: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: '6px',
-    paddingTop: '4px',
-    marginTop: '4px',
-    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-    fontSize: tokens.fontSizeBase200
   }
 });
 
@@ -545,6 +533,23 @@ interface LayoutConfig {
   seats: PositionedSeat[];
 }
 
+function resolveVerticalMetrics(count: number): {
+  cy: number;
+  viewHeight: number;
+  maxHeight: number;
+} {
+  if (count === 1) {
+    return { cy: 64, viewHeight: 128, maxHeight: 136 };
+  }
+  if (count === 2) {
+    return { cy: 110, viewHeight: 220, maxHeight: 216 };
+  }
+  if (count === 3) {
+    return { cy: 192, viewHeight: 308, maxHeight: 304 };
+  }
+  return { cy: 192, viewHeight: 392, maxHeight: 386 };
+}
+
 function computeTableLayout(participants: TaskParticipantInfo[]): LayoutConfig {
   const ordered = [...participants]
     .map((p, origIndex) => ({ participant: p, origIndex, meta: roleSortWeight(p) }))
@@ -552,9 +557,7 @@ function computeTableLayout(participants: TaskParticipantInfo[]): LayoutConfig {
 
   const count = ordered.length;
   const cx = count === 1 ? 330 : 540;
-  const cy = count === 1 ? 64 : count === 2 ? 104 : 192;
-  const viewHeight = count === 1 ? 128 : count === 2 ? 208 : count === 3 ? 286 : 384;
-  const maxHeight = count === 1 ? 136 : count === 2 ? 204 : count === 3 ? 282 : 372;
+  const { cy, viewHeight, maxHeight } = resolveVerticalMetrics(count);
 
   let stepCounter = 0;
 
@@ -727,7 +730,6 @@ export function AgentRoundTable({
     ])
   );
   const focusKey = hoveredKey ?? selectedKey;
-  const focusedSeat = focusKey ? seats.find((s) => s.key === focusKey) : undefined;
   const deltaTheta = 2 * Math.asin(TRIM_DIST / (2 * R_ORBIT));
 
   return (
@@ -970,7 +972,7 @@ export function AgentRoundTable({
                   }
                 }}
               >
-                <title>{`${seat.participant.agent} (${seat.participant.tool} · ${seat.participant.model}) · Evidence: ${seat.participant.evidenceSource}${isLiveWorking ? ' · Live: working' : ''}`}</title>
+                <title>{`${seat.participant.profile} · ${seat.participant.role} · ${seat.participant.tool} · ${shortModelLabel(seat.participant.model)} · ${seat.participant.status} · Evidence: ${seat.participant.evidenceSource}${isLiveWorking ? ' · Live: working' : ''}`}</title>
 
                 {/* Connector stem between circular seat and Visitenkarte */}
                 <line
@@ -1178,35 +1180,6 @@ export function AgentRoundTable({
             );
           })}
         </svg>
-
-        {focusedSeat && (
-          <div className={styles.inspectorFooter}>
-            <div style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-              <GlossaryTooltip term={focusedSeat.participant.profile}>
-                <span
-                  className="mono"
-                  style={{
-                    fontWeight: tokens.fontWeightBold,
-                    color: getToneStyles(focusedSeat.identityTone, isDark).fg
-                  }}
-                >
-                  {focusedSeat.participant.profile}
-                </span>
-              </GlossaryTooltip>
-              <Text weight="semibold" size={200}>
-                {focusedSeat.participant.role}
-              </Text>
-              <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-                · {focusedSeat.participant.tool} ·{' '}
-                <span className="mono">{focusedSeat.participant.model}</span> ·{' '}
-                {focusedSeat.participant.status}
-              </Text>
-            </div>
-            <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-              Evidence: {focusedSeat.participant.evidenceSource}
-            </Text>
-          </div>
-        )}
       </div>
     </div>
   );

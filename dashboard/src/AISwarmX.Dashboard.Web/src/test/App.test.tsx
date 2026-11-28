@@ -2403,4 +2403,99 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     expect(await screen.findByLabelText('Git Worktrees MOBAflow')).toBeInTheDocument();
     expect(screen.getByLabelText('Branch Hygiene MOBAflow and AISwarmX')).toBeInTheDocument();
   });
+
+  it('unclips 3-agent Round Table bottom orbit arc (viewBox 0 0 1080 308) and highlights seat without inspector footer bar', async () => {
+    const snap = createSnapshotFixture();
+    snap.pipeline.activeIssues = [
+      {
+        number: 73,
+        itemKind: 'Issue',
+        title: 'Three-seat Round Table bottom arc clipping check',
+        url: 'https://github.com/ahuelsmann/MOBAflow/issues/73',
+        gitHubState: 'OPEN',
+        kanbanStatus: 'In review',
+        priority: 'P1',
+        area: 'UI',
+        issueType: 'Bug',
+        riskClass: 'L',
+        writer: 'Codex',
+        lockedAreas: [],
+        updatedAtUtc: snap.generatedAtUtc,
+        linkedPullRequests: [],
+        linkedIssues: [],
+        participants: [
+          {
+            agent: 'Codex (GPT-6.2 Sol)',
+            tool: 'ChatGPT Codex',
+            role: 'Writer',
+            profile: 'P2',
+            model: 'GPT-6.2 Sol',
+            status: 'Implemented',
+            evidenceSource: 'Slice Header'
+          },
+          {
+            agent: 'Claude Opus (Claude Opus 5.5)',
+            tool: 'Claude Code',
+            role: 'Final Reviewer',
+            profile: 'P1',
+            model: 'Claude Opus 5.5',
+            status: 'PASS',
+            evidenceSource: 'P1 Final Review'
+          },
+          {
+            agent: 'Antigravity Verifier (Gemini 4 Carbon)',
+            tool: 'Antigravity',
+            role: 'Cross-Family Verifier',
+            profile: 'P3',
+            model: 'Gemini 4 Carbon',
+            status: 'PASS',
+            evidenceSource: 'Cross-Family Check'
+          }
+        ],
+        boardDriftReason: null
+      }
+    ];
+
+    stubDashboardFetch(snap);
+    render(<App />);
+
+    const roundTableSvg = (await screen.findByRole('img', {
+      name: 'Round table of 3 Agents for Issue #73'
+    })) as unknown as SVGSVGElement;
+    expect(roundTableSvg.getAttribute('viewBox')).toBe('0 0 1080 308');
+
+    const viewBoxParts = (roundTableSvg.getAttribute('viewBox') ?? '').split(' ').map(Number);
+    const viewHeight = viewBoxParts[3];
+    const orbitGuide = Array.from(roundTableSvg.querySelectorAll('circle')).find(
+      (c) => c.getAttribute('r') === '98'
+    );
+    expect(orbitGuide).toBeDefined();
+    const cy = Number(orbitGuide?.getAttribute('cy'));
+    const rOrbit = Number(orbitGuide?.getAttribute('r'));
+    expect(cy).toBe(192);
+    expect(rOrbit).toBe(98);
+    expect(viewHeight).toBeGreaterThanOrEqual(cy + rOrbit + 14);
+
+    const writerSeat = within(roundTableSvg as unknown as HTMLElement).getByRole('button', {
+      name: /P2 Writer · GPT-6\.2 Sol · Implemented/i
+    });
+    expect(writerSeat.classList.contains('roundtable-seat')).toBe(true);
+    expect(writerSeat).toHaveAttribute('aria-pressed', 'false');
+
+    const seatTitle = writerSeat.querySelector('title');
+    expect(seatTitle?.textContent).toBe(
+      'P2 · Writer · ChatGPT Codex · GPT-6.2 Sol · Implemented · Evidence: Slice Header'
+    );
+
+    fireEvent.mouseEnter(writerSeat);
+    expect(writerSeat.querySelector('circle[r="27"]')).not.toBeNull();
+    expect(roundTableSvg.parentElement?.children).toHaveLength(1);
+    expect(screen.queryByText(/^Evidence:/i)).not.toBeInTheDocument();
+
+    fireEvent.click(writerSeat);
+    expect(writerSeat).toHaveAttribute('aria-pressed', 'true');
+    expect(writerSeat.querySelector('circle[r="27"]')).not.toBeNull();
+    expect(roundTableSvg.parentElement?.children).toHaveLength(1);
+    expect(screen.queryByText(/^Evidence:/i)).not.toBeInTheDocument();
+  });
 });
