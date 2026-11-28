@@ -1309,3 +1309,57 @@ console.log('[]');
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('bus_send with reply_to auto-acks matching unread parent and leaves unrelated third-party messages unread', async () => {
+  const { dir, dbPath } = createTempDbPath();
+  const env = { ...process.env, MOBADEV_SWARM_BUS_DB: dbPath };
+
+  try {
+    const req1 = JSON.parse((await runProcessAsync(process.execPath, [
+      '--no-warnings', BUS_SCRIPT, '--cli', 'send',
+      '--from', 'antigravity-gemini', '--to', 'codex', '--topic', 'p2-review', '--body', 'Please review delta A'
+    ], env)).stdout);
+    assert.equal(req1.ok, true);
+
+    const req2 = JSON.parse((await runProcessAsync(process.execPath, [
+      '--no-warnings', BUS_SCRIPT, '--cli', 'send',
+      '--from', 'antigravity-gemini', '--to', 'codex', '--topic', 'p2-review-2', '--body', 'Please review delta B'
+    ], env)).stdout);
+    assert.equal(req2.ok, true);
+
+    // Unrelated third agent replying to req2 must NOT ack req2 addressed to codex.
+    await runProcessAsync(process.execPath, [
+      '--no-warnings', BUS_SCRIPT, '--cli', 'send',
+      '--from', 'claude-opus', '--to', 'antigravity-gemini', '--topic', 're:p2-review-2', '--body', 'Side note', '--reply-to', String(req2.id)
+    ], env);
+
+    const codexInboxBefore = JSON.parse((await runProcessAsync(process.execPath, [
+      '--no-warnings', BUS_SCRIPT, '--cli', 'inbox', '--agent', 'codex'
+    ], env)).stdout);
+    assert.equal(codexInboxBefore.count, 2);
+
+    // Original recipient (codex) replying with --reply-to auto-acks req1.
+    await runProcessAsync(process.execPath, [
+      '--no-warnings', BUS_SCRIPT, '--cli', 'send',
+      '--from', 'codex', '--to', 'antigravity-gemini', '--topic', 're:p2-review', '--body', 'P2 PASS', '--reply-to', String(req1.id)
+    ], env);
+
+    const codexInboxAfter = JSON.parse((await runProcessAsync(process.execPath, [
+      '--no-warnings', BUS_SCRIPT, '--cli', 'inbox', '--agent', 'codex'
+    ], env)).stdout);
+    assert.equal(codexInboxAfter.count, 1);
+    assert.equal(codexInboxAfter.messages[0].id, req2.id);
+
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    const row1 = db.prepare('SELECT status, acked_by, acked_at_utc FROM messages WHERE id = ?').get(req1.id);
+    const row2 = db.prepare('SELECT status, acked_by FROM messages WHERE id = ?').get(req2.id);
+    db.close();
+    assert.equal(row1.status, 'acked');
+    assert.equal(row1.acked_by, 'codex');
+    assert.ok(row1.acked_at_utc);
+    assert.equal(row2.status, 'unread');
+    assert.equal(row2.acked_by, null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

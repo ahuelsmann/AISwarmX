@@ -3390,6 +3390,8 @@ public sealed partial class SwarmBusStore
         var createdAtIso = FormatUtc(now);
         var wakeExpiresIso = FormatUtc(now.AddSeconds(SwarmBusConstants.DefaultWakeAttemptTtlSeconds));
 
+        AutoAckParentMessageInTx(connection, input, createdAtIso);
+
         if (input.State is not null)
         {
             var dedup = TryDeduplicateLatestMessageInTx(connection, input, now, wakeExpiresIso);
@@ -3484,6 +3486,34 @@ public sealed partial class SwarmBusStore
         supersedeCmd.Parameters.AddWithValue(ParamWorkspaceId, workspaceId);
         supersedeCmd.Parameters.AddWithValue(ParamPrNumber, prNumber);
         supersedeCmd.ExecuteNonQuery();
+    }
+
+    private static void AutoAckParentMessageInTx(
+        SqliteConnection connection,
+        SendTxInput input,
+        string createdAtIso)
+    {
+        if (!input.ReplyToId.HasValue)
+        {
+            return;
+        }
+
+        using var autoAckCmd = connection.CreateCommand();
+        autoAckCmd.CommandText = """
+            UPDATE messages
+            SET status = 'acked',
+                acked_by = @sender,
+                acked_at_utc = @ackedAt
+            WHERE workspace_id = @workspaceId
+              AND id = @replyToId
+              AND status = 'unread'
+              AND (lower(recipient) = lower(@sender) OR lower(recipient) = 'all')
+            """;
+        autoAckCmd.Parameters.AddWithValue(ParamSender, input.Sender);
+        autoAckCmd.Parameters.AddWithValue(ParamAckedAt, createdAtIso);
+        autoAckCmd.Parameters.AddWithValue(ParamWorkspaceId, input.WorkspaceId);
+        autoAckCmd.Parameters.AddWithValue(ParamReplyToId, input.ReplyToId.Value);
+        autoAckCmd.ExecuteNonQuery();
     }
 
     private static long InsertMessageInTx(

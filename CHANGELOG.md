@@ -5,6 +5,16 @@ All notable changes to **AISwarmX** (formerly **MOBAdev**) and the local **AISwa
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/) within **Gen#3** (`3.0.0+`; earlier MOBAflow AI setups predate this repository as Gen#1 and Gen#2).
 
+## [3.15.1] - 2026-11-28
+
+### Fixed
+- **Swarm Bus `reply_to` Auto-Ack (`bus/mobai-swarm-bus.mjs`, `AISwarmX.SwarmBus.Core/Store/SwarmBusStore.cs`):**
+  - Sending a threaded reply via `bus_send(..., reply_to=<id>)` from the original recipient (or for `all` broadcasts, scoped to the matching workspace in `.NET` v2) now atomically marks the parent `unread` message as `acked` (`acked_by = <sender>`), eliminating orphaned `unread` counts when agents reply without calling `bus_ack` separately.
+- **Swarm Bus Feed Filter Counter Consistency (`SwarmBusCard.tsx`):**
+  - Aligned the `Unread` filter button with the `recentMessages` feed window (`Unread (<inFeed>)`, or `Unread (<inFeed> / <total>)` plus an explanatory count note whenever older unread rows exist in SQLite beyond the 20-message window).
+
+---
+
 ## [3.15.0] - 2026-11-28
 
 ### Added & Changed

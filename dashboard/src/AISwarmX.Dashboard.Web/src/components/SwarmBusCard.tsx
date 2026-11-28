@@ -159,7 +159,9 @@ export function SwarmBusCard({ swarmBus, nowMs, liveConnectionState = 'polling' 
   }
 
   const unreadTotal = swarmBus.unreadCount;
+  const unreadInFeed = swarmBus.recentMessages.filter((m) => m.status === 'unread').length;
   const confirmedTotal = swarmBus.recentMessages.filter((m) => m.status === 'acked').length;
+  const hasOlderUnread = unreadTotal > unreadInFeed;
   const filteredMessages = swarmBus.recentMessages.filter((m) => {
     if (statusFilter === 'unread') return m.status === 'unread';
     if (statusFilter === 'acked') return m.status === 'acked';
@@ -239,7 +241,7 @@ export function SwarmBusCard({ swarmBus, nowMs, liveConnectionState = 'polling' 
               appearance={statusFilter === 'unread' ? 'primary' : 'subtle'}
               onClick={() => setStatusFilter('unread')}
             >
-              Unread ({unreadTotal})
+              {hasOlderUnread ? `Unread (${unreadInFeed} / ${unreadTotal})` : `Unread (${unreadInFeed})`}
             </Button>
             <Button
               size="small"
@@ -301,6 +303,11 @@ export function SwarmBusCard({ swarmBus, nowMs, liveConnectionState = 'polling' 
             ))}
           </div>
         )}
+        {statusFilter === 'unread' && hasOlderUnread ? (
+          <Text className={styles.empty}>
+            Showing {unreadInFeed} newest of {unreadTotal} total unread messages in SQLite bus.
+          </Text>
+        ) : null}
       </Card>
     </section>
   );

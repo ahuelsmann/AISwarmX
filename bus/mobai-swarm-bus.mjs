@@ -275,6 +275,20 @@ function resolveMatchedStateRow(db, latest, fallbackBody, wakeTargetMatches, now
   return { mode: 'deduplicated', id: Number(latest.id), wake_state: curWakeState };
 }
 
+function autoAckParentInTx(db, normalizedReplyTo, sender, createdAt) {
+  if (normalizedReplyTo === null) {
+    return;
+  }
+
+  db.prepare(`
+    UPDATE messages
+    SET status = 'acked', acked_by = ?, acked_at_utc = ?
+    WHERE id = ?
+      AND status = 'unread'
+      AND (lower(recipient) = lower(?) OR lower(recipient) = 'all')
+  `).run(sender, createdAt, normalizedReplyTo, sender);
+}
+
 function sendOrDeduplicateInTx(db, params) {
   const {
     sender,
@@ -292,6 +306,8 @@ function sendOrDeduplicateInTx(db, params) {
   const nowMs = Date.now();
   const createdAt = new Date(nowMs).toISOString();
   const wakeExpiresIso = new Date(nowMs + WAKE_ATTEMPT_TTL_MS).toISOString();
+
+  autoAckParentInTx(db, normalizedReplyTo, sender, createdAt);
 
   if (state !== null) {
     const latest = db.prepare(`

@@ -425,4 +425,75 @@ public sealed class MessagingAndDeduplicationTests
         Assert.Equal("failed", stored.WakeState);
         Assert.Null(stored.WakeAttemptExpiresAtUtc);
     }
+
+    [Fact]
+    public async Task ReplyToAutoAcksMatchingUnreadParentOnlyForRecipientAndWorkspace()
+    {
+        using var fx = new TempBusFixture();
+        var store = fx.CreateStore();
+
+        var parentForCodex = await store.SendMessageAsync(new SwarmSendRequest(
+            From: "antigravity-gemini",
+            To: "codex",
+            Topic: "p2-review",
+            Body: "Review PR #700",
+            WorkspaceId: "aiswarmx"));
+
+        var parentBroadcast = store.SendMessage(new SwarmSendRequest(
+            From: "antigravity-gemini",
+            To: "all",
+            Topic: "status-sync",
+            Body: "Sync point",
+            WorkspaceId: "aiswarmx"));
+
+        var otherWorkspaceParent = store.SendMessage(new SwarmSendRequest(
+            From: "antigravity-gemini",
+            To: "codex",
+            Topic: "other-repo",
+            Body: "Review MOBAflow",
+            WorkspaceId: "mobaflow"));
+
+        // Unrelated agent replying with ReplyToId must NOT auto-ack codex's message.
+        store.SendMessage(new SwarmSendRequest(
+            From: "claude-opus",
+            To: "antigravity-gemini",
+            Topic: "re:p2-review",
+            Body: "Unrelated note",
+            ReplyToId: parentForCodex.Id,
+            WorkspaceId: "aiswarmx"));
+        Assert.Contains(store.GetInbox("codex", unreadOnly: true, workspaceId: "aiswarmx").Messages, m => m.Id == parentForCodex.Id);
+
+        // Codex replying across wrong workspace must NOT auto-ack mobaflow message.
+        store.SendMessage(new SwarmSendRequest(
+            From: "codex",
+            To: "antigravity-gemini",
+            Topic: "re:other-repo",
+            Body: "Cross-workspace reply",
+            ReplyToId: otherWorkspaceParent.Id,
+            WorkspaceId: "aiswarmx"));
+        Assert.Contains(store.GetInbox("codex", unreadOnly: true, workspaceId: "mobaflow").Messages, m => m.Id == otherWorkspaceParent.Id);
+
+        // Matching recipient + matching workspace auto-acks both targeted and broadcast parents.
+        await store.SendMessageAsync(new SwarmSendRequest(
+            From: "codex",
+            To: "antigravity-gemini",
+            Topic: "re:p2-review",
+            Body: "P2 PASS",
+            ReplyToId: parentForCodex.Id,
+            WorkspaceId: "aiswarmx"));
+        store.SendMessage(new SwarmSendRequest(
+            From: "codex",
+            To: "antigravity-gemini",
+            Topic: "re:status-sync",
+            Body: "Noted",
+            ReplyToId: parentBroadcast.Id,
+            WorkspaceId: "aiswarmx"));
+
+        Assert.Equal(0, store.GetInbox("codex", unreadOnly: true, workspaceId: "aiswarmx").Count);
+        var history = store.GetInbox("codex", unreadOnly: false, workspaceId: "aiswarmx").Messages;
+        var ackedCodexMsg = history.Single(m => m.Id == parentForCodex.Id);
+        Assert.Equal("acked", ackedCodexMsg.Status);
+        Assert.Equal("codex", ackedCodexMsg.AckedBy);
+        Assert.NotNull(ackedCodexMsg.AckedAtUtc);
+    }
 }

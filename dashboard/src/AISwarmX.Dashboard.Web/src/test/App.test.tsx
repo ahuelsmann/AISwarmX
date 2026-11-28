@@ -1301,6 +1301,43 @@ describe('AISwarmX — Autonomous Dev Engine Gen3.5 Dashboard', () => {
     expect(within(busCard).queryByText('Acked earlier Sonar pointer')).not.toBeInTheDocument();
   });
 
+  it('shows window vs total DB unread count when older unread messages fall outside recentMessages', async () => {
+    const user = userEvent.setup();
+    const customPayload = createSnapshotFixture({
+      swarmBus: {
+        generatedAtUtc: new Date().toISOString(),
+        unreadCount: 5,
+        activeLockCount: 0,
+        source: { status: 'ok', updatedAtUtc: new Date().toISOString(), fromCache: false },
+        activeLocks: [],
+        recentMessages: [
+          {
+            id: 77,
+            createdAtUtc: new Date().toISOString(),
+            sender: 'antigravity-gemini',
+            recipient: 'codex',
+            topic: 'review-request',
+            body: 'Latest review message in window',
+            priority: 'normal',
+            status: 'unread'
+          }
+        ]
+      }
+    });
+    stubDashboardFetch(customPayload);
+
+    render(<App />);
+    const commTab = await screen.findByRole('tab', { name: /Communication/i });
+    await user.click(commTab);
+
+    const busCard = await screen.findByLabelText('Swarm Bus Cross-Tool MCP Feed');
+    const unreadBtn = within(busCard).getByRole('button', { name: /Unread \(1 \/ 5\)/i });
+    expect(unreadBtn).toBeInTheDocument();
+
+    await user.click(unreadBtn);
+    expect(within(busCard).getByText('Showing 1 newest of 5 total unread messages in SQLite bus.')).toBeInTheDocument();
+  });
+
   it('renders Main Landing Queue in exact arrival order with Just landed on main strip', async () => {
     const base = createSnapshotFixture();
     const templatePr = base.pipeline.pullRequests[0]!;
